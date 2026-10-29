@@ -72,7 +72,7 @@ import { loadExternalBusy } from './calendar-refs';
 import { applyCalendarTemplates } from './calendar-text';
 import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 import { getAccountBranding } from './account-branding';
-import type { BrandKit } from '@slate/types';
+import { normalizeEventTracking, type BrandKit, type EventTracking } from '@slate/types';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
 import { enqueueOutbox } from './outbox';
@@ -476,6 +476,8 @@ export interface TeamProfileView {
     lengthMinutes: number;
     schedulingType: string | null;
     location: ReturnType<typeof parseEventLocation>;
+    /** The event's tracking ids, loaded on its booking page; null = none. */
+    tracking: EventTracking | null;
   }>;
   /** The workspace brand kit, rendered directly by team pages; null = none. */
   brand: BrandKit | null;
@@ -509,8 +511,9 @@ export async function getTeamProfile(
     length_minutes: number;
     scheduling_type: string | null;
     locations: unknown;
+    tracking: unknown;
   }>(
-    sql`SELECT slug, title, description, length_minutes, scheduling_type, locations FROM event_type
+    sql`SELECT slug, title, description, length_minutes, scheduling_type, locations, tracking FROM event_type
         WHERE account_id = ${account.id} AND team_id = ${team.id} AND hidden = 0
         ORDER BY length_minutes ASC`,
   );
@@ -530,6 +533,7 @@ export async function getTeamProfile(
       lengthMinutes: r.length_minutes,
       schedulingType: r.scheduling_type,
       location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
+      tracking: normalizeEventTracking(parseJsonColumn<unknown>(r.tracking, null)),
     })),
     brand: (await getAccountBranding(db, account.id))?.config ?? null,
   };
@@ -545,6 +549,8 @@ interface TeamEventType {
   locations: unknown;
   slot_interval: number | null;
   minimum_booking_notice: number;
+  /** Booking window in calendar days ahead; NULL on every event without one. */
+  booking_window_days: number | null;
   before_event_buffer: number;
   after_event_buffer: number;
   scheduling_type: string | null;
@@ -553,6 +559,8 @@ interface TeamEventType {
   booking_fields: unknown;
   /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
   prevent_duplicate_bookings: number;
+  /** Tracking and pixels on the booking page (JSON); NULL on every event without them. */
+  tracking: unknown;
 }
 
 /**
@@ -570,9 +578,9 @@ async function getTeamEventType(
 ) {
   const visibility = opts?.includeHidden ? sql`` : sql` AND hidden = 0`;
   return db.get<TeamEventType>(
-    sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval,
+    sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval, booking_window_days,
                minimum_booking_notice, before_event_buffer, after_event_buffer, scheduling_type,
-               rr_distribution, booking_fields, prevent_duplicate_bookings
+               rr_distribution, booking_fields, prevent_duplicate_bookings, tracking
         FROM event_type
         WHERE account_id = ${accountId} AND team_id = ${teamId} AND slug = ${slug}${visibility}
         LIMIT 1`,
@@ -590,6 +598,7 @@ type SlotShapedEventType = Pick<
   | 'length_minutes'
   | 'slot_interval'
   | 'minimum_booking_notice'
+  | 'booking_window_days'
   | 'before_event_buffer'
   | 'after_event_buffer'
 >;
@@ -683,6 +692,7 @@ async function hostFreeSlotMs(
     beforeBufferMin: et.before_event_buffer,
     afterBufferMin: et.after_event_buffer,
     minimumBookingNoticeMin: et.minimum_booking_notice,
+    bookingWindowDays: et.booking_window_days,
     now,
   });
   return { free: new Set(slots.map((d) => d.getTime())), reason: null };
@@ -697,6 +707,8 @@ export interface TeamAvailabilityResult {
     schedulingType: string | null;
     /** Where the meeting happens — rendered on the public booking page. */
     location: EventLocation | null;
+    /** Tracking and pixels on the booking page; set only by the invitee's read. */
+    tracking?: EventTracking | null;
   };
   timeZone: string;
   slots: string[];
@@ -856,6 +868,7 @@ export async function getTeamAvailability(
       bookingFields: parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []),
       schedulingType: et.scheduling_type,
       location: parseEventLocation(parseJsonColumn<unknown>(et.locations, null)),
+      tracking: normalizeEventTracking(parseJsonColumn<unknown>(et.tracking, null)),
     },
     timeZone: args.displayTimeZone ?? team.time_zone,
     slots,

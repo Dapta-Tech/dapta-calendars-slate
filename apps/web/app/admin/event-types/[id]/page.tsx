@@ -79,6 +79,7 @@ export default async function EditEventType({
         teamName={team?.name}
         teams={et.teamId ? undefined : teams.map((t) => ({ id: t.id, name: t.name }))}
         canManageTeams={me ? isAdminRole(me.role) : false}
+        trackingEnabled={me ? isAdminRole(me.role) && me.eventTrackingEnabled === true : false}
         connections={et.teamId ? undefined : connections}
         backHref={backToTeam ? `/admin/teams/${fromTeamId}` : '/admin/event-types'}
         backLabel={backToTeam ? msgs.admin.teams.title : m.title}

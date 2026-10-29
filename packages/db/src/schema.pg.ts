@@ -195,6 +195,12 @@ export const eventType = pgTable('event_type', {
   reminders: jsonb('reminders'),
   metadata: jsonb('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
+  /**
+   * Booking window: invitees may book up to this many calendar days ahead
+   * (today = day 0, in the schedule's zone; `bookingWindowEnd` in
+   * @slate/engine). NULL = no limit, as before this existed. See migration 0035.
+   */
+  bookingWindowDays: integer('booking_window_days'),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),
@@ -228,6 +234,20 @@ export const eventType = pgTable('event_type', {
    */
   calendarTitleTemplate: text('calendar_title_template'),
   calendarDescriptionTemplate: text('calendar_description_template'),
+  /**
+   * Where the booking page sends the invitee after a booking, instead of
+   * leaving them on the confirmation: an absolute https URL, checked by the API
+   * (`isSuccessRedirectUrl`). NULL = none, the confirmation stays, as before
+   * this existed. See migration 0034 (pg).
+   */
+  successRedirectUrl: text('success_redirect_url'),
+  /**
+   * Tracking and pixels on this event's booking page: `{ gtmId, metaPixelId,
+   * posthogKey, posthogHost, hubspotTrackingId }`, each optional
+   * (`eventTrackingSchema` in @slate/types). NULL = none, every event type
+   * saved before this existed. See migration 0036.
+   */
+  tracking: jsonb('tracking'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 

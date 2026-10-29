@@ -9,6 +9,7 @@ import { BrandMark } from '@/components/brand/brand';
 import { cn } from '@/lib/cn';
 import { SERVER_NAME } from '@/lib/mcp-connect';
 import { CONNECTOR_NAME as PRODUCT } from '@/lib/product-name';
+import { urlHost } from '@/lib/url-host';
 import { CHATGPT_UI as G, CLAUDE_UI as C, CURSOR_UI as K } from './app-ui';
 import { MeetingAnswer, Pointer, ProductTile, Typed, at } from './walk-kit';
 
@@ -34,14 +35,6 @@ export const SHOWN_TOOLS = [
   'list_event_types',
 ] as const;
 
-const host = (url: string) => {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-};
-
 /* ── The sign-in, as the apps open it in the browser ─────────────────────── */
 
 /**
@@ -55,7 +48,7 @@ function SignIn({ m, app, url, d = 0 }: { m: WalkMessages; app: string; url: str
     <div className="wt-fade absolute inset-0 z-20 flex flex-col bg-[#141414] text-[#e8e8e8]" style={at(d)}>
       <div className="flex h-6 shrink-0 items-center gap-2 bg-[#202020] px-3 text-[8.5px] text-[#9a9a9a]">
         <span>‹ › ⟳</span>
-        <span className="flex-1 truncate rounded bg-[#2b2b2b] px-2 py-0.5 font-mono">{host(url)}/oauth2/authorize</span>
+        <span className="flex-1 truncate rounded bg-[#2b2b2b] px-2 py-0.5 font-mono">{urlHost(url)}/oauth2/authorize</span>
       </div>
       <div className="flex flex-1 flex-col items-center justify-center">
         <span className="text-white">
@@ -222,7 +215,7 @@ function ClaudeDirectoryFrame({ step, url, directory }: { step: 0 | 1; url: stri
             </span>
           ))}
         </div>
-        <p className="mt-3 truncate font-mono text-[8.5px] text-[#9b9890]">{host(url)}</p>
+        <p className="mt-3 truncate font-mono text-[8.5px] text-[#9b9890]">{urlHost(url)}</p>
       </div>
       <Pointer x={500} y={84} d={0.6} fx={-160} fy={120} />
     </div>
@@ -787,7 +780,7 @@ function CursorFrame({ step, m, prompt, url, cursorJson }: AppFrameProps) {
         {/* The browser asking to let Cursor in, before the panel above. */}
         <div className="wt-out absolute inset-0 z-20 flex flex-col bg-[#141414]" style={at(4)}>
           <div className="flex h-6 shrink-0 items-center gap-2 bg-[#202020] px-3 text-[8.5px] text-[#9a9a9a]">
-            <span className="flex-1 truncate rounded bg-[#2b2b2b] px-2 py-0.5 font-mono">{host(url)}/oauth2/authorize</span>
+            <span className="flex-1 truncate rounded bg-[#2b2b2b] px-2 py-0.5 font-mono">{urlHost(url)}/oauth2/authorize</span>
           </div>
           <div className="flex flex-1 flex-col items-center justify-center text-center">
             <div className="flex items-center gap-2">

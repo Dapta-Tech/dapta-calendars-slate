@@ -2,7 +2,7 @@
  * Server-side API client. The web app talks to the Slate API over HTTP (never
  * imports @slate/db or the engine directly) so the deployment stays decoupled.
  */
-import type { BrandKit } from '@slate/types';
+import type { BrandKit, EventTracking } from '@slate/types';
 import { cache } from 'react';
 import { bookingViewSchema, oneOffLinkTargetSchema } from '@slate/types';
 import { visitorHeaders } from '@/lib/visitor';
@@ -102,6 +102,8 @@ export interface TeamProfile {
     schedulingType?: string | null;
     /** Optional on the wire: an older API does not send it. */
     location?: EventLocationDto | null;
+    /** The event's own tracking ids (GTM, Meta Pixel, PostHog, HubSpot); absent or null = none. */
+    tracking?: EventTracking | null;
   }>;
   /** The workspace brand kit, worn directly by a team page. Absent on an older API. */
   brand?: BrandKit | null;

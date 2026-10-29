@@ -31,13 +31,13 @@ interface PosthogInstance {
   captureException(error: unknown, properties?: Record<string, unknown>): void;
 }
 
-interface PosthogGlobal {
+export interface PosthogGlobal {
   __SV?: number;
   init(key: string, config: Record<string, unknown>, name: string): unknown;
   [instance: string]: unknown;
 }
 
-type PosthogWindow = Window & { posthog?: PosthogGlobal };
+export type PosthogWindow = Window & { posthog?: PosthogGlobal };
 
 /** The vendor's event, as `before_send` receives it. */
 interface CaptureEvent {
@@ -354,8 +354,13 @@ function libraryOrigin(apiHost: string): string {
  * Once anything with an `init` lives at `window.posthog` (the stub, or the
  * library itself), it is used as it is: a second stub over the library would
  * replace its `init` and orphan every instance already running.
+ *
+ * Exported for the event's own PostHog project (`lib/event-tracking.ts`), which
+ * must ride this same loader as a named instance: the vendor's pasted snippet
+ * calls `init` without a name, and on this stub that would break every
+ * instance on the page.
  */
-function installStub(w: PosthogWindow, apiHost: string): PosthogGlobal {
+export function installStub(w: PosthogWindow, apiHost: string): PosthogGlobal {
   const existing = w.posthog;
   if (existing && typeof existing.init === 'function') return existing;
   const stub = [] as unknown as PosthogGlobal & { _i: unknown[][] };

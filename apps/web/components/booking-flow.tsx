@@ -47,6 +47,8 @@ import { signupHref } from '@/lib/growth';
 import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
+import { followRedirect, redirectSite, redirectTarget } from '@/lib/success-redirect';
+import { reportBookingConversion } from '@/lib/booking-conversion';
 import { track } from '@/lib/analytics/port';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
@@ -60,6 +62,14 @@ import { useProgressiveSlots, type ProgressiveAvailability } from '@/lib/use-pro
  * only touched when there is a link to wait for.
  */
 const askMeetingLink = (uid: string, token: string) => meetingLinkAction(uid, token);
+
+/**
+ * How long a redirect after booking waits when the host's own tags were just
+ * told of the booking: their requests are fire-and-forget, and a navigation
+ * that commits first cancels them. Well inside the few seconds after the
+ * Confirm click in which a browser still lets an embed move the top window.
+ */
+const CONVERSION_GRACE_MS = 300;
 
 interface Props {
   accountCode: string;
@@ -306,6 +316,10 @@ export function BookingFlow({
   );
   const bookedUid = booked?.uid ?? null;
   const bookedStart = booked?.startUtc ?? null;
+  // Redirect after booking: the booking write answers it (only to someone who
+  // booked; no availability read carries it), and only an https address is
+  // ever followed, whatever came back.
+  const redirectTo = redirectTarget(booked?.successRedirectUrl);
   useEffect(() => {
     if (!embed || !bookedUid || !bookedStart) return;
     // The uid is the booking's IDENTITY. `useActionState` hands back a fresh
@@ -327,6 +341,39 @@ export function BookingFlow({
     trackedUid.current = bookedUid;
     track('booking_confirmed', { status: bookedStatus, mode });
   }, [bookedUid, bookedStatus, mode]);
+
+  // The host's own tags (`lib/event-tracking.ts`) hear of the booking: Meta's
+  // `Schedule` and GTM's `booking_scheduled`, once per booking, after the write
+  // confirmed it and before any redirect below. Nothing at all when the page
+  // loads no tag. Nothing about the invitee is sent.
+  const conversionUid = useRef<string | null>(null);
+  const conversionSent = useRef(false);
+  useEffect(() => {
+    if (!bookedUid || conversionUid.current === bookedUid) return;
+    conversionUid.current = bookedUid;
+    conversionSent.current = reportBookingConversion(bookedUid);
+  }, [bookedUid]);
+
+  // Redirect after booking, once per booking and AFTER the three effects above
+  // (effects run in the order they are declared), so the host page has its
+  // message and the counts are queued before the page goes. dCal's analytics
+  // adapter flushes on unload; the host's tags get CONVERSION_GRACE_MS. The
+  // uid is marked when the redirect runs, not when it is scheduled, so a
+  // cleared timer (React's development double effect) schedules it again.
+  const redirectedUid = useRef<string | null>(null);
+  useEffect(() => {
+    if (!bookedUid || !redirectTo || redirectedUid.current === bookedUid) return;
+    const go = () => {
+      redirectedUid.current = bookedUid;
+      followRedirect(redirectTo);
+    };
+    if (!conversionSent.current) {
+      go();
+      return;
+    }
+    const timer = setTimeout(go, CONVERSION_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [bookedUid, redirectTo]);
 
   /** Full client-side gate, replacing native validation (noValidate): native
    *  bubbles doubled up with the inline errors and can't be themed. Returns
@@ -724,6 +771,26 @@ export function BookingFlow({
         locationLabel={bookedLocation}
         locationKind={b.locationKind ?? location?.kind ?? null}
         sentTo={sentTo}
+        redirect={
+          redirectTo ? (
+            // What the invitee sees for the moment the next page takes to load,
+            // and the way on when a framed page was not allowed to move the
+            // window: `_top` leaves the frame, and is this window when unframed.
+            // The link keeps the sentence's size and colour (not `.bp-link`,
+            // which is a small accent-coloured control link), underlined.
+            <p className="bp-muted" role="status">
+              {t(bp.redirecting, { site: redirectSite(redirectTo) })}{' '}
+              <a
+                href={redirectTo}
+                target="_top"
+                referrerPolicy="no-referrer"
+                className="font-medium underline underline-offset-4"
+              >
+                {bp.redirectContinue}
+              </a>
+            </p>
+          ) : null
+        }
         titleRef={doneTitleRef}
         actions={
           <>

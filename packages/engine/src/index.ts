@@ -11,6 +11,7 @@ export * from './manage-token';
 export * from './one-off-link';
 export * from './pg-errors';
 export * from './location';
+export * from './redirect-url';
 export * from './onboarding';
 export * from './template';
 export * from './template-calendar';

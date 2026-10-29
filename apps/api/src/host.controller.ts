@@ -38,6 +38,9 @@ import { OnboardingService } from './onboarding.service';
 import { GrowthService } from './growth.service';
 import { AuthService, type ReqLike } from './auth.service';
 import { assertAdmin } from './permissions';
+import { trackingAllowedFor } from './event-tracking-gate';
+import { ENV } from './tokens';
+import type { ServerEnv } from '@slate/config/env';
 import { unwrap } from './http';
 
 /**
@@ -62,6 +65,9 @@ export class HostController {
     // Product analytics. LAST and @Optional() for the same reason: absent, no
     // event is recorded, which is also what analytics being off does.
     @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
+    // EVENT_TRACKING_ACCOUNTS, for `eventTrackingEnabled` on /me. LAST and
+    // @Optional() for the same reason: absent, it reads false.
+    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS'>,
   ) {}
 
   /**
@@ -74,7 +80,11 @@ export class HostController {
   async me(@Req() req: ReqLike) {
     const p = await this.auth.resolveHost(req);
     const [me, gates] = await Promise.all([this.admin.me(p), this.onboarding.gatesFor(p)]);
-    return me ? { ...me, ...gates } : me;
+    if (!me) return me;
+    // Whether the event editor offers Tracking and pixels to this workspace
+    // (the save enforces it again, see `trackingAllowedFor`).
+    const eventTrackingEnabled = trackingAllowedFor(this.env, { code: me.accountShortCode, vanitySlug: me.vanitySlug });
+    return { ...me, ...gates, eventTrackingEnabled };
   }
 
   /**

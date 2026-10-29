@@ -8,6 +8,7 @@ import {
   getAccountByCode,
   getBrandingSwitchByCode,
   getAvailability,
+  getBookingSuccessRedirectUrl,
   getPublicProfile,
   getBookingRescheduleAvailability,
   getTeamAvailability,
@@ -24,6 +25,7 @@ import { isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/en
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { AnalyticsEffects, type BookingChannel } from './analytics-effects';
+import { trackingAllowedFor } from './event-tracking-gate';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
@@ -183,7 +185,30 @@ export class BookingService {
   async profile(accountCode: string, handle: string): Promise<PublicProfile | null> {
     const p = await getPublicProfile(this.db, accountCode, handle);
     if (!p) return null;
-    return { ...(p as PublicProfile), showBranding: await this.showBrandingByCode(accountCode) };
+    const tracking = await this.trackingAllowedByCode(accountCode);
+    const view = p as PublicProfile;
+    return {
+      ...view,
+      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: tracking ? e.tracking : null })),
+      showBranding: await this.showBrandingByCode(accountCode),
+    };
+  }
+
+  /**
+   * Whether this workspace's booking pages may load the host's own tags
+   * (`EVENT_TRACKING_ACCOUNTS`, see `event-tracking-gate.ts`). Every public
+   * read that carries tracking ids runs it, so turning a workspace off takes
+   * the tags off its pages at once, whatever is still stored.
+   */
+  private async gatedEventType<T extends { tracking?: unknown }>(eventType: T, accountCode: string): Promise<T> {
+    if (!eventType.tracking) return eventType;
+    return (await this.trackingAllowedByCode(accountCode)) ? eventType : { ...eventType, tracking: undefined };
+  }
+
+  private async trackingAllowedByCode(accountCode: string): Promise<boolean> {
+    if (!this.env.EVENT_TRACKING_ACCOUNTS?.trim()) return false;
+    const account = await getAccountByCode(this.db, accountCode);
+    return !!account && trackingAllowedFor(this.env, { code: account.code, vanitySlug: account.vanity_slug });
   }
 
   /**
@@ -283,7 +308,7 @@ export class BookingService {
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
-      eventType: result.eventType,
+      eventType: await this.gatedEventType(result.eventType, q.accountCode),
       // A corrupt stored zone degrades to UTC here instead of 500ing the
       // endpoint or leaking garbage to integrations (QA fix 1).
       timeZone: safeTimeZone(result.timeZone),
@@ -568,6 +593,11 @@ export class BookingService {
         .catch(() => undefined);
     }
 
+    // Redirect after booking, read once the booking is committed, so only an
+    // invitee who booked learns the address. It must not throw from here
+    // (#102): a failed read costs the redirect, never the confirmation.
+    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, b.uid).catch(() => null);
+
     return {
       uid: b.uid,
       status: b.status as BookingView['status'],
@@ -578,6 +608,7 @@ export class BookingService {
       attendee: b.attendee,
       calendarDescription: b.calendarDescription || undefined,
       manageUrl,
+      ...(successRedirectUrl ? { successRedirectUrl } : {}),
       deduplicated: outcome.deduplicated || undefined,
     };
   }
@@ -696,7 +727,8 @@ export class BookingService {
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
-      eventType: result.eventType,
+      // The manage page's picker loads no tags: a reschedule is not a booking-page visit.
+      eventType: { ...result.eventType, tracking: undefined },
       timeZone: safeTimeZone(result.timeZone),
       slots: result.slots.map((startUtc) => ({ startUtc })),
       emptyReason: result.emptyReason,
@@ -893,7 +925,13 @@ export class BookingService {
   async teamProfile(accountCode: string, teamSlug: string): Promise<TeamProfile | null> {
     const t = await getTeamProfile(this.db, accountCode, teamSlug);
     if (!t) return null;
-    return { ...(t as TeamProfile), showBranding: await this.showBrandingByCode(accountCode) };
+    const tracking = await this.trackingAllowedByCode(accountCode);
+    const view = t as TeamProfile;
+    return {
+      ...view,
+      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: tracking ? e.tracking : null })),
+      showBranding: await this.showBrandingByCode(accountCode),
+    };
   }
 
   async teamAvailability(
@@ -943,7 +981,7 @@ export class BookingService {
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
-      eventType: result.eventType,
+      eventType: await this.gatedEventType(result.eventType, accountCode),
       timeZone: safeTimeZone(result.timeZone),
       slots: result.slots.map((startUtc) => ({ startUtc })),
       emptyReason: result.emptyReason,
@@ -1121,6 +1159,8 @@ export class BookingService {
     // ways is the class of drift this fix exists to close.
     const startUtc = new Date(Number(row?.start_ms ?? Date.parse(body.startUtc))).toISOString();
     const endUtc = row ? new Date(Number(row.end_ms)).toISOString() : startUtc;
+    // As on the personal path: read after the commit, and never thrown.
+    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, out.uid).catch(() => null);
     return {
       uid: out.uid,
       // A team booking is created `accepted` (it has no confirmation gate), so
@@ -1141,6 +1181,7 @@ export class BookingService {
       calendarDescription: row?.calendar_description || undefined,
       hostMemberId: out.hostMemberId,
       manageUrl,
+      ...(successRedirectUrl ? { successRedirectUrl } : {}),
     };
   }
 }

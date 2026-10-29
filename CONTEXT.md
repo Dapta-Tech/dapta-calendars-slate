@@ -1,4 +1,4 @@
-# Dapta Calendars
+# dCal
 
 Open-source, self-hostable scheduling: hosts publish availability, invitees book it. The product is a free lead magnet for the Dapta platform — it never bills anyone.
 

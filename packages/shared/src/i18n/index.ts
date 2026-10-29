@@ -146,6 +146,11 @@ export interface BookingMessages {
     hostTimeZone: string;
     /** The quiet link under a short day's times: "Next day with times: Tue, Oct 13". */
     nextTimes: string;
+    /** The confirmation's line when the event redirects after booking:
+     *  "Taking you to example.com." `{site}` is the destination's host name. */
+    redirecting: string;
+    /** The link beside it, for when the browser did not follow on its own. */
+    redirectContinue: string;
   };
   manage: {
     title: string;
@@ -534,6 +539,17 @@ export interface BookingMessages {
       fLength: string;
       fSlotInterval: string;
       fMinNotice: string;
+      /**
+       * Booking window: how many calendar days ahead invitees can book (today
+       * is day 0), in the schedule's time zone. Empty is no limit.
+       */
+      bookingWindow: {
+        label: string;
+        placeholder: string;
+        hint: string;
+        /** Inline error for anything but a whole number in range; `{max}` is the cap. */
+        invalid: string;
+      };
       fBufferBefore: string;
       fBufferAfter: string;
       fSeats: string;
@@ -550,6 +566,38 @@ export interface BookingMessages {
       duplicateGuard: {
         label: string;
         hint: string;
+      };
+      /**
+       * Redirect after booking: where the booking page sends the invitee
+       * once a booking is made, instead of the confirmation.
+       */
+      successRedirect: {
+        label: string;
+        hint: string;
+        placeholder: string;
+        /** Inline error for anything but a full https address. */
+        invalid: string;
+      };
+      /**
+       * Tracking and pixels on this event's booking page (the dForms section,
+       * per event type). Each help line says WHEN its tag fires.
+       */
+      tracking: {
+        title: string;
+        subtitle: string;
+        gtmLabel: string;
+        gtmHelp: string;
+        metaLabel: string;
+        metaHelp: string;
+        posthogKeyLabel: string;
+        posthogKeyHelp: string;
+        posthogHostLabel: string;
+        posthogHostHelp: string;
+        posthogHostInvalid: string;
+        hubspotLabel: string;
+        hubspotHelp: string;
+        /** Inline error for an id with characters no vendor uses. */
+        idInvalid: string;
       };
       /**
        * One-off links (#69 / AB2, #110) — the editor half.
@@ -1893,7 +1941,7 @@ export const en: BookingMessages = {
     holdExpired: 'Your hold expired',
     pickAnother: 'Pick another time',
     retry: 'Try again',
-    poweredBy: 'Powered by Dapta Calendars',
+    poweredBy: 'Powered by {product}',
     with: 'with',
     seatsLeft: '{n} left',
     full: 'Full',
@@ -1943,6 +1991,8 @@ export const en: BookingMessages = {
     zoneAll: 'All time zones',
     hostTimeZone: "{zone}, the host's time",
     nextTimes: 'Next day with times: {day}',
+    redirecting: 'Taking you to {site}.',
+    redirectContinue: 'Continue',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -2049,9 +2099,9 @@ export const en: BookingMessages = {
     noTeamEvents: 'No bookable team events yet.',
   },
   site: {
-    title: '{product}: free online scheduling and booking pages',
+    title: '{product}: calendars for AI agents',
     description:
-      '{product} gives you a booking page to share with one link. People pick a time in their own time zone, in English or Spanish. Open source.',
+      'With {product}, your agent finds a free time, books the meeting and moves it when plans change. Free and open source.',
     notFoundTitle: 'Page not found',
     notFoundBody: 'This page does not exist. Check the link with the person who shared it.',
     notFoundHome: 'Go home',
@@ -2162,7 +2212,7 @@ export const en: BookingMessages = {
       setupTitle: 'Get bookable',
       setupSubtitle: 'Three steps so a real invite lands in your calendar — not just this dashboard.',
       setupConnectTitle: 'Connect a calendar',
-      setupConnectDesc: 'So Dapta Calendars checks real conflicts and writes the event.',
+      setupConnectDesc: 'So real conflicts are checked and each booking lands on your calendar.',
       setupConnectAction: 'Connect',
       setupHoursTitle: 'Set your working hours',
       setupHoursDesc: 'Defines the window your booking link offers.',
@@ -2238,6 +2288,12 @@ export const en: BookingMessages = {
       fLength: 'Length (min)',
       fSlotInterval: 'Slot interval (min)',
       fMinNotice: 'Min. notice (min)',
+      bookingWindow: {
+        label: 'Booking window (days)',
+        placeholder: 'No limit',
+        hint: 'Invitees can book up to this many calendar days ahead, counting from today in the time zone of the schedule (on a team event, each host’s own). With 14, the last day they can pick is 14 days from today. Leave it empty for no limit.',
+        invalid: 'Use a whole number from 1 to {max}, or leave it empty.',
+      },
       fBufferBefore: 'Buffer before (min)',
       fBufferAfter: 'Buffer after (min)',
       fSeats: 'Seats / slot (group)',
@@ -2250,6 +2306,33 @@ export const en: BookingMessages = {
       duplicateGuard: {
         label: 'One booking per person',
         hint: 'Counts upcoming bookings only — cancelling frees the slot, and past bookings never count. You and your API keys are never affected. Anyone who guesses an invitee’s address is told a booking exists for it, though never when it is.',
+      },
+      // Redirect after booking. Says where the invitee goes, and what never redirects.
+      successRedirect: {
+        label: 'Redirect after booking',
+        hint: 'Invitees go to this page once they book, requests you still have to confirm included, instead of staying on the confirmation. Only someone who books is sent the address. Leave it empty to keep the confirmation. Rescheduling or cancelling never redirects.',
+        placeholder: 'https://example.com/thanks',
+        invalid: 'Use a full address that starts with https://',
+      },
+      // Tracking and pixels. Each help line says when its tag fires.
+      tracking: {
+        title: 'Tracking and pixels',
+        subtitle:
+          'Measure visits and bookings on this event’s booking page, embedded or not. Each tag loads only when its ID is set, and never in your dashboard.',
+        gtmLabel: 'Google Tag Manager ID',
+        gtmHelp: 'Loads your GTM container so your tags fire, and pushes a booking_scheduled event when someone books.',
+        metaLabel: 'Meta Pixel ID',
+        metaHelp:
+          'Fires a PageView when the booking page loads, and a Schedule when someone books. If automatic advanced matching is on in Meta, it can also read the booking form.',
+        posthogKeyLabel: 'PostHog project key',
+        posthogKeyHelp: 'Captures one pageview per visit in your own PostHog project.',
+        posthogHostLabel: 'PostHog host (optional)',
+        posthogHostHelp: 'Defaults to PostHog US cloud; set your EU or self-hosted address.',
+        posthogHostInvalid: 'Enter a full https:// address, e.g. https://eu.i.posthog.com.',
+        hubspotLabel: 'HubSpot tracking ID',
+        hubspotHelp:
+          'Loads the HubSpot tracking code for your portal on the booking page, so its visits count in HubSpot. If collected forms is on in your portal, HubSpot can also capture the booking form. Bookings reach HubSpot through Integrations.',
+        idInvalid: 'Use only letters, numbers, - and _.',
       },
       // One-off links (#110). Not a security control; say what it does.
       oneOffLinks: {
@@ -3578,7 +3661,7 @@ export const es: BookingMessages = {
     holdExpired: 'Tu reserva temporal expiró',
     pickAnother: 'Elige otro horario',
     retry: 'Reintentar',
-    poweredBy: 'Con la tecnología de Dapta Calendars',
+    poweredBy: 'Con la tecnología de {product}',
     with: 'con',
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
@@ -3627,6 +3710,8 @@ export const es: BookingMessages = {
     zoneAll: 'Todas las zonas horarias',
     hostTimeZone: '{zone}, hora del anfitrión',
     nextTimes: 'Siguiente día con horarios: {day}',
+    redirecting: 'Te llevamos a {site}.',
+    redirectContinue: 'Continuar',
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -3734,9 +3819,9 @@ export const es: BookingMessages = {
     noTeamEvents: 'Aún no hay eventos de equipo disponibles para reservar.',
   },
   site: {
-    title: '{product}: agenda de citas en línea gratis',
+    title: '{product}: calendarios para agentes de IA',
     description:
-      '{product} te da una página de reservas para compartir con un solo enlace. Cada persona elige una hora en su propia zona horaria, en español o en inglés. Código abierto.',
+      'Con {product}, tu agente busca un horario libre, agenda la cita y la mueve si algo cambia. Gratis y de código abierto.',
     notFoundTitle: 'Página no encontrada',
     notFoundBody: 'Esta página no existe. Revisa el enlace con quien te lo compartió.',
     notFoundHome: 'Ir al inicio',
@@ -3847,7 +3932,7 @@ export const es: BookingMessages = {
       setupTitle: 'Queda lista para reservas',
       setupSubtitle: 'Tres pasos para que una invitación real llegue a tu calendario — no solo a este panel.',
       setupConnectTitle: 'Conecta un calendario',
-      setupConnectDesc: 'Así Dapta Calendars revisa conflictos reales y escribe el evento.',
+      setupConnectDesc: 'Así se revisan los conflictos reales y cada reserva queda en tu calendario.',
       setupConnectAction: 'Conectar',
       setupHoursTitle: 'Define tus horas de trabajo',
       setupHoursDesc: 'Define la ventana que ofrece tu enlace de reservas.',
@@ -3923,6 +4008,12 @@ export const es: BookingMessages = {
       fLength: 'Duración (min)',
       fSlotInterval: 'Intervalo entre horarios (min)',
       fMinNotice: 'Antelación mínima (min)',
+      bookingWindow: {
+        label: 'Antelación máxima (días)',
+        placeholder: 'Sin límite',
+        hint: 'Los invitados pueden reservar hasta esta cantidad de días calendario hacia adelante, contando desde hoy en la zona horaria del horario (en un evento de equipo, la de cada anfitrión). Con 14, el último día que pueden elegir es dentro de 14 días. Déjalo vacío para no poner límite.',
+        invalid: 'Usa un número entero de 1 a {max}, o déjalo vacío.',
+      },
       fBufferBefore: 'Margen antes (min)',
       fBufferAfter: 'Margen después (min)',
       fSeats: 'Cupos / horario (grupo)',
@@ -3935,6 +4026,34 @@ export const es: BookingMessages = {
       duplicateGuard: {
         label: 'Una reserva por persona',
         hint: 'Solo cuenta las reservas próximas — cancelar libera el espacio y las reservas pasadas nunca cuentan. Ni tú ni tus claves de API se ven afectados. A quien adivine el correo de un invitado se le dirá que existe una reserva, aunque nunca cuándo es.',
+      },
+      // Redirigir después de reservar. Dice adónde va el invitado y qué nunca redirige.
+      successRedirect: {
+        label: 'Redirigir después de reservar',
+        hint: 'Los invitados van a esta página después de reservar, también en las solicitudes que aún debes confirmar, en lugar de quedarse en la confirmación. Solo quien reserva recibe la dirección. Déjalo vacío para mantener la confirmación. Reprogramar o cancelar nunca redirige.',
+        placeholder: 'https://ejemplo.com/gracias',
+        invalid: 'Usa una dirección completa que empiece por https://',
+      },
+      // Seguimiento y píxeles. Cada ayuda dice cuándo se dispara su etiqueta.
+      tracking: {
+        title: 'Seguimiento y píxeles',
+        subtitle:
+          'Mide visitas y reservas en la página de reservas de este evento, insertada o no. Cada etiqueta se carga solo cuando su ID está configurado, y nunca en tu panel.',
+        gtmLabel: 'ID de Google Tag Manager',
+        gtmHelp:
+          'Carga tu contenedor de GTM para que se disparen tus etiquetas, y empuja un evento booking_scheduled cuando alguien reserva.',
+        metaLabel: 'ID del píxel de Meta',
+        metaHelp:
+          'Dispara un PageView al cargar la página de reservas y un Schedule cuando alguien reserva. Si la coincidencia avanzada automática está activa en Meta, también puede leer el formulario de reserva.',
+        posthogKeyLabel: 'Clave del proyecto de PostHog',
+        posthogKeyHelp: 'Captura una pageview por visita en tu propio proyecto de PostHog.',
+        posthogHostLabel: 'Host de PostHog (opcional)',
+        posthogHostHelp: 'Por defecto usa la nube de PostHog en EE. UU.; configura tu dirección de la UE o autoalojada.',
+        posthogHostInvalid: 'Introduce una dirección https:// completa, p. ej. https://eu.i.posthog.com.',
+        hubspotLabel: 'ID de seguimiento de HubSpot',
+        hubspotHelp:
+          'Carga el código de seguimiento de HubSpot de tu portal en la página de reservas, para que sus visitas cuenten en HubSpot. Si los formularios recopilados están activos en tu portal, HubSpot también puede capturar el formulario de reserva. Las reservas llegan a HubSpot por Integraciones.',
+        idInvalid: 'Usa solo letras, números, - y _.',
       },
       // Enlaces de un solo uso (#110). No es un control de seguridad.
       oneOffLinks: {

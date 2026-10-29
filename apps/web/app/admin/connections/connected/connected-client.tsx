@@ -16,7 +16,7 @@ interface ConnectSignal {
 /**
  * The OAuth popup's landing page (Bug C — the popup used to strand the user
  * on the calendar backend's own "you can close this tab" page instead of
- * returning to Dapta Calendars). That backend redirects the popup here as a
+ * returning to dCal). That backend redirects the popup here as a
  * same-origin request with `?connectionId=` on success or
  * `?error=&errorData=` on failure. On mount this:
  *  1. Signals the opener with the actual outcome via BroadcastChannel AND a

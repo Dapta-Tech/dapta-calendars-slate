@@ -11,7 +11,7 @@
  * treats as "sign in again", so the session survives and the page shows
  * something the person can retry.
  */
-import type { BrandKit, WorkspaceView } from '@slate/types';
+import type { BrandKit, EventTracking, WorkspaceView } from '@slate/types';
 import type {
   EventLocationDto,
   EventReminder,
@@ -165,6 +165,9 @@ export interface Me {
    */
   onboardingRequired?: boolean;
   setupRequired?: boolean;
+  /** Whether this deployment lets the workspace load tracking and pixels on its
+   *  booking pages (`EVENT_TRACKING_ACCOUNTS`). Absent from an older API: off. */
+  eventTrackingEnabled?: boolean;
 }
 
 export type AccountRole = 'owner' | 'admin' | 'member';
@@ -399,6 +402,9 @@ export interface EventType {
   location: EventLocationDto | null;
   hidden: boolean;
   minimumBookingNotice: number;
+  /** Booking window in calendar days ahead; null ⇒ no limit. Optional on the
+   *  wire, so an older API reads as no limit. */
+  bookingWindowDays?: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;
   slotInterval: number | null;
@@ -425,6 +431,11 @@ export interface EventType {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. Null on every
    *  event nobody has configured, which is what "never configured" reads as. */
   crmPropertyMappings: CrmPropertyMappings | null;
+  /** Where the booking page sends the invitee after booking; null ⇒ the
+   *  confirmation stays. Optional on the wire, so an older API reads as none. */
+  successRedirectUrl?: string | null;
+  /** Tracking and pixels on the booking page; null ⇒ none. Optional on the wire. */
+  tracking?: EventTracking | null;
 }
 export interface Schedule {
   id: string;

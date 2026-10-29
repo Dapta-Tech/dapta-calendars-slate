@@ -9,12 +9,19 @@ import {
   AVAILABILITY_EMPTY_REASONS,
   LOCATION_DETAIL_MAX,
   LOCATION_KINDS,
+  MAX_SUCCESS_REDIRECT_URL,
   ONBOARDING_COHORTS,
   ONBOARDING_QUESTION_KEYS,
   ONBOARDING_TEMPLATE_IDS,
+  isSuccessRedirectUrl,
 } from '@slate/engine';
 
-export { LOCATION_KINDS, parseEventLocation } from '@slate/engine';
+export {
+  LOCATION_KINDS,
+  MAX_SUCCESS_REDIRECT_URL,
+  isSuccessRedirectUrl,
+  parseEventLocation,
+} from '@slate/engine';
 export type { EventLocation, LocationKind } from '@slate/engine';
 
 // --- Enums (string unions — portable across SQLite & Postgres) -------------
@@ -152,6 +159,93 @@ export const MAX_REMINDER_BODY = 5000;
  */
 export const MAX_CALENDAR_TITLE_TEMPLATE = 500;
 export const MAX_CALENDAR_DESCRIPTION_TEMPLATE = 5000;
+
+/** The longest Google Tag Manager, Meta Pixel or HubSpot id an event type takes. */
+export const MAX_TRACKING_ID = 32;
+/** The longest PostHog project key an event type takes. */
+export const MAX_POSTHOG_KEY = 128;
+/** The longest PostHog host an event type takes. */
+export const MAX_POSTHOG_HOST = 256;
+
+/**
+ * One vendor id: letters, digits, `-` and `_` only (every GTM, Meta, PostHog
+ * and HubSpot id is written that way), trimmed, blank = none. The page only
+ * ever interpolates it escaped, so this is a typo catcher, not the defence.
+ */
+const trackingIdSchema = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .regex(/^[A-Za-z0-9_-]*$/, 'Use only letters, numbers, - and _.');
+
+/**
+ * Tracking and pixels on ONE event type's public booking page (the dForms
+ * `formTrackingSchema`, per event type): Google Tag Manager, Meta Pixel, a
+ * PostHog project of the host's own and HubSpot's tracking code. Each loads only
+ * when its id is set, and only on this event's booking page. Absent or null is
+ * all off, which is every event type saved before this existed.
+ */
+export const eventTrackingSchema = z.object({
+  /** Google Tag Manager container id (`GTM-XXXXXXX`). */
+  gtmId: trackingIdSchema(MAX_TRACKING_ID).nullable().optional(),
+  /** Meta (Facebook) Pixel id. */
+  metaPixelId: trackingIdSchema(MAX_TRACKING_ID).nullable().optional(),
+  /** PostHog project API key (`phc_...`). */
+  posthogKey: trackingIdSchema(MAX_POSTHOG_KEY).nullable().optional(),
+  /** PostHog ingestion host for an EU or self-hosted project: an https ORIGIN
+   *  (no path, query or credentials). https only: the booking page is https,
+   *  and a browser blocks plain http from it. */
+  posthogHost: z
+    .string()
+    .trim()
+    .max(MAX_POSTHOG_HOST)
+    .regex(/^(https:\/\/[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:\d{1,5})?\/?)?$/i, 'Enter a full https:// address, e.g. https://eu.i.posthog.com.')
+    .nullable()
+    .optional(),
+  /** HubSpot tracking code portal id. */
+  hubspotTrackingId: trackingIdSchema(MAX_TRACKING_ID).nullable().optional(),
+});
+export type EventTracking = z.infer<typeof eventTrackingSchema>;
+
+/** The fields of {@link EventTracking}, in the order the editor lists them. */
+export const EVENT_TRACKING_KEYS = ['gtmId', 'metaPixelId', 'posthogKey', 'posthogHost', 'hubspotTrackingId'] as const;
+
+/**
+ * The stored shape: every id trimmed, a blank one left out, and nothing at all
+ * (null) when no id is left, so an event type that never set one, or cleared
+ * them all, reads exactly as it did before tracking existed. A PostHog host
+ * without a PostHog key is dropped too: alone it loads nothing.
+ *
+ * Every read goes through here as well, with the save's own field checks: a
+ * value written past the API (straight into the column) that the save would
+ * refuse is dropped, never handed to a booking page.
+ */
+export function normalizeEventTracking(input: unknown): EventTracking | null {
+  if (!input || typeof input !== 'object') return null;
+  const raw = input as Record<string, unknown>;
+  const out: EventTracking = {};
+  for (const key of EVENT_TRACKING_KEYS) {
+    const value = raw[key];
+    if (typeof value !== 'string' || value.trim() === '') continue;
+    const checked = eventTrackingSchema.shape[key].safeParse(value);
+    if (checked.success && checked.data) out[key] = checked.data;
+  }
+  if (!out.posthogKey) delete out.posthogHost;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * The event type's redirect-after-booking URL on input. Trimmed, and blank is
+ * "none" (stored as NULL), so clearing the editor's field turns it off.
+ */
+export const successRedirectUrlSchema = z
+  .string()
+  .trim()
+  .max(MAX_SUCCESS_REDIRECT_URL)
+  .refine((v) => v === '' || isSuccessRedirectUrl(v), {
+    message: 'The redirect URL must be a full https:// address.',
+  });
 
 /**
  * ONE reminder on an event type: its own switch, its own lead time, its own
@@ -299,6 +393,14 @@ export function clampAvailabilityWindow(fromMs: number, toMs: number): number {
 }
 
 /**
+ * The longest booking window a host may set on an event type: two years of
+ * calendar days ahead. Unlike {@link MAX_AVAILABILITY_WINDOW_DAYS} this is a
+ * scheduling rule the host chooses (`bookingWindowDays`), not a bound on what
+ * one read may ask for.
+ */
+export const MAX_BOOKING_WINDOW_DAYS = 730;
+
+/**
  * Query for the public TEAM availability route
  * (`GET /v1/public/teams/{accountCode}/{teamSlug}/availability`, #136).
  *
@@ -368,6 +470,9 @@ export const availabilityResponseSchema = z.object({
     schedulingType: z.enum(schedulingType).nullable().default(null),
     /** Where the meeting happens — rendered on the public booking page. */
     location: eventLocationSchema.nullable().default(null),
+    /** The event's tracking ids, for the one-off link page, which serves a
+     *  hidden event no listing carries. Absent when the event has none. */
+    tracking: eventTrackingSchema.nullable().optional(),
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
@@ -746,6 +851,10 @@ export const bookingViewSchema = z.object({
   calendarDescription: z.string().nullable().optional(),
   /** One-time manage token URL (cancel/reschedule) — returned only on create. */
   manageUrl: z.string().optional(),
+  /** Where the booking page sends the invitee next: the event type's redirect
+   *  after booking. Returned only by the public create routes, and only when
+   *  the event has one, so the address is not readable before anyone books. */
+  successRedirectUrl: z.string().optional(),
   /** The organizer a TEAM booking's scheduling method resolved to (#102).
    *  Additive and team-only — the personal path never sets it, and a booking
    *  read back later carries its host in `host` instead. It belongs on this
@@ -818,6 +927,10 @@ export const publicProfileSchema = z.object({
        */
       location: eventLocationSchema.nullable().optional(),
       timeZone: z.string().optional(),
+      /** The event's tracking ids, loaded on its booking page. Optional on the
+       *  wire; absent and null are both "no tracking". Public by nature: every
+       *  one of them is in the page's own markup once it loads. */
+      tracking: eventTrackingSchema.nullable().optional(),
     }),
   ),
 });
@@ -842,6 +955,8 @@ export const teamProfileSchema = z.object({
       schedulingType: z.enum(schedulingType).nullable(),
       /** Where the meeting happens; see `publicProfileSchema`. Optional on the wire. */
       location: eventLocationSchema.nullable().optional(),
+      /** The event's tracking ids; see `publicProfileSchema`. */
+      tracking: eventTrackingSchema.nullable().optional(),
     }),
   ),
   /** The workspace brand kit, which a team page renders directly (a team
@@ -1138,6 +1253,17 @@ export const eventTypeInputSchema = z.object({
   /** Round robin only; NULL keeps `availability`. See `rrDistribution`. */
   rrDistribution: z.enum(rrDistribution).nullable().optional(),
   minimumBookingNotice: z.number().int().min(0).optional(),
+  /** Booking window: invitees may book up to this many calendar days ahead,
+   *  today being day 0, counted in the schedule's time zone. Omitted ⇒
+   *  unchanged; null ⇒ no limit, which is what every event type that predates
+   *  it reads as. Enforced wherever the minimum notice is. */
+  bookingWindowDays: z
+    .number()
+    .int()
+    .min(1, 'The booking window must be at least 1 day.')
+    .max(MAX_BOOKING_WINDOW_DAYS, `The booking window can be at most ${MAX_BOOKING_WINDOW_DAYS} days.`)
+    .nullable()
+    .optional(),
   beforeEventBuffer: z.number().int().min(0).optional(),
   afterEventBuffer: z.number().int().min(0).optional(),
   slotInterval: z.number().int().positive().nullable().optional(),
@@ -1184,6 +1310,14 @@ export const eventTypeInputSchema = z.object({
    *  Checked by the API against the variables catalog before they are stored. */
   calendarTitleTemplate: z.string().max(MAX_CALENDAR_TITLE_TEMPLATE).nullable().optional(),
   calendarDescriptionTemplate: z.string().max(MAX_CALENDAR_DESCRIPTION_TEMPLATE).nullable().optional(),
+  /** Where the booking page sends the invitee once a booking is made, instead
+   *  of leaving them on the confirmation. An absolute https URL. Omitted ⇒
+   *  unchanged; null or blank ⇒ none, which is what every event type that
+   *  predates it reads as. Reschedules and cancellations never redirect. */
+  successRedirectUrl: successRedirectUrlSchema.nullable().optional(),
+  /** Tracking and pixels on this event's booking page. Omitted ⇒ unchanged;
+   *  null, or every id blank ⇒ none. See `eventTrackingSchema`. */
+  tracking: eventTrackingSchema.nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;
 

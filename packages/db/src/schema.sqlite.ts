@@ -195,6 +195,8 @@ export const eventType = sqliteTable('event_type', {
   reminders: text('reminders'),
   metadata: text('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
+  /** Booking window in calendar days ahead; NULL = no limit. See schema.pg.ts. */
+  bookingWindowDays: integer('booking_window_days'),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),
@@ -216,6 +218,10 @@ export const eventType = sqliteTable('event_type', {
   /** The calendar title and description templates; NULL = none. See schema.pg.ts. */
   calendarTitleTemplate: text('calendar_title_template'),
   calendarDescriptionTemplate: text('calendar_description_template'),
+  /** Redirect after booking (https URL); NULL = none. See schema.pg.ts. */
+  successRedirectUrl: text('success_redirect_url'),
+  /** Tracking and pixels on the booking page, as JSON text; NULL = none. See schema.pg.ts. */
+  tracking: text('tracking'),
   createdAt: integer('created_at').notNull(),
 });
 

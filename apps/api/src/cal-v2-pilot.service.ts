@@ -168,6 +168,7 @@ export class CalV2PilotService {
       slug: string;
       description: string | null;
       length_minutes: number;
+      booking_window_days: number | null;
       hidden: number;
       member_id: string | null;
       team_id: string | null;
@@ -177,11 +178,12 @@ export class CalV2PilotService {
       locations: unknown;
       booking_fields: unknown;
       team_name: string | null;
+      success_redirect_url: string | null;
     }>(
-      sql`SELECT et.id, et.title, et.slug, et.description, et.length_minutes,
+      sql`SELECT et.id, et.title, et.slug, et.description, et.length_minutes, et.booking_window_days,
                  et.hidden, et.member_id, et.team_id, m.handle,
                  t.slug AS team_slug, t.name AS team_name, et.scheduling_type,
-                 et.locations, et.booking_fields
+                 et.locations, et.booking_fields, et.success_redirect_url
           FROM event_type et
           LEFT JOIN member m ON m.id = et.member_id
           LEFT JOIN team t ON t.id = et.team_id
@@ -197,6 +199,13 @@ export class CalV2PilotService {
         id: compatibilityId(row.id),
         daptaId: row.id,
         lengthInMinutes: row.length_minutes,
+        // Cal.com's shape for "up to N calendar days into the future". Not
+        // `rolling`: cal.com means N days that have availability by it, and
+        // this window counts calendar days. Null when the event has none.
+        bookingWindow:
+          row.booking_window_days === null
+            ? null
+            : { type: 'calendarDays' as const, value: row.booking_window_days, rolling: false },
         title: row.title,
         slug: row.slug,
         description: row.description,
@@ -213,6 +222,8 @@ export class CalV2PilotService {
           return loc ? [loc] : [];
         })(),
         bookingFields: parseJsonColumn<unknown[]>(row.booking_fields, []),
+        // Cal.com's name for the same setting, so a v2 client reads it as-is.
+        successRedirectUrl: row.success_redirect_url ?? null,
         team:
           row.team_id && row.team_slug && row.team_name
             ? {

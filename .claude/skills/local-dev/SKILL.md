@@ -1,9 +1,9 @@
 ---
 name: local-dev
-description: Boot, seed, log in, reset, and switch database dialect for Dapta Calendars locally. Use when you need to run the app, get into the admin dashboard as a specific user, reset demo data, or exercise the Postgres parity path.
+description: Boot, seed, log in, reset, and switch database dialect for dCal locally. Use when you need to run the app, get into the admin dashboard as a specific user, reset demo data, or exercise the Postgres parity path.
 ---
 
-# Local dev — Dapta Calendars
+# Local dev — dCal
 
 Zero infrastructure: a bare clone runs on SQLite with `log-only` email, a
 `disabled` calendar, and a `local` auth stub. No Docker, Postgres, or accounts

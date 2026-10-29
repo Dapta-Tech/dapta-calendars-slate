@@ -8,6 +8,7 @@ import type {
   CrmPropertyMappings,
   EventLocationDto,
   EventReminder,
+  EventTracking,
   OneOffLinkView,
 } from '@slate/types';
 import { adminApi } from '@/lib/admin-api';
@@ -23,6 +24,8 @@ export interface EventTypePayload {
   /** The location kind + its detail; null clears the Where. */
   location: EventLocationDto | null;
   minimumBookingNotice: number;
+  /** Booking window in calendar days ahead; null ⇒ no limit. */
+  bookingWindowDays: number | null;
   slotInterval: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;
@@ -50,6 +53,10 @@ export interface EventTypePayload {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. `null` clears
    *  them; omitted leaves whatever the event already had. */
   crmPropertyMappings?: CrmPropertyMappings | null;
+  /** Redirect after booking: an https URL, or null for none. */
+  successRedirectUrl?: string | null;
+  /** Tracking and pixels on the booking page; null clears every id. */
+  tracking?: EventTracking | null;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {

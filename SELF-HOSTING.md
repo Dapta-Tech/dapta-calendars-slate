@@ -1,6 +1,6 @@
-# Self-hosting Dapta Calendars
+# Self-hosting dCal
 
-Dapta Calendars is **deployment-agnostic**: two Node apps (a Next.js web frontend
+dCal is **deployment-agnostic**: two Node apps (a Next.js web frontend
 and a NestJS API) plus a database. No host-only APIs, no managed-platform lock-in —
 anywhere Node ≥ 22.13 or Docker runs, it runs. This guide takes you from a clean host
 to a running, double-booking-safe production deployment.
@@ -204,6 +204,19 @@ connection per minute (`busy cache: event=stale_served|read_failed conn=<hash>
 | `PREMIUM_FEATURES` | `open` | keep `open` for a self-host (everything unlocked) | no |
 | `ENTITLEMENTS_API_URL` | — | only when `PREMIUM_FEATURES=locked` | no |
 | `ENTITLEMENTS_API_KEY` | — | only when `PREMIUM_FEATURES=locked` | **yes** |
+
+### Tracking and pixels per event type
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `EVENT_TRACKING_ACCOUNTS` | — (nobody) | to let workspaces load GTM, Meta Pixel, PostHog or HubSpot on their booking pages: account short codes or vanity slugs, comma-separated, or `*` for every workspace | no |
+
+An event's tags run that host's own JavaScript (a GTM container can carry any
+script) on the same origin as the dashboard and its session cookie, so a host
+could act as anyone signed in who opens their booking page. Only name
+workspaces you trust, or use `*` only when every workspace on the deployment is
+yours. Only owners and admins can set the ids. Taking a workspace off the list
+takes its tags off its pages at once.
 
 ### Onboarding cohort probe (first-run wizard)
 
