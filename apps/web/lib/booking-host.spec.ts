@@ -124,9 +124,11 @@ describe('the app host and older aliases', () => {
 
   it('refuses a write another host of the same site made the browser send, and a subresource GET that changes the signed-in state', () => {
     expect(routeForHost(req('app.dcal.ai', '/admin/event-types', { method: 'POST', fetchSite: 'same-site' }), env())).toEqual({ kind: 'refuse', status: 403 });
-    for (const path of ['/api/auth/logout', '/api/auth/refresh', '/api/workspace/reset', '/api/developers/skill', '/admin/join/acme']) {
+    for (const path of ['/api/auth/login', '/api/auth/logout', '/api/auth/refresh', '/api/workspace/reset', '/api/developers/skill', '/admin/join/acme']) {
       // An <img> or a fetch from the booking host: refused.
       expect(routeForHost(req('app.dcal.ai', path, { fetchSite: 'same-site', fetchMode: 'no-cors', fetchDest: 'image' }), env())).toEqual({ kind: 'refuse', status: 403 });
+      // A frame another host placed is not the person navigating either.
+      expect(routeForHost(req('app.dcal.ai', path, { fetchSite: 'same-site', fetchMode: 'navigate', fetchDest: 'iframe' }), env())).toEqual({ kind: 'refuse', status: 403 });
       // A full-page navigation (a click on the landing, the dashboard's own refresh chain): served.
       expect(routeForHost(req('app.dcal.ai', path, { fetchSite: 'same-site', fetchMode: 'navigate', fetchDest: 'document' }), env()).kind).toBe('next');
       // A prerender or prefetch another host's page asked for is not the person navigating.
