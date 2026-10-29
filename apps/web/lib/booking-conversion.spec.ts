@@ -82,7 +82,7 @@ describe('reportBookingConversion', () => {
       start_time: '2026-11-03T15:00:00.000Z',
       booking_status: 'accepted',
     };
-    expect(fbq.mock.calls).toEqual([['track', 'Schedule', { content_name: 'intro-call' }]]);
+    expect(fbq.mock.calls).toEqual([['track', 'Schedule', { ...props, content_name: 'intro-call' }]]);
     expect(containerEvents()).toEqual([{ event: 'booking_scheduled', dcal: props }]);
     expect(gtag.mock.calls).toEqual([['event', 'booking_scheduled', props]]);
     expect(capture.mock.calls).toEqual([['booking_scheduled', props]]);
@@ -159,7 +159,7 @@ describe('reportBookingStep', () => {
     w().posthog = { [EVENT_OWNER_POSTHOG]: { capture } };
     expect(reportBookingStep('date_selected', { ...DETAILS, date: '2026-11-03' })).toBe(true);
     const props = { event_type: 'intro-call', duration_minutes: 30, is_team: false, date: '2026-11-03' };
-    expect(fbq.mock.calls).toEqual([['trackCustom', DATE_SELECTED_PIXEL_EVENT, { content_name: 'intro-call' }]]);
+    expect(fbq.mock.calls).toEqual([['trackCustom', DATE_SELECTED_PIXEL_EVENT, { ...props, content_name: 'intro-call' }]]);
     expect(containerEvents()).toEqual([{ event: DATE_SELECTED_EVENT, dcal: props }]);
     expect(gtag.mock.calls).toEqual([['event', DATE_SELECTED_EVENT, props]]);
     expect(capture.mock.calls).toEqual([[DATE_SELECTED_EVENT, props]]);

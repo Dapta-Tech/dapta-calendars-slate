@@ -141,7 +141,8 @@ function send(
   if (!anyTag(tags)) return false;
   const props = propertiesOf(details);
   if (tags.pixel) {
-    const params = details ? { content_name: details.eventTypeSlug } : null;
+    // Meta's own `content_name` names the event type; the details ride beside it.
+    const params = details ? { ...props, content_name: details.eventTypeSlug } : null;
     safely(() => {
       if (!names.pixelStandard) w.fbq!('trackCustom', names.pixel, params ?? {});
       else if (params) w.fbq!('track', names.pixel, params);

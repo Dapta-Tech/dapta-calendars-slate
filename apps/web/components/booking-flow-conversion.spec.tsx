@@ -139,7 +139,9 @@ describe('the host’s tags hear of the booking', () => {
     const el = await mount();
     expect(fbq).not.toHaveBeenCalled();
     await book(el);
-    expect(pixelCalls(fbq, 'track')).toEqual([['track', 'Schedule', { content_name: 'design-review' }]]);
+    expect(pixelCalls(fbq, 'track')).toEqual([
+      ['track', 'Schedule', expect.objectContaining({ content_name: 'design-review', event_type: 'design-review' })],
+    ]);
     expect(events().filter((e) => e === 'booking_scheduled')).toHaveLength(1);
   });
 
@@ -165,7 +167,9 @@ describe('the host’s tags hear of the booking', () => {
     withContainer();
     const el = await mount();
     await book(el, undefined, 'pending');
-    expect(pixelCalls(fbq, 'track')).toEqual([['track', 'Schedule', { content_name: 'design-review' }]]);
+    expect(pixelCalls(fbq, 'track')).toEqual([
+      ['track', 'Schedule', expect.objectContaining({ content_name: 'design-review', event_type: 'design-review' })],
+    ]);
     const last = (window as TagWindow).dataLayer!.at(-1) as { event: string; dcal: Record<string, unknown> };
     expect(last).toMatchObject({ event: 'booking_scheduled', dcal: { booking_status: 'pending' } });
   });
