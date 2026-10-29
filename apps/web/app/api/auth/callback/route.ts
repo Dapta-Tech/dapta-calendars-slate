@@ -5,8 +5,11 @@ import { setSession, workosSessionIdFromJwt } from '@/lib/auth-session';
 import { requestOrigin } from '@/lib/request-origin';
 import { clearWorkspace } from '@/lib/workspace';
 import { RETURN_TO_COOKIE, safeReturnTo, withReturnTo } from '@/lib/return-to';
+import { deleteHostCookie, readHostCookie } from '@/lib/session';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
+/** The attributes the login wrote the two hand-off cookies with, for removing them. */
+const shortCookie = () => ({ httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }) as const;
 
 /**
  * WorkOS callback contract verified against the private deployment adapter:
@@ -36,10 +39,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // The login round-trip must have started here (cookie set by /api/auth/login).
   const jar = await cookies();
-  const started = jar.get(OAUTH_STATE_COOKIE)?.value;
-  jar.delete(OAUTH_STATE_COOKIE);
-  const next = safeReturnTo(jar.get(RETURN_TO_COOKIE)?.value);
-  jar.delete(RETURN_TO_COOKIE);
+  const started = readHostCookie(jar, OAUTH_STATE_COOKIE);
+  deleteHostCookie(jar, OAUTH_STATE_COOKIE, shortCookie());
+  const next = safeReturnTo(readHostCookie(jar, RETURN_TO_COOKIE));
+  deleteHostCookie(jar, RETURN_TO_COOKIE, shortCookie());
   const failed = (error: string) =>
     NextResponse.redirect(new URL(withReturnTo(`/login?error=${error}`, next), origin));
   if (!started) return failed('state');

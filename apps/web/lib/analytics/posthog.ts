@@ -315,6 +315,13 @@ export function posthogSettings(
     return {
       ...common,
       person_profiles: 'identified_only',
+      // The dashboard's analytics identity stays on this origin: in local
+      // storage, which no other host can read, not in a cookie posthog-js
+      // would share with every subdomain of the site, where a sibling host that
+      // serves booking pages (and the hosts' own tags) could read or replace
+      // it. The shared cookie earlier releases wrote is expired on connect.
+      persistence: 'localStorage',
+      cross_subdomain_cookie: false,
       // The dashboard is a multi-route app: each navigation is a real page.
       capture_pageview: 'history_change',
       capture_pageleave: true,
@@ -386,6 +393,22 @@ export function installStub(w: PosthogWindow, apiHost: string): PosthogGlobal {
 }
 
 /**
+ * Expire the identity cookie earlier releases let posthog-js share with the
+ * whole site (`ph_<key>_posthog` on the parent domain), so a sibling host can
+ * no longer read it. Best effort, and nothing on a single-label host.
+ */
+export function expireSharedPosthogCookie(key: string, w: Pick<Window, 'location' | 'document'>): void {
+  try {
+    const labels = w.location.hostname.split('.');
+    if (labels.length < 3) return;
+    const parent = labels.slice(1).join('.');
+    w.document.cookie = `ph_${key}_posthog=; Domain=.${parent}; Path=/; Max-Age=0; SameSite=Lax`;
+  } catch {
+    /* a blocked cookie store loses nothing here */
+  }
+}
+
+/**
  * Start (or reuse) this audience's instance and return the port for it.
  */
 export function connectPosthog(
@@ -396,6 +419,7 @@ export function connectPosthog(
   const global = installStub(w, config.host);
   const name = INSTANCE_NAME[surface];
   if (!initialized.has(name)) {
+    if (surface === 'host') expireSharedPosthogCookie(config.key, w);
     global.init(config.key, posthogSettings(config, surface, w), name);
     initialized.add(name);
   }

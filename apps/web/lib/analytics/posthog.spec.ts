@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalyticsConfig } from '@slate/shared';
 import { connectPosthog, posthogSettings, resetPosthogForTests, scrubEvent, withoutQuery } from './posthog';
 import { clearActiveAnalyticsPort, resetAnalytics, setActiveAnalyticsPort, track, type AnalyticsPort } from './port';
+import { expireSharedPosthogCookie } from './posthog';
 
 const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test', errors: true };
 
@@ -66,6 +67,9 @@ describe('posthogSettings', () => {
   it('a host gets pageviews, but still no recording and no autocapture', () => {
     expect(posthogSettings(CONFIG, 'host', location)).toMatchObject({
       person_profiles: 'identified_only',
+      // Never shared with sibling hosts (a booking host on the same site).
+      persistence: 'localStorage',
+      cross_subdomain_cookie: false,
       capture_pageview: 'history_change',
       autocapture: false,
       disable_session_recording: true,
@@ -357,3 +361,15 @@ describe('track', () => {
     clearActiveAnalyticsPort(port);
   });
 });
+
+describe('expireSharedPosthogCookie', () => {
+  it('expires the site-wide identity cookie on the parent domain, and does nothing on a short host', () => {
+    const doc = { cookie: '' };
+    expireSharedPosthogCookie('phc_key', { location: { hostname: 'app.dcal.ai' } as Location, document: doc as Document });
+    expect(doc.cookie).toBe('ph_phc_key_posthog=; Domain=.dcal.ai; Path=/; Max-Age=0; SameSite=Lax');
+    const local = { cookie: '' };
+    expireSharedPosthogCookie('phc_key', { location: { hostname: 'localhost' } as Location, document: local as Document });
+    expect(local.cookie).toBe('');
+  });
+});
+

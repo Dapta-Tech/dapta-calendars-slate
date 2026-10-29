@@ -205,6 +205,23 @@ connection per minute (`busy cache: event=stale_served|read_failed conn=<hash>
 | `ENTITLEMENTS_API_URL` | — | only when `PREMIUM_FEATURES=locked` | no |
 | `ENTITLEMENTS_API_KEY` | — | only when `PREMIUM_FEATURES=locked` | **yes** |
 
+### Sign-in cookies need https in production
+
+In production (`NODE_ENV=production`) the dashboard's sign-in cookies are
+`__Host-` cookies with `Secure`, so the web must be reached over https, or on
+localhost. A TLS-terminating proxy in front of it is fine: the browser sees
+https. A production web served over plain http to other hosts cannot sign
+anyone in (it could not keep a `Secure` cookie before either).
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `PUBLIC_BOOKING_URL` | — (booking pages on `PUBLIC_APP_URL`) | booking pages are served from a host of their own (cloud: `https://book.<domain>`); set the same value on the web and the API | no |
+
+Set it only together with that host. From the moment it names an origin other
+than `PUBLIC_APP_URL`, the web stops reading the session cookie's pre-`__Host-`
+name, because a page on that other host could have planted one: a session
+that has not moved to the `__Host-` name by then signs in once more.
+
 ### Tracking and pixels per event type
 
 | Var | Default | Required when | Secret? |
