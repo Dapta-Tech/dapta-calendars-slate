@@ -1,3 +1,5 @@
+import { httpOrigin } from '@slate/config/url';
+import { EMBED_PARAM, isEmbedValue } from '@/lib/embed-mode';
 import { isProductPath } from '@/lib/theme';
 
 /**
@@ -25,19 +27,10 @@ export type BookingRedirectMode = 'off' | 'temporary' | 'permanent';
 
 type Env = Record<string, string | undefined>;
 
-function originOf(value: string | undefined): string | null {
-  if (!value?.trim()) return null;
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null;
-  } catch {
-    return null;
-  }
-}
 
 /** The app's own origin (`PUBLIC_APP_URL`), or null when unset or not a URL. */
 export function appOrigin(env: Env = process.env): string | null {
-  return originOf(env.PUBLIC_APP_URL);
+  return httpOrigin(env.PUBLIC_APP_URL);
 }
 
 /**
@@ -45,7 +38,7 @@ export function appOrigin(env: Env = process.env): string | null {
  * the app's origin (unset, not a URL, or the same origin as the app).
  */
 export function bookingOrigin(env: Env = process.env): string | null {
-  const booking = originOf(env.PUBLIC_BOOKING_URL);
+  const booking = httpOrigin(env.PUBLIC_BOOKING_URL);
   if (!booking) return null;
   return booking === appOrigin(env) ? null : booking;
 }
@@ -171,15 +164,9 @@ export function routeForHost(
   return { kind: 'next', bookingHost: false };
 }
 
-/**
- * The query asks for embed mode: `embed=1` or `embed=true`, first value,
- * trimmed, any case. The same rule as `isEmbedRequest` (`lib/embed.ts`), which
- * this module cannot import: it runs in the middleware, and that one pulls in
- * `@slate/types`.
- */
+/** The query asks for embed mode, by the one rule the pages use (`lib/embed-mode.ts`). */
 function inEmbedMode(search: string): boolean {
-  const raw = new URLSearchParams(search).get('embed')?.trim().toLowerCase();
-  return raw === '1' || raw === 'true';
+  return isEmbedValue(new URLSearchParams(search).get(EMBED_PARAM));
 }
 
 function isStateChangingGet(path: string): boolean {

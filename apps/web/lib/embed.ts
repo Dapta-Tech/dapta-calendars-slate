@@ -1,4 +1,5 @@
 import { bookingPageStyleSchema } from '@slate/types';
+import { EMBED_PARAM, isEmbedValue } from '@/lib/embed-mode';
 
 /**
  * Inline embed mode (E) — the one place that decides what `?embed=1` means.
@@ -10,7 +11,7 @@ import { bookingPageStyleSchema } from '@slate/types';
  */
 
 /** The query keys the embed understands, in the order the snippet writes them. */
-export const EMBED_PARAM = 'embed';
+export { EMBED_PARAM };
 
 /**
  * The class the routes hang on `BrandedShell` in embed mode.
@@ -107,15 +108,9 @@ function one(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-/**
- * `embed=1` turns the mode on; `embed=true` is accepted because a host
- * hand-editing a snippet writes it about as often. Anything else — including
- * `embed=0` and a bare `?embed` — is not embed mode: the failure direction
- * that matters is a page accidentally rendering AS an embed, not one failing to.
- */
+/** Whether the query asks for embed mode (`isEmbedValue`, `lib/embed-mode.ts`), first value of the key. */
 export function isEmbedRequest(params: RawSearchParams | undefined): boolean {
-  const raw = one(params?.[EMBED_PARAM])?.trim().toLowerCase();
-  return raw === '1' || raw === 'true';
+  return isEmbedValue(one(params?.[EMBED_PARAM]));
 }
 
 /**

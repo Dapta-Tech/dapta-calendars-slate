@@ -1,4 +1,5 @@
 import type { ServerEnv } from '@slate/config/env';
+import { httpOrigin } from '@slate/config/url';
 
 /**
  * The base every public booking link names: `PUBLIC_BOOKING_URL` when booking
@@ -8,7 +9,7 @@ import type { ServerEnv } from '@slate/config/env';
 export function publicBookingBase(env: Pick<ServerEnv, 'PUBLIC_APP_URL' | 'PUBLIC_BOOKING_URL'>): string {
   // The booking host's ORIGIN (as the web reads it): a path or query on the
   // setting would name pages the web never serves.
-  return originOf(env.PUBLIC_BOOKING_URL) ?? env.PUBLIC_APP_URL.replace(/\/+$/, '');
+  return httpOrigin(env.PUBLIC_BOOKING_URL) ?? env.PUBLIC_APP_URL.replace(/\/+$/, '');
 }
 
 /**
@@ -20,7 +21,7 @@ export function publicBookingBase(env: Pick<ServerEnv, 'PUBLIC_APP_URL' | 'PUBLI
  * Null when they come through the single-origin allowlist instead, or not at all.
  */
 export function hostScriptsOriginFor(env: Pick<ServerEnv, 'PUBLIC_APP_URL' | 'PUBLIC_BOOKING_URL'> | undefined): string | null {
-  return env && bookingHostIsSeparate(env) ? originOf(env.PUBLIC_BOOKING_URL) : null;
+  return env && bookingHostIsSeparate(env) ? httpOrigin(env.PUBLIC_BOOKING_URL) : null;
 }
 
 /**
@@ -30,17 +31,6 @@ export function hostScriptsOriginFor(env: Pick<ServerEnv, 'PUBLIC_APP_URL' | 'PU
  * them only on that origin).
  */
 export function bookingHostIsSeparate(env: Pick<ServerEnv, 'PUBLIC_APP_URL' | 'PUBLIC_BOOKING_URL'> | undefined): boolean {
-  const booking = originOf(env?.PUBLIC_BOOKING_URL);
-  return !!booking && booking !== originOf(env?.PUBLIC_APP_URL);
-}
-
-/** As the web reads it: an http(s) URL's origin, else null. */
-function originOf(value: string | undefined): string | null {
-  if (!value?.trim()) return null;
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null;
-  } catch {
-    return null;
-  }
+  const booking = httpOrigin(env?.PUBLIC_BOOKING_URL);
+  return !!booking && booking !== httpOrigin(env?.PUBLIC_APP_URL);
 }
