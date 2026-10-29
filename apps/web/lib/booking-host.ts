@@ -81,8 +81,13 @@ export function isBookingPath(path: string): boolean {
 }
 
 /**
- * Route handlers that change the signed-in state on a GET (sign out, refresh,
- * reset or switch the workspace, install the developer skill). A sibling host
+ * Route handlers that change the signed-in state on a GET (start a sign-in,
+ * sign out, refresh, reset or switch the workspace, install the developer
+ * skill). Starting a sign-in counts: it sets the short-lived OAuth state
+ * cookie, and the callback's only binding is that the cookie exists (the
+ * identity service does not echo a state), so a sign-in started by another
+ * host's script would let that script finish it with a session of its own
+ * choosing (login CSRF). A sibling host
  * on the same site can make the browser request them with the session cookie
  * from an image, a script or a fetch; on the app host those same-site
  * subresource requests are refused. A full-page navigation is not: any site
@@ -91,6 +96,7 @@ export function isBookingPath(path: string): boolean {
  * started by a click on the landing) arrive as same-site navigations.
  */
 const STATE_CHANGING_GETS: readonly string[] = [
+  '/api/auth/login',
   '/api/auth/logout',
   '/api/auth/refresh',
   '/api/workspace/reset',
