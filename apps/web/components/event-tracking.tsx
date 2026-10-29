@@ -48,7 +48,10 @@ export function EventTracking({
   if (!hasAnyTracking(t)) return null;
   return (
     <>
-      {gtmId ? (
+      {/* GTM's no-JavaScript container, only where no booking host is set: the
+          server cannot tell which origin the page is served on, and a booking
+          page needs JavaScript to book anyway. */}
+      {gtmId && hostScriptsOrigin === null ? (
         <noscript data-testid="tracking-gtm-noscript">
           <iframe src={gtmNoscriptSrc(gtmId)} height="0" width="0" className="hidden" title="Google Tag Manager" />
         </noscript>

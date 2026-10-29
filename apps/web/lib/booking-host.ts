@@ -160,12 +160,26 @@ export function routeForHost(
   const mode = bookingRedirectMode(env);
   // A frame is not moved: an embed on a site whose CSP allows only the old
   // host as a frame source would break on the redirect's hop. It keeps
-  // booking there; the host-script tags stay off on that origin.
-  const framed = req.fetchDest === 'iframe' || req.fetchDest === 'frame';
+  // booking there; the host-script tags stay off on that origin. Told by
+  // `Sec-Fetch-Dest`, or, where a browser or webview sends no Fetch Metadata,
+  // by the embed mode every snippet's frame carries (an embed address opened
+  // in a tab by such a browser stays too, which only costs the move).
+  const framed = req.fetchDest === 'iframe' || req.fetchDest === 'frame' || (!req.fetchDest && inEmbedMode(req.search));
   if (mode !== 'off' && safe && !framed && isBookingPath(req.pathname)) {
     return { kind: 'redirect', url: `${booking}${req.pathname}${req.search}`, status: mode === 'permanent' ? 308 : 307 };
   }
   return { kind: 'next', bookingHost: false };
+}
+
+/**
+ * The query asks for embed mode: `embed=1` or `embed=true`, first value,
+ * trimmed, any case. The same rule as `isEmbedRequest` (`lib/embed.ts`), which
+ * this module cannot import: it runs in the middleware, and that one pulls in
+ * `@slate/types`.
+ */
+function inEmbedMode(search: string): boolean {
+  const raw = new URLSearchParams(search).get('embed')?.trim().toLowerCase();
+  return raw === '1' || raw === 'true';
 }
 
 function isStateChangingGet(path: string): boolean {

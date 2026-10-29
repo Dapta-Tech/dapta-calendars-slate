@@ -50,6 +50,12 @@ describe('EventTracking', () => {
     expect(html).not.toContain('<script');
   });
 
+  it('with a booking host of its own, server-renders no GTM container fallback (the server cannot tell the origin)', () => {
+    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '424242424242' }} hostScriptsOrigin="https://book.example.com" />);
+    expect(html).not.toContain('googletagmanager.com');
+    expect(html).toContain('<noscript data-testid="tracking-meta-pixel-noscript">');
+  });
+
   it('starts the tags after hydration', async () => {
     await mount({ gtmId: 'GTM-AB12', hubspotTrackingId: '7' });
     const srcs = [...document.head.querySelectorAll('script')].map((s) => s.src);

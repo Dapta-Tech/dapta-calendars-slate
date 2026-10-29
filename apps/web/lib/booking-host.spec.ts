@@ -88,7 +88,9 @@ describe('the app host and older aliases', () => {
     for (const host of ['app.dcal.ai', 'calendar.dapta.ai', 'calendars.dapta.ai']) {
       for (const [path, search] of PUBLIC) {
         for (const method of ['GET', 'HEAD']) {
-          expect(routeForHost(req(host, path, { search, method }), env('temporary'))).toEqual({ kind: 'redirect', url: `${BOOK}${path}${search}`, status: 307 });
+          // A top-level visit, as a browser that sends Fetch Metadata tells it.
+          const top = { search, method, fetchDest: 'document', fetchMode: 'navigate' };
+          expect(routeForHost(req(host, path, top), env('temporary'))).toEqual({ kind: 'redirect', url: `${BOOK}${path}${search}`, status: 307 });
         }
       }
     }
@@ -97,11 +99,22 @@ describe('the app host and older aliases', () => {
   it('never moves a frame: an old embed keeps booking on its host, whatever the customer site’s CSP allows', () => {
     const [path, search] = PUBLIC[1];
     expect(routeForHost(req('app.dcal.ai', path, { search, fetchDest: 'iframe', fetchMode: 'navigate', fetchSite: 'cross-site' }), env('permanent'))).toEqual({ kind: 'next', bookingHost: false });
+    // A browser or webview that sends no Fetch Metadata: the snippet's embed mode tells the frame.
+    for (const embed of ['?embed=1', '?embed=TRUE&utm_source=x', '?embed=%201%20']) {
+      expect(routeForHost(req('app.dcal.ai', path, { search: embed }), env('permanent'))).toEqual({ kind: 'next', bookingHost: false });
+    }
+    // With Fetch Metadata saying top-level, an embed address opened in a tab moves like any other.
+    expect(routeForHost(req('app.dcal.ai', path, { search: '?embed=1', fetchDest: 'document', fetchMode: 'navigate' }), env('permanent'))).toMatchObject({ kind: 'redirect', status: 308 });
+    // Not embed mode: moved.
+    expect(routeForHost(req('app.dcal.ai', path, { search: '?embed=0' }), env('permanent'))).toMatchObject({ kind: 'redirect', status: 308 });
   });
 
   it('step 3 (permanent): the same, with a 308', () => {
     const [path, search] = PUBLIC[1];
-    expect(routeForHost(req('app.dcal.ai', path, { search }), env('permanent'))).toEqual({ kind: 'redirect', url: `${BOOK}${path}${search}`, status: 308 });
+    expect(routeForHost(req('app.dcal.ai', path, { search, fetchDest: 'document', fetchMode: 'navigate' }), env('permanent'))).toEqual({ kind: 'redirect', url: `${BOOK}${path}${search}`, status: 308 });
+    // Without Fetch Metadata, a page that is not an embed moves too.
+    const [plain] = PUBLIC[0];
+    expect(routeForHost(req('app.dcal.ai', plain), env('permanent'))).toEqual({ kind: 'redirect', url: `${BOOK}${plain}`, status: 308 });
   });
 
   it('never redirects a POST (an open tab’s Server Action), the dashboard, or a shared path', () => {
