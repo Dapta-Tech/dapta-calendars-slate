@@ -71,11 +71,28 @@ describe('the booking host', () => {
     for (const path of SHARED) expect(routeForHost(req('book.dcal.ai', path), env()).kind).toBe('next');
   });
 
-  it('sends the dashboard’s paths to the app host, path and query kept (temporary, so no browser keeps it), and refuses their writes', () => {
-    for (const path of PRODUCT) {
+  it('sends the dashboard’s pages to the app host, path and query kept (temporary, so no browser keeps it), and refuses their writes', () => {
+    for (const path of PRODUCT.filter((p) => !p.startsWith('/api/'))) {
       expect(routeForHost(req('book.dcal.ai', path, { search: '?x=1' }), env())).toEqual({ kind: 'redirect', url: `${APP}${path}?x=1`, status: 307 });
       expect(routeForHost(req('book.dcal.ai', path, { method: 'POST' }), env())).toEqual({ kind: 'refuse', status: 404 });
     }
+  });
+
+  it('answers every app route handler but the shared ones with a 404, and bounces none to the app host', () => {
+    const handlers = ['/api', '/api/auth/login', '/api/auth/logout', '/api/auth/callback', '/api/auth/refresh', '/api/workspace/reset', '/api/developers/skill', '/api/anything/else'];
+    for (const path of handlers) {
+      for (const method of ['GET', 'HEAD', 'POST']) {
+        // As a full-page navigation too: a booking page's script must not reach sign-in through this host.
+        const nav = { method, search: '?next=%2Fadmin', fetchSite: 'same-origin', fetchMode: 'navigate', fetchDest: 'document' };
+        expect(routeForHost(req('book.dcal.ai', path, nav), env())).toEqual({ kind: 'refuse', status: 404 });
+      }
+    }
+    // The shared one is still served here: an open booking page reads later months from its own origin.
+    expect(routeForHost(req('book.dcal.ai', '/api/availability', { search: '?accountCode=acme' }), env())).toEqual({ kind: 'next', bookingHost: true });
+    // A booking page whose path only starts with "api" is not a route handler, and a
+    // look-alike of the shared one is not shared.
+    expect(routeForHost(req('book.dcal.ai', '/apiary/alex/intro'), env()).kind).not.toBe('refuse');
+    expect(routeForHost(req('book.dcal.ai', '/api/availabilityx'), env())).toEqual({ kind: 'refuse', status: 404 });
   });
 });
 
@@ -124,7 +141,7 @@ describe('the app host and older aliases', () => {
 
   it('refuses a write another host of the same site made the browser send, and a subresource GET that changes the signed-in state', () => {
     expect(routeForHost(req('app.dcal.ai', '/admin/event-types', { method: 'POST', fetchSite: 'same-site' }), env())).toEqual({ kind: 'refuse', status: 403 });
-    for (const path of ['/api/auth/login', '/api/auth/logout', '/api/auth/refresh', '/api/workspace/reset', '/api/developers/skill', '/admin/join/acme']) {
+    for (const path of ['/api/auth/login', '/api/auth/callback', '/api/auth/logout', '/api/auth/refresh', '/api/workspace/reset', '/api/developers/skill', '/admin/join/acme']) {
       // An <img> or a fetch from the booking host: refused.
       expect(routeForHost(req('app.dcal.ai', path, { fetchSite: 'same-site', fetchMode: 'no-cors', fetchDest: 'image' }), env())).toEqual({ kind: 'refuse', status: 403 });
       // A frame another host placed is not the person navigating either.

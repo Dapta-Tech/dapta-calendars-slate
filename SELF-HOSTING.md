@@ -222,7 +222,7 @@ origin with a signed-in session. Cloud: `app.<domain>` for the dashboard,
 
 | Var | Default | Set on | What it does |
 |---|---|---|---|
-| `PUBLIC_BOOKING_URL` | — (booking pages on `PUBLIC_APP_URL`) | web and API, same value | the booking host: it serves every booking page and sends the dashboard's paths to `PUBLIC_APP_URL`; the links the app writes (manage links in emails, MCP booking links, the dashboard's copy, open and embed snippets) name it; every workspace may load Google Tag Manager, Google Analytics and HubSpot, which start only on that host |
+| `PUBLIC_BOOKING_URL` | — (booking pages on `PUBLIC_APP_URL`) | web and API, same value | the booking host: it serves every booking page, sends the dashboard's pages to `PUBLIC_APP_URL` and answers the app's route handlers (`/api/*`, except `/api/availability`) with a 404; the links the app writes (manage links in emails, MCP booking links, the dashboard's copy, open and embed snippets) name it; every workspace may load Google Tag Manager, Google Analytics and HubSpot, which start only on that host |
 | `BOOKING_HOST_REDIRECTS` | `off` | web | `temporary` (307) or `permanent` (308): every other host answers a booking page's GET with a redirect to the same path and query on the booking host |
 
 Move in steps, each undone by reverting its setting:
