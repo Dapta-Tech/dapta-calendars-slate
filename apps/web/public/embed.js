@@ -22,6 +22,12 @@
   'use strict';
 
   var MESSAGE_TYPE = 'dapta-calendars:resize';
+  /* The booking page asks for the campaign this page was opened with, so a
+     booking made in the frame keeps it (a frame's own URL rarely carries one). */
+  var CONTEXT_REQUEST_TYPE = 'dapta-calendars:context-request';
+  var CONTEXT_TYPE = 'dapta-calendars:context';
+  var UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+  var MAX_UTM_VALUE = 128;
   var SELECTOR = 'iframe[data-dapta-calendars]';
   /* A frame taller than this is a runaway measurement, not a booking page. */
   var MAX_HEIGHT = 20000;
@@ -32,6 +38,35 @@
 
   if (typeof window === 'undefined' || !window.addEventListener) return;
 
+  /* The five utm_* keys of this page's own address, and nothing else: no
+     path, no other parameter, no cookie. */
+  function pageUtm() {
+    var out = {};
+    var found = false;
+    try {
+      var params = new URLSearchParams(window.location.search);
+      for (var i = 0; i < UTM_KEYS.length; i++) {
+        var value = params.get(UTM_KEYS[i]);
+        if (value && value.length <= MAX_UTM_VALUE) {
+          out[UTM_KEYS[i]] = value;
+          found = true;
+        }
+      }
+    } catch (e) {
+      return null;
+    }
+    return found ? out : null;
+  }
+
+  /* The frame this page placed whose document posted `source`, or null. */
+  function frameOf(source) {
+    var frames = document.querySelectorAll(SELECTOR);
+    for (var i = 0; i < frames.length; i++) {
+      if (frames[i].contentWindow === source) return frames[i];
+    }
+    return null;
+  }
+
   window.addEventListener(
     'message',
     function (event) {
@@ -39,6 +74,13 @@
       /* Every page on the internet may post here. Read nothing until the
          payload is the exact shape this script published. */
       if (!data || typeof data !== 'object') return;
+      if (data.type === CONTEXT_REQUEST_TYPE) {
+        /* Answered only to a frame this page placed, and only to the origin
+           that asked, which is that frame's document wherever it now lives. */
+        if (!frameOf(event.source) || !event.origin || event.origin === 'null') return;
+        event.source.postMessage({ type: CONTEXT_TYPE, utm: pageUtm() }, event.origin);
+        return;
+      }
       if (data.type !== MESSAGE_TYPE) return;
 
       var height = Number(data.height);

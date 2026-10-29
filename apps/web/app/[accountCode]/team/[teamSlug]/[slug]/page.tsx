@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { bookingPageTracking } from '@/lib/booking-page-tracking';
+import { utmFromQuery } from '@/lib/booking-utm';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { eventPageTitle, getMessages, schedulingMethodLabel, t } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
@@ -156,6 +158,7 @@ export default async function TeamBookingPage({
           methodLabel={schedulingMethodLabel(messages, listing.schedulingType)}
           nowUtc={from}
           embed={embed}
+          utm={utmFromQuery(query)}
           showBranding={brandingShown(team)}
         />
       </main>
@@ -171,7 +174,7 @@ export default async function TeamBookingPage({
       />
       {/* The host's own tags for this event (GTM, Meta Pixel, their PostHog,
           HubSpot), apart from dCal's anonymous counts above. Nothing without ids. */}
-      <EventTracking tracking={listing.tracking} />
+      <EventTracking {...bookingPageTracking(listing)} />
     </BrandedShell>
   );
 }

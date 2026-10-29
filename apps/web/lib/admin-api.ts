@@ -11,7 +11,7 @@
  * treats as "sign in again", so the session survives and the page shows
  * something the person can retry.
  */
-import type { BrandKit, EventTracking, WorkspaceView } from '@slate/types';
+import type { BrandKit, EventTracking, SuccessRedirectData, WorkspaceView } from '@slate/types';
 import type {
   EventLocationDto,
   EventReminder,
@@ -165,9 +165,12 @@ export interface Me {
    */
   onboardingRequired?: boolean;
   setupRequired?: boolean;
-  /** Whether this deployment lets the workspace load tracking and pixels on its
-   *  booking pages (`EVENT_TRACKING_ACCOUNTS`). Absent from an older API: off. */
+  /** The earlier name of `eventTrackingHostScriptsEnabled`, same answer. */
   eventTrackingEnabled?: boolean;
+  /** Whether this deployment lets the workspace load Google Tag Manager,
+   *  Google Analytics and HubSpot on its booking pages (`EVENT_TRACKING_ACCOUNTS`).
+   *  Meta Pixel and PostHog need no permission. Absent from an older API: off. */
+  eventTrackingHostScriptsEnabled?: boolean;
 }
 
 export type AccountRole = 'owner' | 'admin' | 'member';
@@ -434,6 +437,8 @@ export interface EventType {
   /** Where the booking page sends the invitee after booking; null ⇒ the
    *  confirmation stays. Optional on the wire, so an older API reads as none. */
   successRedirectUrl?: string | null;
+  /** What the redirect after booking carries to that page; null = nothing. */
+  successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page; null ⇒ none. Optional on the wire. */
   tracking?: EventTracking | null;
 }

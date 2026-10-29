@@ -40,6 +40,7 @@ import type { CalendarProvider } from '@slate/calendar';
 import { CALENDAR, DB, EMAIL, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE } from './tokens';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
+import { publicBookingBase } from './booking-origin';
 
 /**
  * Thrown by `deliver` when a row must be deliberately NOT sent (e.g. tenant
@@ -766,7 +767,7 @@ export class EmailEffects {
       previousStartUtc: extra.previousStartUtc ?? null,
       bookingLink:
         ctx.bookAgain && this.env
-          ? `${this.env.PUBLIC_APP_URL}/${ctx.bookAgain.accountCode}/${ctx.bookAgain.handle}/${ctx.bookAgain.slug}`
+          ? `${publicBookingBase(this.env)}/${ctx.bookAgain.accountCode}/${ctx.bookAgain.handle}/${ctx.bookAgain.slug}`
           : null,
       // DTSTAMP = the moment the notification was assembled (not the event start).
       stamp: new Date().toISOString(),

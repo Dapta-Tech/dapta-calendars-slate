@@ -20,18 +20,38 @@ import {
  * the same with or without them; the `<noscript>` fallbacks are the only
  * markup, for the two vendors that have one.
  */
-export function EventTracking({ tracking }: { tracking: EventTracking | null | undefined }) {
+export function EventTracking({
+  tracking,
+  hostScriptsOrigin,
+}: {
+  tracking: EventTracking | null | undefined;
+  /**
+   * The booking host's origin when booking pages have one
+   * (`bookingPageTracking`, which pages spread in): Google Tag Manager, Google
+   * Analytics and HubSpot then start only when this document is on it, so a
+   * page still served on the dashboard's origin (an old link, an old embed)
+   * never runs them next to a session. Null: no such host, and the API's
+   * allowlist alone decides. Required, so a new page cannot forget it.
+   */
+  hostScriptsOrigin: string | null;
+}) {
   const t = resolveTracking(tracking);
-  const { gtmId, metaPixelId, posthogKey, posthogHost, hubspotTrackingId } = t;
+  const { gtmId, ga4Id, metaPixelId, posthogKey, posthogHost, hubspotTrackingId } = t;
   useEffect(() => {
-    const ids = { gtmId, metaPixelId, posthogKey, posthogHost, hubspotTrackingId };
+    const offOrigin = hostScriptsOrigin !== null && window.location.origin !== hostScriptsOrigin;
+    const ids = offOrigin
+      ? { gtmId: null, ga4Id: null, metaPixelId, posthogKey, posthogHost, hubspotTrackingId: null }
+      : { gtmId, ga4Id, metaPixelId, posthogKey, posthogHost, hubspotTrackingId };
     if (hasAnyTracking(ids)) startTracking(window as TrackingWindow, ids);
-  }, [gtmId, metaPixelId, posthogKey, posthogHost, hubspotTrackingId]);
+  }, [gtmId, ga4Id, metaPixelId, posthogKey, posthogHost, hubspotTrackingId, hostScriptsOrigin]);
 
   if (!hasAnyTracking(t)) return null;
   return (
     <>
-      {gtmId ? (
+      {/* GTM's no-JavaScript container, only where no booking host is set: the
+          server cannot tell which origin the page is served on, and a booking
+          page needs JavaScript to book anyway. */}
+      {gtmId && hostScriptsOrigin === null ? (
         <noscript data-testid="tracking-gtm-noscript">
           <iframe src={gtmNoscriptSrc(gtmId)} height="0" width="0" className="hidden" title="Google Tag Manager" />
         </noscript>

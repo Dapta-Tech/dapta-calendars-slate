@@ -72,7 +72,8 @@ describe('GET /api/auth/login keeps the page the sign-in returns to', () => {
   const fetchMock = vi.fn();
   const PAGE = '/admin/bookings/6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10';
   const withNext = (v: string, extra = '') => `/api/auth/login?${extra}next=${encodeURIComponent(v)}`;
-  const returnCookie = () => cookieJar.set.mock.calls.find((c) => c[0] === 'slate_return_to');
+  // A parked target, not the expired write that removes a stale one.
+  const returnCookie = () => cookieJar.set.mock.calls.find((c) => c[0] === 'slate_return_to' && c[1] !== '');
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -104,7 +105,7 @@ describe('GET /api/auth/login keeps the page the sign-in returns to', () => {
       await GET(req(withNext(target)));
 
       expect(returnCookie()).toBeUndefined();
-      expect(cookieJar.delete).toHaveBeenCalledWith('slate_return_to');
+      expect(cookieJar.set).toHaveBeenCalledWith('slate_return_to', '', expect.objectContaining({ maxAge: 0 }));
     },
   );
 
@@ -112,7 +113,7 @@ describe('GET /api/auth/login keeps the page the sign-in returns to', () => {
     await GET(req('/api/auth/login'));
 
     expect(returnCookie()).toBeUndefined();
-    expect(cookieJar.delete).toHaveBeenCalledWith('slate_return_to');
+    expect(cookieJar.set).toHaveBeenCalledWith('slate_return_to', '', expect.objectContaining({ maxAge: 0 }));
   });
 
   it('the error card keeps it, so its retry returns to the page too', async () => {

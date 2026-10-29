@@ -8,7 +8,8 @@ import {
   getAccountByCode,
   getBrandingSwitchByCode,
   getAvailability,
-  getBookingSuccessRedirectUrl,
+  getBookingSuccessRedirect,
+  setBookingUtm,
   getPublicProfile,
   getBookingRescheduleAvailability,
   getTeamAvailability,
@@ -21,11 +22,12 @@ import {
   parseJsonColumn,
   sql,
 } from '@slate/db';
-import { isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
+import { bookingRedirectUrl, isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { AnalyticsEffects, type BookingChannel } from './analytics-effects';
 import { trackingAllowedFor } from './event-tracking-gate';
+import { bookingHostIsSeparate, hostScriptsOriginFor, publicBookingBase } from './booking-origin';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
@@ -43,6 +45,9 @@ import {
   type OneOffLinkTargetView,
   type PublicProfile,
   type TeamProfile,
+  hasHostScriptTracking,
+  normalizeBookingUtm,
+  withoutHostScriptTracking,
 } from '@slate/types';
 import { z } from 'zod';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
@@ -179,34 +184,55 @@ export class BookingService {
   }
 
   private manageUrl(uid: string, token: string): string {
-    return `${this.env.PUBLIC_APP_URL}/manage/${uid}?token=${token}`;
+    return `${publicBookingBase(this.env)}/manage/${uid}?token=${token}`;
   }
 
   async profile(accountCode: string, handle: string): Promise<PublicProfile | null> {
     const p = await getPublicProfile(this.db, accountCode, handle);
     if (!p) return null;
-    const tracking = await this.trackingAllowedByCode(accountCode);
     const view = p as PublicProfile;
+    const scripts = await this.hostScriptsFor(accountCode, view.eventTypes);
     return {
       ...view,
-      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: tracking ? e.tracking : null })),
+      eventTypes: view.eventTypes.map((e) => this.withHostScriptsOrigin({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
       showBranding: await this.showBrandingByCode(accountCode),
     };
   }
 
   /**
-   * Whether this workspace's booking pages may load the host's own tags
-   * (`EVENT_TRACKING_ACCOUNTS`, see `event-tracking-gate.ts`). Every public
-   * read that carries tracking ids runs it, so turning a workspace off takes
-   * the tags off its pages at once, whatever is still stored.
+   * The event's tracking as its booking page may load it. Meta Pixel and
+   * PostHog always (vendor code only); Google Tag Manager, Google Analytics and
+   * HubSpot only for a workspace the deployment allows (`EVENT_TRACKING_ACCOUNTS`,
+   * see `event-tracking-gate.ts`). Every public read that carries tracking ids
+   * runs it, so turning a workspace off takes those three off its pages at
+   * once, whatever is still stored.
    */
   private async gatedEventType<T extends { tracking?: unknown }>(eventType: T, accountCode: string): Promise<T> {
-    if (!eventType.tracking) return eventType;
-    return (await this.trackingAllowedByCode(accountCode)) ? eventType : { ...eventType, tracking: undefined };
+    if (!hasHostScriptTracking(eventType.tracking)) return eventType;
+    if (await this.trackingAllowedByCode(accountCode)) return this.withHostScriptsOrigin(eventType);
+    return { ...eventType, tracking: withoutHostScriptTracking(eventType.tracking) ?? undefined };
+  }
+
+  /**
+   * Name the only origin a page may start the host-script tags on, when they
+   * came through because booking pages have a host of their own. The web keeps
+   * them only when its own setting names the same origin and starts them only
+   * there, so a web whose setting is missing, late or different never runs
+   * them (fail closed).
+   */
+  private withHostScriptsOrigin<T extends { tracking?: unknown }>(eventType: T): T {
+    const origin = hostScriptsOriginFor(this.env);
+    return origin && hasHostScriptTracking(eventType.tracking) ? { ...eventType, trackingHostScriptsOrigin: origin } : eventType;
+  }
+
+  /** Whether a listing's GTM, GA4 and HubSpot ids may stay; asked only when one has them. */
+  private async hostScriptsFor(accountCode: string, eventTypes: ReadonlyArray<{ tracking?: unknown }>): Promise<boolean> {
+    if (!eventTypes.some((e) => hasHostScriptTracking(e.tracking))) return true;
+    return this.trackingAllowedByCode(accountCode);
   }
 
   private async trackingAllowedByCode(accountCode: string): Promise<boolean> {
-    if (!this.env.EVENT_TRACKING_ACCOUNTS?.trim()) return false;
+    if (!this.env.EVENT_TRACKING_ACCOUNTS?.trim() && !bookingHostIsSeparate(this.env)) return false;
     const account = await getAccountByCode(this.db, accountCode);
     return !!account && trackingAllowedFor(this.env, { code: account.code, vanitySlug: account.vanity_slug });
   }
@@ -540,6 +566,17 @@ export class BookingService {
     // Idempotent replay returns an empty token → do NOT reissue a manage link
     // (single-active-token invariant); only mint a URL for a fresh booking.
     const manageUrl = outcome.manageToken ? this.manageUrl(b.uid, outcome.manageToken) : undefined;
+    // The campaign the visitor came from, kept on a fresh booking before the
+    // webhook reads it. A failed write costs the UTMs, never the booking.
+    // Anything else writes nothing and answers the request's own campaign: a
+    // seat on an existing group booking (the row keeps its first campaign;
+    // per-seat UTMs are a follow-up) and a replay, so a retry's answer and
+    // redirect keep their UTMs. Never the row's on a replay: on a group slot
+    // that is the first seat-taker's, another visitor's campaign. A replay by
+    // key carries the same request, so the same campaign.
+    const utm = outcome.manageToken
+      ? await setBookingUtm(this.db, b.uid, input.utm).catch(() => null)
+      : normalizeBookingUtm(input.utm);
 
     // A seat on an existing group booking: its calendar event already exists,
     // with one guest fewer and the text it was first written with. Rewrite it
@@ -587,6 +624,7 @@ export class BookingService {
                 startUtc,
                 endUtc,
                 title: b.title,
+                ...(utm ? { utm } : {}),
               })
             : undefined,
         )
@@ -596,7 +634,19 @@ export class BookingService {
     // Redirect after booking, read once the booking is committed, so only an
     // invitee who booked learns the address. It must not throw from here
     // (#102): a failed read costs the redirect, never the confirmation.
-    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, b.uid).catch(() => null);
+    const redirect = await getBookingSuccessRedirect(this.db, b.uid).catch(() => null);
+    const successRedirectUrl = redirect
+      ? bookingRedirectUrl(redirect.url, redirect.data, {
+          eventTypeSlug: redirect.eventTypeSlug,
+          eventTypeName: redirect.eventTypeName,
+          startUtc,
+          endUtc,
+          status: b.status,
+          hostName: b.hostName,
+          utm,
+          invitee: { name: b.attendee.name, email: b.attendee.email },
+        })
+      : null;
 
     return {
       uid: b.uid,
@@ -609,6 +659,7 @@ export class BookingService {
       calendarDescription: b.calendarDescription || undefined,
       manageUrl,
       ...(successRedirectUrl ? { successRedirectUrl } : {}),
+      ...(utm ? { utm } : {}),
       deduplicated: outcome.deduplicated || undefined,
     };
   }
@@ -925,11 +976,11 @@ export class BookingService {
   async teamProfile(accountCode: string, teamSlug: string): Promise<TeamProfile | null> {
     const t = await getTeamProfile(this.db, accountCode, teamSlug);
     if (!t) return null;
-    const tracking = await this.trackingAllowedByCode(accountCode);
     const view = t as TeamProfile;
+    const scripts = await this.hostScriptsFor(accountCode, view.eventTypes);
     return {
       ...view,
-      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: tracking ? e.tracking : null })),
+      eventTypes: view.eventTypes.map((e) => this.withHostScriptsOrigin({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
       showBranding: await this.showBrandingByCode(accountCode),
     };
   }
@@ -1012,6 +1063,8 @@ export class BookingService {
       metadata?: Record<string, unknown>;
       /** The booking page's language, as `book()` reads `locale`; unvalidated here. */
       locale?: unknown;
+      /** The campaign the visitor came from; cleaned by `normalizeBookingUtm`. */
+      utm?: unknown;
     },
     /**
      * Caller-supplied context, NEVER request body. `PublicController` passes
@@ -1102,6 +1155,13 @@ export class BookingService {
     this.calendar.onBookingAccepted(out.uid);
     this.crm?.onBookingAccepted(out.uid);
     const manageUrl = out.manageToken ? this.manageUrl(out.uid, out.manageToken) : undefined;
+    // As on the personal path: a fresh booking keeps its campaign before the
+    // webhook reads it, and anything else answers the request's own. (The CRM
+    // write-out above does not read it.) Every team booking is fresh today:
+    // `createTeamBooking` mints a token on each.
+    const utm = out.manageToken
+      ? await setBookingUtm(this.db, out.uid, body.utm).catch(() => null)
+      : normalizeBookingUtm(body.utm);
     void this.email.enqueueConfirmation(out.uid, { manageUrl });
     void this.email.enqueueReminders(out.uid, { manageUrl });
     void this.email.enqueueFollowUps(out.uid, { manageUrl });
@@ -1109,6 +1169,7 @@ export class BookingService {
       uid: out.uid,
       status: 'accepted',
       startUtc: body.startUtc,
+      ...(utm ? { utm } : {}),
     });
     // Fresh bookings only, as on the personal path: a replay mints no token.
     if (out.manageToken) {
@@ -1160,7 +1221,19 @@ export class BookingService {
     const startUtc = new Date(Number(row?.start_ms ?? Date.parse(body.startUtc))).toISOString();
     const endUtc = row ? new Date(Number(row.end_ms)).toISOString() : startUtc;
     // As on the personal path: read after the commit, and never thrown.
-    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, out.uid).catch(() => null);
+    const redirect = await getBookingSuccessRedirect(this.db, out.uid).catch(() => null);
+    const successRedirectUrl = redirect
+      ? bookingRedirectUrl(redirect.url, redirect.data, {
+          eventTypeSlug: redirect.eventTypeSlug,
+          eventTypeName: redirect.eventTypeName,
+          startUtc,
+          endUtc,
+          status: (row?.status as string | undefined) ?? 'accepted',
+          hostName: row?.host_name ?? null,
+          utm,
+          invitee: { name: body.attendee.name, email: body.attendee.email },
+        })
+      : null;
     return {
       uid: out.uid,
       // A team booking is created `accepted` (it has no confirmation gate), so
@@ -1182,6 +1255,7 @@ export class BookingService {
       hostMemberId: out.hostMemberId,
       manageUrl,
       ...(successRedirectUrl ? { successRedirectUrl } : {}),
+      ...(utm ? { utm } : {}),
     };
   }
 }

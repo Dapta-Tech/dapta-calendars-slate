@@ -104,6 +104,7 @@ import { assertTemplates, templateFieldLabel } from './template-validation';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
+import { publicBookingBase } from './booking-origin';
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
 @Injectable()
@@ -338,7 +339,7 @@ export class AdminService {
     if (outcome.ok && outcome.manageToken) {
       const b = outcome.booking;
       const manageUrl = this.env
-        ? `${this.env.PUBLIC_APP_URL}/manage/${b.uid}?token=${outcome.manageToken}`
+        ? `${publicBookingBase(this.env)}/manage/${b.uid}?token=${outcome.manageToken}`
         : undefined;
       if (b.status === 'accepted') {
         void this.email.enqueueConfirmation(b.uid, { manageUrl });

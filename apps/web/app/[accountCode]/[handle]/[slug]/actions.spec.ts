@@ -125,3 +125,28 @@ describe('meetingLinkAction answers the join link and nothing else (F5)', () => 
     expect(api.getManageView).not.toHaveBeenCalled();
   });
 });
+
+describe('bookAction forwards the campaign the page carried', () => {
+  it('the five utm_* fields, cleaned, on a personal booking', async () => {
+    await bookAction(null, form({ utm_source: ' google ', utm_campaign: 'q4', utm_medium: '', gclid: 'abc' }));
+    expect(api.postBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ utm: { utm_source: 'google', utm_campaign: 'q4' } }),
+      undefined,
+    );
+  });
+
+  it('on a team booking too', async () => {
+    await bookAction(null, form({ kind: 'team', utm_source: 'linkedin' }));
+    expect(api.postTeamBooking).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ utm: { utm_source: 'linkedin' } }),
+      undefined,
+    );
+  });
+
+  it('nothing when the page carried none', async () => {
+    await bookAction(null, form({}));
+    expect(api.postBooking).toHaveBeenCalledWith(expect.not.objectContaining({ utm: expect.anything() }), undefined);
+  });
+});

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalyticsConfig } from '@slate/shared';
-import { connectPosthog, posthogSettings, resetPosthogForTests, scrubEvent, withoutQuery } from './posthog';
+import { POSTHOG_JS_VERSION, connectPosthog, posthogSettings, resetPosthogForTests, scrubEvent, withoutQuery } from './posthog';
 import { clearActiveAnalyticsPort, resetAnalytics, setActiveAnalyticsPort, track, type AnalyticsPort } from './port';
+import { expireSharedPosthogCookie } from './posthog';
 
 const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test', errors: true };
 
@@ -66,6 +67,9 @@ describe('posthogSettings', () => {
   it('a host gets pageviews, but still no recording and no autocapture', () => {
     expect(posthogSettings(CONFIG, 'host', location)).toMatchObject({
       person_profiles: 'identified_only',
+      // Never shared with sibling hosts (a booking host on the same site).
+      persistence: 'localStorage',
+      cross_subdomain_cookie: false,
       capture_pageview: 'history_change',
       autocapture: false,
       disable_session_recording: true,
@@ -263,8 +267,8 @@ describe('connectPosthog', () => {
     expect(global._i.map((i) => i[2])).toEqual(['calendars_visitor', 'calendars_host']);
     expect(global._i[0]![0]).toBe(CONFIG.key);
     expect(global._i[0]![1]).toMatchObject({ person_profiles: 'never', persistence: 'memory' });
-    const scripts = document.querySelectorAll<HTMLScriptElement>('script[src$="/static/array.js"]');
-    expect(Array.from(scripts).map((el) => el.src)).toEqual([`${CONFIG.host}/static/array.js`]);
+    const scripts = document.querySelectorAll<HTMLScriptElement>('script[src$="/array.js"]');
+    expect(Array.from(scripts).map((el) => el.src)).toEqual([`${CONFIG.host}/static/${POSTHOG_JS_VERSION}/array.js`]);
     // Calls before the library loads wait in the stub's queue for this name.
     port.capture('calendars_day_picked', { mode: 'personal' });
     expect(global['calendars_visitor']).toContainEqual(['capture', 'calendars_day_picked', { mode: 'personal' }]);
@@ -274,8 +278,8 @@ describe('connectPosthog', () => {
   it("loads the library from the vendor's own assets host when the host is the vendor's", () => {
     const own = { document, location: window.location } as unknown as Parameters<typeof connectPosthog>[2];
     connectPosthog({ ...CONFIG, host: 'https://us.i.posthog.com' }, 'visitor', own);
-    const script = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src$="/static/array.js"]')).at(-1);
-    expect(script?.src).toBe('https://us-assets.i.posthog.com/static/array.js');
+    const script = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src$="/array.js"]')).at(-1);
+    expect(script?.src).toBe(`https://us-assets.i.posthog.com/static/${POSTHOG_JS_VERSION}/array.js`);
   });
 
   it('initializes each audience once, under its own name', () => {
@@ -357,3 +361,16 @@ describe('track', () => {
     clearActiveAnalyticsPort(port);
   });
 });
+
+describe('expireSharedPosthogCookie', () => {
+  it('expires the site-wide identity cookie on the parent domain, and does nothing on a short host', () => {
+    const doc = { cookie: '' };
+    expireSharedPosthogCookie('phc_key', { location: { hostname: 'app.dcal.ai', protocol: 'https:' } as Location, document: doc as Document });
+    // Secure on https, or the browser keeps the Secure cookie posthog-js wrote.
+    expect(doc.cookie).toBe('ph_phc_key_posthog=; Domain=.dcal.ai; Path=/; Max-Age=0; SameSite=Lax; Secure');
+    const local = { cookie: '' };
+    expireSharedPosthogCookie('phc_key', { location: { hostname: 'localhost' } as Location, document: local as Document });
+    expect(local.cookie).toBe('');
+  });
+});
+

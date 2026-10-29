@@ -248,6 +248,12 @@ export const eventType = pgTable('event_type', {
    * saved before this existed. See migration 0036.
    */
   tracking: jsonb('tracking'),
+  /**
+   * What the redirect after booking carries to the host's page: 'event' or
+   * 'event_and_invitee' (`SUCCESS_REDIRECT_DATA_MODES` in @slate/types). NULL =
+   * the address as typed. See migration 0037 (pg).
+   */
+  successRedirectData: text('success_redirect_data'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -334,6 +340,12 @@ export const booking = pgTable('booking', {
    *  GLOBAL, so a raw caller-supplied key would be claimable across
    *  tenants. Go through `scopedIdempotencyKey` on every read and write. */
   idempotencyKey: text('idempotency_key').unique(),
+  /**
+   * The campaign the booking came from: `{ utm_source, utm_medium,
+   * utm_campaign, utm_term, utm_content }`, each optional (`bookingUtmSchema`
+   * in @slate/types). NULL = none. See migration 0037 (pg).
+   */
+  utm: jsonb('utm'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });

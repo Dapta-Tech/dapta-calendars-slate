@@ -65,9 +65,9 @@ export class HostController {
     // Product analytics. LAST and @Optional() for the same reason: absent, no
     // event is recorded, which is also what analytics being off does.
     @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
-    // EVENT_TRACKING_ACCOUNTS, for `eventTrackingEnabled` on /me. LAST and
+    // EVENT_TRACKING_ACCOUNTS, for `eventTrackingHostScriptsEnabled` on /me. LAST and
     // @Optional() for the same reason: absent, it reads false.
-    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS'>,
+    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS' | 'PUBLIC_APP_URL' | 'PUBLIC_BOOKING_URL'>,
   ) {}
 
   /**
@@ -81,10 +81,22 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     const [me, gates] = await Promise.all([this.admin.me(p), this.onboarding.gatesFor(p)]);
     if (!me) return me;
-    // Whether the event editor offers Tracking and pixels to this workspace
-    // (the save enforces it again, see `trackingAllowedFor`).
-    const eventTrackingEnabled = trackingAllowedFor(this.env, { code: me.accountShortCode, vanitySlug: me.vanitySlug });
-    return { ...me, ...gates, eventTrackingEnabled };
+    // Whether the event editor offers Google Tag Manager, Google Analytics and
+    // HubSpot to this workspace (the save enforces it again, see
+    // `trackingAllowedFor`). Meta Pixel and PostHog are offered to every owner
+    // and admin.
+    // `eventTrackingEnabled` is the earlier name of the same answer, kept for
+    // clients that still read it.
+    const eventTrackingHostScriptsEnabled = trackingAllowedFor(this.env, {
+      code: me.accountShortCode,
+      vanitySlug: me.vanitySlug,
+    });
+    return {
+      ...me,
+      ...gates,
+      eventTrackingEnabled: eventTrackingHostScriptsEnabled,
+      eventTrackingHostScriptsEnabled,
+    };
   }
 
   /**

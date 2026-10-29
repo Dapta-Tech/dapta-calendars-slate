@@ -205,18 +205,98 @@ connection per minute (`busy cache: event=stale_served|read_failed conn=<hash>
 | `ENTITLEMENTS_API_URL` | — | only when `PREMIUM_FEATURES=locked` | no |
 | `ENTITLEMENTS_API_KEY` | — | only when `PREMIUM_FEATURES=locked` | **yes** |
 
+### Sign-in cookies need https in production
+
+In production (`NODE_ENV=production`) the dashboard's sign-in cookies are
+`__Host-` cookies with `Secure`, so the web must be reached over https, or on
+localhost. A TLS-terminating proxy in front of it is fine: the browser sees
+https. A production web served over plain http to other hosts cannot sign
+anyone in (it could not keep a `Secure` cookie before either).
+
+### Booking pages on a host of their own
+
+Booking pages (personal, team, one-off links and the invitee's manage page) can
+live on a host apart from the dashboard, so the hosts' own tags never share an
+origin with a signed-in session. Cloud: `app.<domain>` for the dashboard,
+`book.<domain>` for booking pages.
+
+| Var | Default | Set on | What it does |
+|---|---|---|---|
+| `PUBLIC_BOOKING_URL` | — (booking pages on `PUBLIC_APP_URL`) | web and API, same value | the booking host: it serves every booking page and sends the dashboard's paths to `PUBLIC_APP_URL`; the links the app writes (manage links in emails, MCP booking links, the dashboard's copy, open and embed snippets) name it; every workspace may load Google Tag Manager, Google Analytics and HubSpot, which start only on that host |
+| `BOOKING_HOST_REDIRECTS` | `off` | web | `temporary` (307) or `permanent` (308): every other host answers a booking page's GET with a redirect to the same path and query on the booking host |
+
+Move in steps, each undone by reverting its setting:
+
+1. Point the new host at the web, then set `PUBLIC_BOOKING_URL` on the **web
+   first**. Once every web instance runs with it, set it on the **API**. To
+   roll back, take it off the API first. The API is what opens Google Tag
+   Manager, Google Analytics and HubSpot to every workspace and hands the
+   booking origin over with them. The web keeps them only when that origin
+   matches its own setting, and starts them only on it. With the setting on
+   the API alone, or the two apart, the web drops them. The order still
+   matters while instances roll: a web instance without the setting still
+   reads the session's pre-`__Host-` name, so the API may not open the tags
+   to every workspace until every instance has it. Both hosts now serve
+   booking pages, and new links name the new one. `PUBLIC_APP_URL` must be
+   set on the web too: the booking host sends the dashboard's paths there.
+2. Once every route type and your real traffic answer on the new host, set
+   `BOOKING_HOST_REDIRECTS=temporary`; after a stable month, `permanent`.
+
+From the moment `PUBLIC_BOOKING_URL` names an origin other than
+`PUBLIC_APP_URL`, the web stops reading the session cookie's pre-`__Host-`
+name, because a page on that other host could have planted one: a session
+that has not moved to the `__Host-` name by then signs in once more. Taking
+the setting off the web again makes it read that name again, and a cookie a
+tag planted meanwhile can still be in a browser. So once tags have run on the
+booking host, undo the move by taking the setting off the API (the tags stop)
+and keep it on the web, unless the booking host itself has to go.
+
+What keeps working: a POST is served where it lands (an open tab), except a
+write another host of the same site made the browser send, which the app host
+refuses; `/api/availability` and `embed.js` answer on both hosts; an embed's
+frame is never redirected, so a site whose CSP allows only the old host as a
+frame source keeps booking (new snippets name the booking host; Google Tag
+Manager, Google Analytics and HubSpot run only there). A host page that checks
+`event.origin` on the embed's messages must accept the booking host's origin
+for new snippets.
+
 ### Tracking and pixels per event type
+
+Owners and admins of every workspace can set a **Meta Pixel** and a **PostHog**
+project (US or EU cloud) on each event type, with no configuration here. Those
+load only the vendor's own code: each ID is checked against its vendor's format
+on save and again on every read, it reaches the page only as data (a URL query
+or a function argument), and the PostHog project can load nothing of its own
+(no remote config, flags, toolbar, surveys, site apps or extensions, on a pinned
+posthog-js release, with its ids kept in memory). A self-hosted PostHog address
+is refused, because posthog-js loads scripts from whatever host it is given.
+
+**Google Tag Manager**, **Google Analytics 4** and **HubSpot** are different: a
+GTM container can carry any script, a HubSpot portal decides which of its apps,
+pop-ups and ad pixels load, and gtag.js can load scripts from a server container
+named in the Google tag's settings. On this deployment they would run on the
+same origin as the dashboard and its session cookie, so a host could act as
+anyone signed in who opens their booking page. They load only for the
+workspaces you name:
 
 | Var | Default | Required when | Secret? |
 |---|---|---|---|
-| `EVENT_TRACKING_ACCOUNTS` | — (nobody) | to let workspaces load GTM, Meta Pixel, PostHog or HubSpot on their booking pages: account short codes or vanity slugs, comma-separated, or `*` for every workspace | no |
+| `EVENT_TRACKING_ACCOUNTS` | — (nobody) | to let workspaces load Google Tag Manager, Google Analytics 4 or HubSpot on their booking pages: account short codes or vanity slugs, comma-separated, or `*` for every workspace | no |
 
-An event's tags run that host's own JavaScript (a GTM container can carry any
-script) on the same origin as the dashboard and its session cookie, so a host
-could act as anyone signed in who opens their booking page. Only name
-workspaces you trust, or use `*` only when every workspace on the deployment is
-yours. Only owners and admins can set the ids. Taking a workspace off the list
-takes its tags off its pages at once.
+Only name workspaces you trust, or use `*` only when every workspace on the
+deployment is yours. Taking a workspace off the list takes its GTM, GA4 and
+HubSpot off its pages at once; its other IDs stay.
+
+What each tool hears: the page view, a day picked, a time picked and the
+booking (`booking_date_selected`, `booking_time_selected`, `booking_scheduled`
+on GTM, GA4 and PostHog; `BookingDateSelected`, `BookingTimeSelected` and the
+standard `Schedule` on Meta), each with the event type's slug, length, personal
+or team, the picked start and, once booked, accepted or pending. Never the
+invitee's name, email, answers or the booking's ID. GA4 runs on a data layer of
+its own, so a GTM container on the same page never hears an event twice. An
+embedded page posts the same steps to the framing page
+(`dapta-calendars.event_type_viewed`, `.date_selected`, `.time_selected`,
+`.booking_scheduled`).
 
 ### Onboarding cohort probe (first-run wizard)
 

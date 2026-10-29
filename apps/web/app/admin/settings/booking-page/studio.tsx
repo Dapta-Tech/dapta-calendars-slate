@@ -111,8 +111,8 @@ export interface StudioInit {
   accountCode: string;
   /** Vanity claim state: the shareable-link section renders from this. */
   vanity: { vanitySlug: string | null; shortCode: string; canClaim: boolean };
-  /** Where "included with your Dapta AI subscription" links (deploy-config
-   *  destination, same switch as the growth badge; null = plain text). */
+  /** Where "included with your Dapta AI subscription" links: the Dapta AI app
+   *  (NEXT_PUBLIC_PLATFORM_URL, deploy config; null = plain text). */
   subscriptionUrl: string | null;
   /** Whether the public pages carry the Dapta branding now (the profile's `showBranding`). */
   showBranding: boolean;

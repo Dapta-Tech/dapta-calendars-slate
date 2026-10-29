@@ -577,6 +577,12 @@ export interface BookingMessages {
         placeholder: string;
         /** Inline error for anything but a full https address. */
         invalid: string;
+        /** What the redirect carries to that page (Calendly's "pass event details"). */
+        dataLabel: string;
+        dataNone: string;
+        dataEvent: string;
+        dataEventAndInvitee: string;
+        dataHint: string;
       };
       /**
        * Tracking and pixels on this event's booking page (the dForms section,
@@ -598,6 +604,19 @@ export interface BookingMessages {
         hubspotHelp: string;
         /** Inline error for an id with characters no vendor uses. */
         idInvalid: string;
+        ga4Label: string;
+        ga4Help: string;
+        /** The two PostHog clouds, the options of the host select. */
+        posthogHostUs: string;
+        posthogHostEu: string;
+        /** Inline errors, one per vendor format. */
+        gtmInvalid: string;
+        ga4Invalid: string;
+        metaInvalid: string;
+        posthogKeyInvalid: string;
+        hubspotInvalid: string;
+        /** Under the fields when the deployment does not offer GTM, GA4 and HubSpot. */
+        hostScriptsUnavailable: string;
       };
       /**
        * One-off links (#69 / AB2, #110) — the editor half.
@@ -2313,26 +2332,45 @@ export const en: BookingMessages = {
         hint: 'Invitees go to this page once they book, requests you still have to confirm included, instead of staying on the confirmation. Only someone who books is sent the address. Leave it empty to keep the confirmation. Rescheduling or cancelling never redirects.',
         placeholder: 'https://example.com/thanks',
         invalid: 'Use a full address that starts with https://',
+        dataLabel: 'Booking details on that page',
+        dataNone: 'None: the address as you typed it',
+        dataEvent: 'The event, its time and the campaign (UTMs)',
+        dataEventAndInvitee: 'The event, its time, the campaign, and the invitee’s name and email',
+        dataHint:
+          'Added to the address as parameters (event_type, event_start_time, utm_source and the like), so your thank-you page can count the booking. The invitee’s name and email end up in that page’s address and in whatever analytics runs there: add them only if that page needs them.',
       },
       // Tracking and pixels. Each help line says when its tag fires.
       tracking: {
         title: 'Tracking and pixels',
         subtitle:
-          'Measure visits and bookings on this event’s booking page, embedded or not. Each tag loads only when its ID is set, and never in your dashboard.',
+          'Measure visits and bookings on this event’s booking page, embedded or not: each tool hears the page view, the day and time picked, and the booking, with the event’s details and nothing about the invitee. Each tag loads only when its ID is set, and never in your dashboard.',
         gtmLabel: 'Google Tag Manager ID',
-        gtmHelp: 'Loads your GTM container so your tags fire, and pushes a booking_scheduled event when someone books.',
+        gtmHelp:
+          'Loads your GTM container and pushes booking_date_selected, booking_time_selected and booking_scheduled events, with the event’s details under dcal.',
         metaLabel: 'Meta Pixel ID',
         metaHelp:
-          'Fires a PageView when the booking page loads, and a Schedule when someone books. If automatic advanced matching is on in Meta, it can also read the booking form.',
+          'Fires a PageView when the booking page loads, BookingDateSelected and BookingTimeSelected as the invitee picks, and a Schedule when someone books. If automatic advanced matching is on in Meta, it can also read the booking form.',
         posthogKeyLabel: 'PostHog project key',
-        posthogKeyHelp: 'Captures one pageview per visit in your own PostHog project.',
-        posthogHostLabel: 'PostHog host (optional)',
-        posthogHostHelp: 'Defaults to PostHog US cloud; set your EU or self-hosted address.',
-        posthogHostInvalid: 'Enter a full https:// address, e.g. https://eu.i.posthog.com.',
+        posthogKeyHelp: 'Captures the pageview and the booking steps in your own PostHog project.',
+        posthogHostLabel: 'PostHog cloud',
+        posthogHostHelp: 'The cloud your PostHog project lives in. Self-hosted PostHog is not supported.',
+        posthogHostInvalid: 'Choose PostHog US or EU cloud.',
         hubspotLabel: 'HubSpot tracking ID',
         hubspotHelp:
           'Loads the HubSpot tracking code for your portal on the booking page, so its visits count in HubSpot. If collected forms is on in your portal, HubSpot can also capture the booking form. Bookings reach HubSpot through Integrations.',
         idInvalid: 'Use only letters, numbers, - and _.',
+        ga4Label: 'Google Analytics 4 measurement ID',
+        ga4Help:
+          'Sends the page view, booking_date_selected, booking_time_selected and booking_scheduled to your GA4 property. Mark booking_scheduled as a key event in GA4 to count bookings as conversions.',
+        posthogHostUs: 'US cloud',
+        posthogHostEu: 'EU cloud',
+        gtmInvalid: 'Use the container ID, e.g. GTM-ABC1234.',
+        ga4Invalid: 'Use the measurement ID, e.g. G-ABC123XYZ9.',
+        metaInvalid: 'A Meta Pixel ID is numbers only.',
+        posthogKeyInvalid: 'Use the project API key, which starts with phc_.',
+        hubspotInvalid: 'A HubSpot portal ID is numbers only.',
+        hostScriptsUnavailable:
+          'Google Tag Manager, Google Analytics and HubSpot can run code set up in your own account, so this deployment does not offer them on booking pages yet.',
       },
       // One-off links (#110). Not a security control; say what it does.
       oneOffLinks: {
@@ -4033,27 +4071,45 @@ export const es: BookingMessages = {
         hint: 'Los invitados van a esta página después de reservar, también en las solicitudes que aún debes confirmar, en lugar de quedarse en la confirmación. Solo quien reserva recibe la dirección. Déjalo vacío para mantener la confirmación. Reprogramar o cancelar nunca redirige.',
         placeholder: 'https://ejemplo.com/gracias',
         invalid: 'Usa una dirección completa que empiece por https://',
+        dataLabel: 'Datos de la reserva en esa página',
+        dataNone: 'Ninguno: la dirección tal como la escribiste',
+        dataEvent: 'El evento, su hora y la campaña (UTMs)',
+        dataEventAndInvitee: 'El evento, su hora, la campaña, y el nombre y el correo del invitado',
+        dataHint:
+          'Se añaden a la dirección como parámetros (event_type, event_start_time, utm_source y similares), para que tu página de gracias pueda contar la reserva. El nombre y el correo del invitado quedan en la dirección de esa página y en la analítica que corra allí: añádelos solo si esa página los necesita.',
       },
       // Seguimiento y píxeles. Cada ayuda dice cuándo se dispara su etiqueta.
       tracking: {
         title: 'Seguimiento y píxeles',
         subtitle:
-          'Mide visitas y reservas en la página de reservas de este evento, insertada o no. Cada etiqueta se carga solo cuando su ID está configurado, y nunca en tu panel.',
+          'Mide visitas y reservas en la página de reservas de este evento, insertada o no: cada herramienta recibe la visita, el día y la hora elegidos y la reserva, con los datos del evento y nada del invitado. Cada etiqueta se carga solo cuando su ID está configurado, y nunca en tu panel.',
         gtmLabel: 'ID de Google Tag Manager',
         gtmHelp:
-          'Carga tu contenedor de GTM para que se disparen tus etiquetas, y empuja un evento booking_scheduled cuando alguien reserva.',
+          'Carga tu contenedor de GTM y empuja los eventos booking_date_selected, booking_time_selected y booking_scheduled, con los datos del evento en dcal.',
         metaLabel: 'ID del píxel de Meta',
         metaHelp:
-          'Dispara un PageView al cargar la página de reservas y un Schedule cuando alguien reserva. Si la coincidencia avanzada automática está activa en Meta, también puede leer el formulario de reserva.',
+          'Dispara un PageView al cargar la página de reservas, BookingDateSelected y BookingTimeSelected mientras el invitado elige, y un Schedule cuando alguien reserva. Si la coincidencia avanzada automática está activa en Meta, también puede leer el formulario de reserva.',
         posthogKeyLabel: 'Clave del proyecto de PostHog',
-        posthogKeyHelp: 'Captura una pageview por visita en tu propio proyecto de PostHog.',
-        posthogHostLabel: 'Host de PostHog (opcional)',
-        posthogHostHelp: 'Por defecto usa la nube de PostHog en EE. UU.; configura tu dirección de la UE o autoalojada.',
-        posthogHostInvalid: 'Introduce una dirección https:// completa, p. ej. https://eu.i.posthog.com.',
+        posthogKeyHelp: 'Captura la visita y los pasos de la reserva en tu propio proyecto de PostHog.',
+        posthogHostLabel: 'Nube de PostHog',
+        posthogHostHelp: 'La nube donde vive tu proyecto de PostHog. PostHog autoalojado no está disponible.',
+        posthogHostInvalid: 'Elige la nube de PostHog de EE. UU. o de la UE.',
         hubspotLabel: 'ID de seguimiento de HubSpot',
         hubspotHelp:
           'Carga el código de seguimiento de HubSpot de tu portal en la página de reservas, para que sus visitas cuenten en HubSpot. Si los formularios recopilados están activos en tu portal, HubSpot también puede capturar el formulario de reserva. Las reservas llegan a HubSpot por Integraciones.',
         idInvalid: 'Usa solo letras, números, - y _.',
+        ga4Label: 'ID de medición de Google Analytics 4',
+        ga4Help:
+          'Envía la visita, booking_date_selected, booking_time_selected y booking_scheduled a tu propiedad de GA4. Marca booking_scheduled como evento clave en GA4 para contar las reservas como conversiones.',
+        posthogHostUs: 'Nube de EE. UU.',
+        posthogHostEu: 'Nube de la UE',
+        gtmInvalid: 'Usa el ID del contenedor, p. ej. GTM-ABC1234.',
+        ga4Invalid: 'Usa el ID de medición, p. ej. G-ABC123XYZ9.',
+        metaInvalid: 'El ID del píxel de Meta lleva solo números.',
+        posthogKeyInvalid: 'Usa la clave API del proyecto, que empieza por phc_.',
+        hubspotInvalid: 'El ID del portal de HubSpot lleva solo números.',
+        hostScriptsUnavailable:
+          'Google Tag Manager, Google Analytics y HubSpot pueden ejecutar código configurado en tu propia cuenta, así que este despliegue todavía no los ofrece en las páginas de reserva.',
       },
       // Enlaces de un solo uso (#110). No es un control de seguridad.
       oneOffLinks: {

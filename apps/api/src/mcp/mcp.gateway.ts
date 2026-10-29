@@ -12,6 +12,7 @@ import { NoopRateLimiter, TokenBucketRateLimiter, type RateLimiter } from '../ra
 import { type McpCall, ToolFailure, argsHash, callerLabel, loginPrincipal, notFound, signInKey, toFailure, untrusted } from './support';
 import { TOOLS, accessOf, accountIdArg, notLinked, requireScope, takesAccount, type McpToolDeps, type ToolDef, type ToolResult } from './tools';
 import { McpUsageReporter, toolCallEvent } from './mcp-usage';
+import { publicBookingBase } from '../booking-origin';
 
 export const MCP_SERVER_NAME = 'dcal';
 const SERVER_VERSION = '1.0.0';
@@ -100,7 +101,8 @@ export class McpGateway {
     // Product analytics: one `$mcp_tool_call` per tool call, only with a provider configured.
     @Optional() @Inject(AnalyticsEffects) analytics?: AnalyticsEffects,
   ) {
-    this.deps = { publicAppUrl: env.PUBLIC_APP_URL, db, calV2, pilot, bookings, admin };
+    // Booking links the tools hand out name the booking host when there is one.
+    this.deps = { publicAppUrl: env.PUBLIC_APP_URL, publicBookingUrl: publicBookingBase(env), db, calV2, pilot, bookings, admin };
     this.usage = new McpUsageReporter(analytics ?? null, SERVER_VERSION);
     // Per pod, like the public limiter: a replica counts only what it served.
     this.readLimiter = env.RATE_LIMIT_ENABLED

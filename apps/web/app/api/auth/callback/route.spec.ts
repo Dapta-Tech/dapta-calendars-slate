@@ -41,7 +41,7 @@ describe('GET /api/auth/callback', () => {
 
     expect(setSession).toHaveBeenCalled();
     expect(res.headers.get('location')).toBe(`${ORIGIN}${PAGE}`);
-    expect(cookieJar.delete).toHaveBeenCalledWith('slate_return_to');
+    expect(cookieJar.set).toHaveBeenCalledWith('slate_return_to', '', expect.objectContaining({ maxAge: 0 }));
   });
 
   it('lands on /admin when the login was started without one', async () => {
@@ -58,7 +58,7 @@ describe('GET /api/auth/callback', () => {
       const res = await GET(callback());
 
       expect(res.headers.get('location')).toBe(`${ORIGIN}/admin`);
-      expect(cookieJar.delete).toHaveBeenCalledWith('slate_return_to');
+      expect(cookieJar.set).toHaveBeenCalledWith('slate_return_to', '', expect.objectContaining({ maxAge: 0 }));
     },
   );
 
@@ -69,7 +69,7 @@ describe('GET /api/auth/callback', () => {
 
     expect(setSession).not.toHaveBeenCalled();
     expect(res.headers.get('location')).toBe(`${ORIGIN}/login?error=callback&next=${encodeURIComponent(PAGE)}`);
-    expect(cookieJar.delete).toHaveBeenCalledWith('slate_return_to');
+    expect(cookieJar.set).toHaveBeenCalledWith('slate_return_to', '', expect.objectContaining({ maxAge: 0 }));
   });
 
   it('a login that did not start here keeps the target for the retry, and signs nobody in', async () => {

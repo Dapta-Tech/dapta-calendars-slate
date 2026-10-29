@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { bookingPageTracking } from '@/lib/booking-page-tracking';
+import { utmFromQuery } from '@/lib/booking-utm';
 import { notFound } from 'next/navigation';
 import { getMessages, schedulingMethodLabel } from '@slate/shared';
 import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
@@ -261,6 +263,7 @@ export default async function OneOffBookingPage({
             methodLabel={schedulingMethodLabel(messages, availability.eventType.schedulingType)}
             nowUtc={from}
             embed={embed}
+            utm={utmFromQuery(query)}
             oneOffToken={token}
             showBranding={brandingShown(team)}
           />
@@ -268,7 +271,7 @@ export default async function OneOffBookingPage({
         <MadeWithBadge locale={locale} accountCode={target.accountCode} show={brandingShown(team)} />
         {embed ? <EmbedResizeReporter /> : null}
         {/* The host's own tags: a hidden event is on no listing, so its ids come with the read. */}
-        <EventTracking tracking={availability.eventType.tracking} />
+        <EventTracking {...bookingPageTracking(availability.eventType)} />
       </BrandedShell>
     );
   }
@@ -320,13 +323,14 @@ export default async function OneOffBookingPage({
           location={availability.eventType.location}
           nowUtc={from}
           embed={embed}
+          utm={utmFromQuery(query)}
           oneOffToken={token}
           showBranding={brandingShown(profile)}
         />
       </main>
       <MadeWithBadge locale={locale} accountCode={target.accountCode} show={brandingShown(profile)} />
       {embed ? <EmbedResizeReporter /> : null}
-      <EventTracking tracking={availability.eventType.tracking} />
+      <EventTracking {...bookingPageTracking(availability.eventType)} />
     </BrandedShell>
   );
 }
