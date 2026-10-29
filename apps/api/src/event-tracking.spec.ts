@@ -11,19 +11,21 @@ import { BookingService } from './booking.service';
 import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
 
-/** The seeded workspace (`acme`) is the one this deployment lets use tracking. */
+/** The seeded workspace (`acme`) is the one this deployment lets use GTM, GA4 and HubSpot. */
 const ENV = loadServerEnv({ NODE_ENV: 'test', EVENT_TRACKING_ACCOUNTS: 'other, ACME' } as NodeJS.ProcessEnv);
 const OFF = loadServerEnv({ NODE_ENV: 'test' } as NodeJS.ProcessEnv);
 const REQ: ReqLike = { headers: {} };
 const DAY = 86_400_000;
 
-const ALL = {
-  gtmId: 'GTM-ABC1234',
+/** The ids that load only vendor code: every workspace may set them. */
+const OPEN = {
   metaPixelId: '123456789012345',
   posthogKey: 'phc_abcdefghijklmnopqrstuvwxyz0123456789',
   posthogHost: 'https://eu.i.posthog.com',
-  hubspotTrackingId: '24681357',
 };
+/** The ids that can run the host's own code: only where the deployment allows them. */
+const SCRIPTS = { gtmId: 'GTM-ABC1234', ga4Id: 'G-ABC123XYZ9', hubspotTrackingId: '24681357' };
+const ALL = { ...OPEN, ...SCRIPTS };
 
 async function refusalOf(run: Promise<unknown>): Promise<{ error: string; message: string }> {
   try {
@@ -36,11 +38,14 @@ async function refusalOf(run: Promise<unknown>): Promise<{ error: string; messag
 }
 
 /**
- * Tracking and pixels per event type, on the API: the editor's save keeps the
- * ids trimmed, drops the blank ones (and a PostHog host with no key), refuses
- * ids with characters no vendor uses and a host that is not https, and the
- * public reads each event page takes them from carry them: the personal and
- * team listings, and the availability read the one-off link page uses.
+ * Tracking and pixels per event type, on the API: the editor's save keeps each
+ * id in its vendor's own format (trimmed, GTM and GA4 upper-cased), drops the
+ * blank ones (and a PostHog host with no key), refuses anything else, including
+ * a PostHog host that is not PostHog's own cloud, and the public reads each
+ * event page takes them from carry them: the personal and team listings, and
+ * the availability read the one-off link page uses. Meta and PostHog are open
+ * to every workspace; GTM, GA4 and HubSpot only to the ones the deployment
+ * names.
  */
 describe('event type tracking', () => {
   let db: Db;
@@ -81,16 +86,23 @@ describe('event type tracking', () => {
   });
 
   describe('the editor save', () => {
-    it('stores every id trimmed and reads them back on /v1', async () => {
+    it('stores every id in its vendor format and reads them back on /v1', async () => {
       const padded = Object.fromEntries(Object.entries(ALL).map(([k, v]) => [k, `  ${v}  `]));
       expect((await crud.updateEventType(REQ, introId, { tracking: padded })).tracking).toEqual(ALL);
       expect((await crud.getEventType(REQ, introId)).tracking).toEqual(ALL);
-      const created = await crud.createEventType(REQ, { slug: 'ads', title: 'Ads', lengthMinutes: 30, tracking: { metaPixelId: '42' } });
-      expect(created.tracking).toEqual({ metaPixelId: '42' });
+      const created = await crud.createEventType(REQ, { slug: 'ads', title: 'Ads', lengthMinutes: 30, tracking: { metaPixelId: '424242424242' } });
+      expect(created.tracking).toEqual({ metaPixelId: '424242424242' });
+    });
+
+    it('upper-cases GTM and GA4 ids, and keeps a PostHog host as its bare origin', async () => {
+      const saved = await crud.updateEventType(REQ, introId, {
+        tracking: { gtmId: 'gtm-abc1234', ga4Id: 'g-abc123xyz9', posthogKey: OPEN.posthogKey, posthogHost: 'HTTPS://US.i.posthog.com/' },
+      });
+      expect(saved.tracking).toEqual({ gtmId: 'GTM-ABC1234', ga4Id: 'G-ABC123XYZ9', posthogKey: OPEN.posthogKey, posthogHost: 'https://us.i.posthog.com' });
     });
 
     it('leaves blank ids out, a PostHog host without a key out, and stores none when nothing is left', async () => {
-      expect((await crud.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1', metaPixelId: '   ', posthogHost: 'https://eu.i.posthog.com' } })).tracking).toEqual({ gtmId: 'GTM-X1' });
+      expect((await crud.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1Y2Z3', metaPixelId: '   ', posthogHost: 'https://eu.i.posthog.com' } })).tracking).toEqual({ gtmId: 'GTM-X1Y2Z3' });
       expect((await crud.updateEventType(REQ, introId, { tracking: { gtmId: '', posthogKey: ' ' } })).tracking).toBeNull();
       const raw = await db.get<{ tracking: unknown }>(sql`SELECT tracking FROM event_type WHERE id = ${introId}`);
       expect(raw!.tracking).toBeNull();
@@ -102,15 +114,23 @@ describe('event type tracking', () => {
       expect((await crud.updateEventType(REQ, introId, { tracking: null })).tracking).toBeNull();
     });
 
-    it('refuses ids with characters no vendor uses, a host that is not https, and over-long values', async () => {
+    it('refuses an id not shaped like its vendor’s, any PostHog host but PostHog’s own cloud, and over-long values', async () => {
       for (const bad of [
         { gtmId: 'GTM 123' },
+        { gtmId: 'ABC1234' },
+        { ga4Id: 'UA-12345-1' },
+        { ga4Id: 'G-ABC 123' },
         { metaPixelId: '</script><script>alert(1)</script>' },
+        { metaPixelId: '12345abc' },
         { hubspotTrackingId: '"onload="x' },
-        { posthogKey: 'phc_ok', posthogHost: 'http://eu.i.posthog.com' },
-        { posthogKey: 'phc_ok', posthogHost: 'javascript:alert(1)' },
-        { posthogKey: 'phc_ok', posthogHost: 'https://ph.example.com/ingest?x=1' },
-        { posthogKey: 'phc_ok', posthogHost: 'https://user:pass@example.com' },
+        { hubspotTrackingId: 'abc123' },
+        { posthogKey: 'project_key_without_the_phc_prefix' },
+        { posthogKey: OPEN.posthogKey, posthogHost: 'http://eu.i.posthog.com' },
+        { posthogKey: OPEN.posthogKey, posthogHost: 'javascript:alert(1)' },
+        { posthogKey: OPEN.posthogKey, posthogHost: 'https://ph.example.com' },
+        { posthogKey: OPEN.posthogKey, posthogHost: 'https://eu.i.posthog.com.example.com' },
+        { posthogKey: OPEN.posthogKey, posthogHost: 'https://eu.i.posthog.com/ingest' },
+        { posthogKey: OPEN.posthogKey, posthogHost: 'https://user:pass@example.com' },
         { gtmId: `GTM-${'A'.repeat(40)}` },
       ]) {
         const r = await refusalOf(crud.updateEventType(REQ, introId, { tracking: bad }));
@@ -152,7 +172,7 @@ describe('event type tracking', () => {
     });
   });
 
-  describe('the deployment gate (EVENT_TRACKING_ACCOUNTS) and who may set it', () => {
+  describe('who may set what: every workspace the vendor-only ids, the deployment GTM, GA4 and HubSpot', () => {
     it('matches short codes and vanity slugs case-insensitively, `*` is everyone, unset is nobody', () => {
       expect(trackingAllowedFor({ EVENT_TRACKING_ACCOUNTS: 'acme' }, { code: 'ACME' })).toBe(true);
       expect(trackingAllowedFor({ EVENT_TRACKING_ACCOUNTS: 'x, my-brand ' }, { code: 'k3j2', vanitySlug: 'My-Brand' })).toBe(true);
@@ -162,42 +182,72 @@ describe('event type tracking', () => {
       expect(trackingAllowedFor(undefined, { code: 'acme' })).toBe(false);
     });
 
-    it('refuses to store tracking for a workspace the deployment does not name, and still lets it clear', async () => {
+    it('any workspace stores Meta and PostHog with no permission from the deployment', async () => {
       const off = controller('owner', OFF);
-      const r = await refusalOf(off.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1' } }));
-      expect(r.error).toBe('TRACKING_DISABLED');
-      await crud.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1' } });
+      expect((await off.updateEventType(REQ, introId, { tracking: OPEN })).tracking).toEqual(OPEN);
+      const created = await off.createEventType(REQ, { slug: 'ads', title: 'Ads', lengthMinutes: 30, tracking: { metaPixelId: '424242424242' } });
+      expect(created.tracking).toEqual({ metaPixelId: '424242424242' });
+    });
+
+    it('refuses a new or changed GTM container, GA4 property or HubSpot portal where the deployment does not name the workspace', async () => {
+      const off = controller('owner', OFF);
+      for (const scripts of [{ gtmId: 'GTM-X1Y2Z3' }, { ga4Id: 'G-ABC123XYZ9' }, { hubspotTrackingId: '1357' }, { ...OPEN, gtmId: 'GTM-X1Y2Z3' }]) {
+        const r = await refusalOf(off.updateEventType(REQ, introId, { tracking: scripts }));
+        expect(r.error).toBe('TRACKING_DISABLED');
+      }
+      await expect(
+        off.createEventType(REQ, { slug: 'g', title: 'G', lengthMinutes: 30, tracking: { gtmId: 'GTM-X1Y2Z3' } }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      // Stored while allowed, then changed while not: refused too.
+      await crud.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1Y2Z3' } });
+      expect((await refusalOf(off.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-Z9Y8X7' } }))).error).toBe('TRACKING_DISABLED');
+    });
+
+    it('still lets that workspace clear them, or edit the other ids around a stored one', async () => {
+      await crud.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1Y2Z3' } });
+      const off = controller('owner', OFF);
+      // The editor sends the stored container back unchanged next to a new pixel.
+      expect((await off.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1Y2Z3', metaPixelId: '424242424242' } })).tracking).toEqual({
+        gtmId: 'GTM-X1Y2Z3',
+        metaPixelId: '424242424242',
+      });
+      expect((await off.updateEventType(REQ, introId, { tracking: { metaPixelId: '424242424242' } })).tracking).toEqual({ metaPixelId: '424242424242' });
       expect((await off.updateEventType(REQ, introId, { tracking: null })).tracking).toBeNull();
     });
 
-    it('a plain member cannot set or change tracking, but can still save their event as it is', async () => {
-      await crud.updateEventType(REQ, introId, { tracking: { metaPixelId: '42' } });
+    it('a plain member cannot set or change any id, but can still save their event as it is', async () => {
+      await crud.updateEventType(REQ, introId, { tracking: { metaPixelId: '424242424242' } });
       const member = controller('member');
-      await expect(member.updateEventType(REQ, introId, { tracking: { metaPixelId: '43' } })).rejects.toMatchObject({ status: 403 });
+      await expect(member.updateEventType(REQ, introId, { tracking: { metaPixelId: '434343434343' } })).rejects.toMatchObject({ status: 403 });
       await expect(member.updateEventType(REQ, introId, { tracking: null })).rejects.toMatchObject({ status: 403 });
       // The editor sends the stored ids back unchanged: that is not a change.
-      expect((await member.updateEventType(REQ, introId, { title: 'Renamed', tracking: { metaPixelId: '42' } })).title).toBe('Renamed');
-      await expect(member.createEventType(REQ, { slug: 'm', title: 'M', lengthMinutes: 30, tracking: { gtmId: 'GTM-M1' } })).rejects.toMatchObject({ status: 403 });
+      expect((await member.updateEventType(REQ, introId, { title: 'Renamed', tracking: { metaPixelId: '424242424242' } })).title).toBe('Renamed');
+      await expect(member.createEventType(REQ, { slug: 'm', title: 'M', lengthMinutes: 30, tracking: { metaPixelId: '424242424242' } })).rejects.toMatchObject({ status: 403 });
     });
 
-    it('takes the tags off every public read the moment a workspace is not allowed, whatever is stored', async () => {
-      await crud.updateEventType(REQ, introId, { tracking: { gtmId: 'GTM-X1' } });
-      await crud.updateEventType(REQ, teamEventId, { tracking: { gtmId: 'GTM-T1' } });
+    it('takes GTM, GA4 and HubSpot off every public read the moment a workspace is not allowed, and leaves the rest', async () => {
+      await crud.updateEventType(REQ, introId, { tracking: ALL });
+      await crud.updateEventType(REQ, teamEventId, { tracking: { gtmId: 'GTM-TEAM1' } });
       const off = service(OFF);
       const from = new Date().toISOString();
       const to = new Date(Date.now() + 7 * DAY).toISOString();
-      expect((await off.profile('acme', 'alex-rivera'))!.eventTypes.every((e) => e.tracking === null)).toBe(true);
-      expect((await off.teamProfile('acme', 'sales'))!.eventTypes.every((e) => e.tracking === null)).toBe(true);
-      expect((await off.availability({ accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', from, to }))!.eventType.tracking).toBeUndefined();
+      expect((await off.profile('acme', 'alex-rivera'))!.eventTypes.find((e) => e.slug === 'intro-call')!.tracking).toEqual(OPEN);
+      expect((await off.teamProfile('acme', 'sales'))!.eventTypes.find((e) => e.slug === 'team-demo')!.tracking).toBeNull();
+      expect((await off.availability({ accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', from, to }))!.eventType.tracking).toEqual(OPEN);
       expect((await off.teamAvailability('acme', 'sales', 'team-demo', from, to))!.eventType.tracking).toBeUndefined();
       // And on again, read straight back.
-      expect((await bookings.profile('acme', 'alex-rivera'))!.eventTypes.find((e) => e.slug === 'intro-call')!.tracking).toEqual({ gtmId: 'GTM-X1' });
+      expect((await bookings.profile('acme', 'alex-rivera'))!.eventTypes.find((e) => e.slug === 'intro-call')!.tracking).toEqual(ALL);
     });
 
-    it('drops, on read, a value written past the API that the save would refuse', async () => {
-      await db.run(sql`UPDATE event_type SET tracking = ${JSON.stringify({ gtmId: '"><script>', metaPixelId: '42' })} WHERE id = ${introId}`);
-      expect((await crud.getEventType(REQ, introId)).tracking).toEqual({ metaPixelId: '42' });
-      expect((await bookings.profile('acme', 'alex-rivera'))!.eventTypes.find((e) => e.slug === 'intro-call')!.tracking).toEqual({ metaPixelId: '42' });
+    it('drops, on read, a value written past the API (or under the older, looser rules) that the save would refuse', async () => {
+      await db.run(
+        sql`UPDATE event_type SET tracking = ${JSON.stringify({ gtmId: '"><script>', metaPixelId: '424242424242', posthogKey: OPEN.posthogKey, posthogHost: 'https://ph.tenant.example' })} WHERE id = ${introId}`,
+      );
+      // The PostHog key goes with its refused host: its events would otherwise
+      // land on a cloud the host never chose.
+      const expected = { metaPixelId: '424242424242' };
+      expect((await crud.getEventType(REQ, introId)).tracking).toEqual(expected);
+      expect((await bookings.profile('acme', 'alex-rivera'))!.eventTypes.find((e) => e.slug === 'intro-call')!.tracking).toEqual(expected);
     });
   });
 });

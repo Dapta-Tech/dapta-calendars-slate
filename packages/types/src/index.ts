@@ -160,7 +160,7 @@ export const MAX_REMINDER_BODY = 5000;
 export const MAX_CALENDAR_TITLE_TEMPLATE = 500;
 export const MAX_CALENDAR_DESCRIPTION_TEMPLATE = 5000;
 
-/** The longest Google Tag Manager, Meta Pixel or HubSpot id an event type takes. */
+/** The longest Google Tag Manager, Google Analytics, Meta Pixel or HubSpot id an event type takes. */
 export const MAX_TRACKING_ID = 32;
 /** The longest PostHog project key an event type takes. */
 export const MAX_POSTHOG_KEY = 128;
@@ -168,58 +168,96 @@ export const MAX_POSTHOG_KEY = 128;
 export const MAX_POSTHOG_HOST = 256;
 
 /**
- * One vendor id: letters, digits, `-` and `_` only (every GTM, Meta, PostHog
- * and HubSpot id is written that way), trimmed, blank = none. The page only
- * ever interpolates it escaped, so this is a typo catcher, not the defence.
+ * The PostHog ingestion hosts an event type may name: the vendor's own US and
+ * EU clouds, nothing else. posthog-js loads its remote config and every
+ * extension as a script from whatever host it is given, so a host the event's
+ * owner chose would be their own code running on the booking page.
  */
-const trackingIdSchema = (max: number) =>
-  z
-    .string()
-    .trim()
-    .max(max)
-    .regex(/^[A-Za-z0-9_-]*$/, 'Use only letters, numbers, - and _.');
+export const POSTHOG_HOSTS = ['https://us.i.posthog.com', 'https://eu.i.posthog.com'] as const;
 
 /**
- * Tracking and pixels on ONE event type's public booking page (the dForms
- * `formTrackingSchema`, per event type): Google Tag Manager, Meta Pixel, a
- * PostHog project of the host's own and HubSpot's tracking code. Each loads only
- * when its id is set, and only on this event's booking page. Absent or null is
- * all off, which is every event type saved before this existed.
+ * One vendor id in that vendor's own format, trimmed, blank = none. The format
+ * is the defence, not a typo catcher: an id is only ever used as data (a URL
+ * query, a function argument), and one that is not shaped like the vendor's is
+ * refused on save and dropped on read, so nothing else can reach the page.
+ */
+const vendorIdSchema = (max: number, pattern: RegExp, message: string) =>
+  z.string().trim().max(max).regex(pattern, message);
+
+/**
+ * Tracking and pixels on ONE event type's public booking page, per event type:
+ * Meta Pixel, Google Analytics 4, a PostHog project of the host's own, Google
+ * Tag Manager and HubSpot's tracking code. Each loads only when its id is set,
+ * and only on this event's booking page. Absent or null is all off, which is
+ * every event type saved before this existed.
+ *
+ * Meta and PostHog load only the vendor's own code, so every workspace may set
+ * them. Google Tag Manager, Google Analytics and HubSpot can run code set up in
+ * the host's own account, so they load only where the deployment allows them:
+ * {@link EVENT_TRACKING_HOST_SCRIPT_KEYS}.
  */
 export const eventTrackingSchema = z.object({
   /** Google Tag Manager container id (`GTM-XXXXXXX`). */
-  gtmId: trackingIdSchema(MAX_TRACKING_ID).nullable().optional(),
-  /** Meta (Facebook) Pixel id. */
-  metaPixelId: trackingIdSchema(MAX_TRACKING_ID).nullable().optional(),
+  gtmId: vendorIdSchema(MAX_TRACKING_ID, /^(GTM-[A-Z0-9]{4,12})?$/i, 'Use the container id, e.g. GTM-ABC1234.')
+    .nullable()
+    .optional(),
+  /** Google Analytics 4 measurement id (`G-XXXXXXXXXX`). */
+  ga4Id: vendorIdSchema(MAX_TRACKING_ID, /^(G-[A-Z0-9]{4,20})?$/i, 'Use the measurement id, e.g. G-ABC123XYZ9.')
+    .nullable()
+    .optional(),
+  /** Meta (Facebook) Pixel id: digits only. */
+  metaPixelId: vendorIdSchema(MAX_TRACKING_ID, /^(\d{6,20})?$/, 'A Meta Pixel id is numbers only.').nullable().optional(),
   /** PostHog project API key (`phc_...`). */
-  posthogKey: trackingIdSchema(MAX_POSTHOG_KEY).nullable().optional(),
-  /** PostHog ingestion host for an EU or self-hosted project: an https ORIGIN
-   *  (no path, query or credentials). https only: the booking page is https,
-   *  and a browser blocks plain http from it. */
+  posthogKey: vendorIdSchema(MAX_POSTHOG_KEY, /^(phc_[A-Za-z0-9]{20,64})?$/, 'Use the project API key, which starts with phc_.')
+    .nullable()
+    .optional(),
+  /** PostHog cloud the project lives in: one of {@link POSTHOG_HOSTS}. Blank =
+   *  US. A self-hosted PostHog is not accepted (see `POSTHOG_HOSTS`). */
   posthogHost: z
     .string()
     .trim()
     .max(MAX_POSTHOG_HOST)
-    .regex(/^(https:\/\/[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:\d{1,5})?\/?)?$/i, 'Enter a full https:// address, e.g. https://eu.i.posthog.com.')
+    .regex(/^(https:\/\/(us|eu)\.i\.posthog\.com\/?)?$/i, 'Choose PostHog US or EU cloud.')
     .nullable()
     .optional(),
-  /** HubSpot tracking code portal id. */
-  hubspotTrackingId: trackingIdSchema(MAX_TRACKING_ID).nullable().optional(),
+  /** HubSpot tracking code portal id: digits only. */
+  hubspotTrackingId: vendorIdSchema(MAX_TRACKING_ID, /^(\d{1,12})?$/, 'A HubSpot portal id is numbers only.')
+    .nullable()
+    .optional(),
 });
 export type EventTracking = z.infer<typeof eventTrackingSchema>;
 
 /** The fields of {@link EventTracking}, in the order the editor lists them. */
-export const EVENT_TRACKING_KEYS = ['gtmId', 'metaPixelId', 'posthogKey', 'posthogHost', 'hubspotTrackingId'] as const;
+export const EVENT_TRACKING_KEYS = ['metaPixelId', 'posthogKey', 'posthogHost', 'gtmId', 'ga4Id', 'hubspotTrackingId'] as const;
 
 /**
- * The stored shape: every id trimmed, a blank one left out, and nothing at all
- * (null) when no id is left, so an event type that never set one, or cleared
- * them all, reads exactly as it did before tracking existed. A PostHog host
- * without a PostHog key is dropped too: alone it loads nothing.
+ * The tags that can run code set up in the host's own account: a GTM container
+ * can carry any script; HubSpot's portal decides which of its apps, pop-ups and
+ * ad pixels load; and gtag.js can load scripts from a server container named in
+ * the Google tag's settings (not yet ruled out for a GA4 property, so GA4 waits
+ * with them). On a deployment that serves booking pages next to its dashboard
+ * they load only for the workspaces the operator allows
+ * (`EVENT_TRACKING_ACCOUNTS`); Meta Pixel and PostHog load only vendor code.
+ */
+export const EVENT_TRACKING_HOST_SCRIPT_KEYS = ['gtmId', 'ga4Id', 'hubspotTrackingId'] as const;
+
+/** Ids stored in the vendor's own case. */
+const UPPERCASE_TRACKING_KEYS: ReadonlySet<string> = new Set(['gtmId', 'ga4Id']);
+
+/**
+ * The stored shape: every id trimmed and checked against its vendor's format, a
+ * blank one left out, and nothing at all (null) when no id is left, so an event
+ * type that never set one, or cleared them all, reads exactly as it did before
+ * tracking existed. GTM and GA4 ids are upper-cased, a PostHog host loses its
+ * trailing slash, and a PostHog host without a PostHog key is dropped: alone it
+ * loads nothing. A PostHog key whose host is set but refused (a self-hosted or
+ * proxied PostHog saved under the earlier rules) is dropped with it: its events
+ * would otherwise go to a cloud the host never chose.
  *
  * Every read goes through here as well, with the save's own field checks: a
- * value written past the API (straight into the column) that the save would
- * refuse is dropped, never handed to a booking page.
+ * value written past the API (straight into the column), or saved before the
+ * formats tightened, that the save would refuse is dropped, never handed to a
+ * booking page.
  */
 export function normalizeEventTracking(input: unknown): EventTracking | null {
   if (!input || typeof input !== 'object') return null;
@@ -229,10 +267,35 @@ export function normalizeEventTracking(input: unknown): EventTracking | null {
     const value = raw[key];
     if (typeof value !== 'string' || value.trim() === '') continue;
     const checked = eventTrackingSchema.shape[key].safeParse(value);
-    if (checked.success && checked.data) out[key] = checked.data;
+    if (!checked.success || !checked.data) continue;
+    let v = checked.data;
+    if (UPPERCASE_TRACKING_KEYS.has(key)) v = v.toUpperCase();
+    if (key === 'posthogHost') v = v.toLowerCase().replace(/\/$/, '');
+    out[key] = v;
   }
   if (!out.posthogKey) delete out.posthogHost;
+  const storedHost = raw.posthogHost;
+  if (typeof storedHost === 'string' && storedHost.trim() !== '' && !out.posthogHost) delete out.posthogKey;
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * The event's tracking without {@link EVENT_TRACKING_HOST_SCRIPT_KEYS}: what a
+ * booking page loads when the deployment does not allow the workspace's GTM,
+ * Google Analytics or HubSpot. Null when nothing is left.
+ */
+export function withoutHostScriptTracking(input: unknown): EventTracking | null {
+  const tracking = normalizeEventTracking(input);
+  if (!tracking) return null;
+  const out: EventTracking = { ...tracking };
+  for (const key of EVENT_TRACKING_HOST_SCRIPT_KEYS) delete out[key];
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** True when the tracking sets a GTM container, a GA4 property or a HubSpot portal. */
+export function hasHostScriptTracking(input: unknown): boolean {
+  const tracking = normalizeEventTracking(input);
+  return EVENT_TRACKING_HOST_SCRIPT_KEYS.some((key) => Boolean(tracking?.[key]));
 }
 
 /**

@@ -337,6 +337,15 @@ const initialized = new Set<string>();
 /** The methods the port calls, queued by the stub until the library loads. */
 const QUEUED_METHODS = ['capture', 'identify', 'alias', 'register', 'group', 'reset', 'captureException'] as const;
 
+/**
+ * The posthog-js release every page loads, pinned: the host's own PostHog
+ * instance on a booking page relies on this release's switches to load nothing
+ * from the project (`OWNER_POSTHOG_SETTINGS` in `lib/event-tracking.ts`), so a
+ * new release is taken on purpose, after checking them again, never because the
+ * CDN moved.
+ */
+export const POSTHOG_JS_VERSION = '1.441.0';
+
 /** Where the library is served from: the vendor's own hosts keep it on an assets host. */
 function libraryOrigin(apiHost: string): string {
   return apiHost.replace('.i.posthog.com', '-assets.i.posthog.com');
@@ -380,7 +389,7 @@ export function installStub(w: PosthogWindow, apiHost: string): PosthogGlobal {
   const script = w.document.createElement('script');
   script.async = true;
   script.crossOrigin = 'anonymous';
-  script.src = `${libraryOrigin(apiHost)}/static/array.js`;
+  script.src = `${libraryOrigin(apiHost)}/static/${POSTHOG_JS_VERSION}/array.js`;
   w.document.head.appendChild(script);
   return stub;
 }

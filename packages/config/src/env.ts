@@ -130,13 +130,14 @@ export const serverEnvSchema = z.object({
   // OSS fork gets every feature with no upstream wired.
   PREMIUM_FEATURES: z.enum(['open', 'locked']).default('open'),
 
-  // Tracking and pixels per event type (GTM, Meta Pixel, PostHog, HubSpot):
-  // the workspaces whose booking pages may load them, as a comma-separated
-  // list of account short codes or vanity slugs, or `*` for every workspace.
-  // UNSET (the default) = nobody: those tags run the host's own JavaScript on
-  // this deployment's origin, the one the dashboard and its session cookie
-  // live on, so they are for workspaces the operator trusts, until booking
-  // pages are served from an origin of their own. See SELF-HOSTING.md.
+  // Tracking and pixels per event type: the workspaces whose booking pages may
+  // load Google Tag Manager, Google Analytics 4 and HubSpot, as a
+  // comma-separated list of account short codes or vanity slugs, or `*` for
+  // every workspace. UNSET (the default) = nobody: those can run the host's own
+  // code on this deployment's origin, the one the dashboard and its session
+  // cookie live on, so they are for workspaces the operator trusts, until
+  // booking pages are served from an origin of their own. Meta Pixel and
+  // PostHog load only vendor code and need no entry here. See SELF-HOSTING.md.
   EVENT_TRACKING_ACCOUNTS: z.string().optional(),
   // Upstream entitlement service (cloud only): base URL + service key. Unset
   // selects the disabled provider (OSS default).

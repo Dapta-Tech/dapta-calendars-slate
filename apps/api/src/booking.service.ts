@@ -43,6 +43,8 @@ import {
   type OneOffLinkTargetView,
   type PublicProfile,
   type TeamProfile,
+  hasHostScriptTracking,
+  withoutHostScriptTracking,
 } from '@slate/types';
 import { z } from 'zod';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
@@ -185,24 +187,33 @@ export class BookingService {
   async profile(accountCode: string, handle: string): Promise<PublicProfile | null> {
     const p = await getPublicProfile(this.db, accountCode, handle);
     if (!p) return null;
-    const tracking = await this.trackingAllowedByCode(accountCode);
     const view = p as PublicProfile;
+    const scripts = await this.hostScriptsFor(accountCode, view.eventTypes);
     return {
       ...view,
-      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: tracking ? e.tracking : null })),
+      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
       showBranding: await this.showBrandingByCode(accountCode),
     };
   }
 
   /**
-   * Whether this workspace's booking pages may load the host's own tags
-   * (`EVENT_TRACKING_ACCOUNTS`, see `event-tracking-gate.ts`). Every public
-   * read that carries tracking ids runs it, so turning a workspace off takes
-   * the tags off its pages at once, whatever is still stored.
+   * The event's tracking as its booking page may load it. Meta Pixel and
+   * PostHog always (vendor code only); Google Tag Manager, Google Analytics and
+   * HubSpot only for a workspace the deployment allows (`EVENT_TRACKING_ACCOUNTS`,
+   * see `event-tracking-gate.ts`). Every public read that carries tracking ids
+   * runs it, so turning a workspace off takes those three off its pages at
+   * once, whatever is still stored.
    */
   private async gatedEventType<T extends { tracking?: unknown }>(eventType: T, accountCode: string): Promise<T> {
-    if (!eventType.tracking) return eventType;
-    return (await this.trackingAllowedByCode(accountCode)) ? eventType : { ...eventType, tracking: undefined };
+    if (!hasHostScriptTracking(eventType.tracking)) return eventType;
+    if (await this.trackingAllowedByCode(accountCode)) return eventType;
+    return { ...eventType, tracking: withoutHostScriptTracking(eventType.tracking) ?? undefined };
+  }
+
+  /** Whether a listing's GTM, GA4 and HubSpot ids may stay; asked only when one has them. */
+  private async hostScriptsFor(accountCode: string, eventTypes: ReadonlyArray<{ tracking?: unknown }>): Promise<boolean> {
+    if (!eventTypes.some((e) => hasHostScriptTracking(e.tracking))) return true;
+    return this.trackingAllowedByCode(accountCode);
   }
 
   private async trackingAllowedByCode(accountCode: string): Promise<boolean> {
@@ -925,11 +936,11 @@ export class BookingService {
   async teamProfile(accountCode: string, teamSlug: string): Promise<TeamProfile | null> {
     const t = await getTeamProfile(this.db, accountCode, teamSlug);
     if (!t) return null;
-    const tracking = await this.trackingAllowedByCode(accountCode);
     const view = t as TeamProfile;
+    const scripts = await this.hostScriptsFor(accountCode, view.eventTypes);
     return {
       ...view,
-      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: tracking ? e.tracking : null })),
+      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
       showBranding: await this.showBrandingByCode(accountCode),
     };
   }

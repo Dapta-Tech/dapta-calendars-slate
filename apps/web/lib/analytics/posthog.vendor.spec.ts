@@ -389,7 +389,7 @@ describe('the PostHog adapter, against the real library', () => {
     expect(global['calendars_host']?.__loaded).toBe(true);
     expect(global['calendars_visitor']?.__loaded).toBe(true);
     // One library request, however many audiences queued an init.
-    expect(b.w.document.querySelectorAll('script[src$="/static/array.js"]')).toHaveLength(1);
+    expect(b.w.document.querySelectorAll('script[src$="/array.js"]')).toHaveLength(1);
     port.capture('calendars_link_copied');
     await wait(FLUSH_MS);
     expect((await b.sent()).some((e) => e.event === 'calendars_link_copied')).toBe(true);

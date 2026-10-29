@@ -22,11 +22,11 @@ import {
  */
 export function EventTracking({ tracking }: { tracking: EventTracking | null | undefined }) {
   const t = resolveTracking(tracking);
-  const { gtmId, metaPixelId, posthogKey, posthogHost, hubspotTrackingId } = t;
+  const { gtmId, ga4Id, metaPixelId, posthogKey, posthogHost, hubspotTrackingId } = t;
   useEffect(() => {
-    const ids = { gtmId, metaPixelId, posthogKey, posthogHost, hubspotTrackingId };
+    const ids = { gtmId, ga4Id, metaPixelId, posthogKey, posthogHost, hubspotTrackingId };
     if (hasAnyTracking(ids)) startTracking(window as TrackingWindow, ids);
-  }, [gtmId, metaPixelId, posthogKey, posthogHost, hubspotTrackingId]);
+  }, [gtmId, ga4Id, metaPixelId, posthogKey, posthogHost, hubspotTrackingId]);
 
   if (!hasAnyTracking(t)) return null;
   return (

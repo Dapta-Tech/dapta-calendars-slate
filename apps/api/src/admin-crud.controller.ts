@@ -60,6 +60,7 @@ import {
   memberResendInviteSchema,
   type OneOffLinkView,
   memberPatchSchema,
+  EVENT_TRACKING_HOST_SCRIPT_KEYS,
   normalizeEventTracking,
   scheduleInputSchema,
   teamInputSchema,
@@ -183,17 +184,20 @@ export class AdminCrudController {
     // an invite creates the member and sends nothing, as it always did.
     @Optional() @Inject(EmailEffects) private readonly email?: EmailEffects,
     // EVENT_TRACKING_ACCOUNTS. LAST and @Optional() for the same reason:
-    // absent, no workspace may set tracking, which is also the env's default.
+    // absent, no workspace may set GTM, GA4 or HubSpot, which is also the
+    // env's default.
     @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS'>,
   ) {}
 
   /**
-   * Tracking and pixels change only by an owner or admin, and only in a
-   * workspace the deployment allows (`trackingAllowedFor`): the tags run the
-   * host's JavaScript on the dashboard's origin. A save that leaves them as
+   * Tracking and pixels change only by an owner or admin. Meta Pixel and
+   * PostHog ids need nothing more: they load only vendor code. A Google Tag
+   * Manager container, GA4 property or HubSpot portal can run code set up in
+   * the host's own account on the dashboard's origin, so setting or changing
+   * one also needs a workspace the deployment allows (`trackingAllowedFor`). A save that leaves the ids as
    * they are (every editor save sends them) passes untouched, so a member can
-   * still edit their event. Clearing them needs an owner or admin too, but
-   * never the deployment's permission.
+   * still edit their event. Clearing any id needs an owner or admin, but never
+   * the deployment's permission.
    */
   private async assertTrackingChange(
     p: Parameters<typeof assertAdmin>[0] & { accountId: string },
@@ -202,16 +206,21 @@ export class AdminCrudController {
   ): Promise<void> {
     if (next === undefined) return;
     const normalized = normalizeEventTracking(next);
-    if (JSON.stringify(normalized) === JSON.stringify(normalizeEventTracking(current))) return;
+    const before = normalizeEventTracking(current);
+    if (JSON.stringify(normalized) === JSON.stringify(before)) return;
     assertAdmin(p);
-    if (!normalized) return;
+    // Only a NEW or changed GTM container, GA4 property or HubSpot portal
+    // needs the deployment's permission: those can run the host's own code.
+    // Every other id, and clearing any id, needs none.
+    const newScripts = EVENT_TRACKING_HOST_SCRIPT_KEYS.some((key) => normalized?.[key] && normalized[key] !== before?.[key]);
+    if (!newScripts) return;
     const account = await this.db.get<{ code: string; vanity_slug: string | null }>(
       sql`SELECT code, vanity_slug FROM account WHERE id = ${p.accountId} LIMIT 1`,
     );
     if (!account || !trackingAllowedFor(this.env, { code: account.code, vanitySlug: account.vanity_slug })) {
       throw new BadRequestException({
         error: 'TRACKING_DISABLED',
-        message: 'Tracking and pixels are not enabled for this workspace on this deployment.',
+        message: 'Google Tag Manager, Google Analytics and HubSpot are not enabled for this workspace on this deployment.',
       });
     }
   }

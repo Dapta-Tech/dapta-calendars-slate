@@ -4,7 +4,11 @@
  * They are deliberately different shapes:
  *
  *   internal    { type:  'dapta-calendars:resize',            height }
- *   host-facing { event: 'dapta-calendars.booking_scheduled', payload }
+ *   host-facing { event: 'dapta-calendars.<step>',             payload }
+ *
+ * The host-facing steps, in the order a visitor meets them (Calendly's ladder,
+ * named the same way): `event_type_viewed`, `date_selected`, `time_selected`,
+ * `booking_scheduled`.
  *
  * One keys on `type` with a colon and is read only by `public/embed.js`; the
  * other keys on `event` with a dot, mirroring `calendly.event_scheduled` so the
@@ -20,6 +24,9 @@
 
 export const RESIZE_MESSAGE_TYPE = 'dapta-calendars:resize';
 export const BOOKING_SCHEDULED_EVENT = 'dapta-calendars.booking_scheduled';
+export const EVENT_TYPE_VIEWED_EVENT = 'dapta-calendars.event_type_viewed';
+export const DATE_SELECTED_EMBED_EVENT = 'dapta-calendars.date_selected';
+export const TIME_SELECTED_EMBED_EVENT = 'dapta-calendars.time_selected';
 
 /** A frame taller than this is a runaway measurement, not a booking page. */
 export const MAX_EMBED_HEIGHT = 20000;
@@ -70,4 +77,27 @@ export function postBookingScheduled(payload: {
     },
     '*',
   );
+}
+
+/**
+ * A step before the booking, to the framing page: the event type was shown, a
+ * day was picked, a time was picked. Same rule as `postBookingScheduled`: the
+ * payload is only what the URL already says (`eventTypeSlug`) and the day or
+ * instant picked, because any page that frames this one receives it.
+ */
+export function postBookingStep(
+  step: 'event_type_viewed' | 'date_selected' | 'time_selected',
+  payload: { eventTypeSlug: string; date?: string; startUtc?: string },
+): void {
+  if (!isFramed()) return;
+  const event =
+    step === 'event_type_viewed'
+      ? EVENT_TYPE_VIEWED_EVENT
+      : step === 'date_selected'
+        ? DATE_SELECTED_EMBED_EVENT
+        : TIME_SELECTED_EMBED_EVENT;
+  const body: { eventTypeSlug: string; date?: string; startUtc?: string } = { eventTypeSlug: payload.eventTypeSlug };
+  if (step === 'date_selected' && payload.date) body.date = payload.date;
+  if (step === 'time_selected' && payload.startUtc) body.startUtc = payload.startUtc;
+  window.parent.postMessage({ event, payload: body }, '*');
 }

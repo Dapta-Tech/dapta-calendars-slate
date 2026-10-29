@@ -165,9 +165,12 @@ export interface Me {
    */
   onboardingRequired?: boolean;
   setupRequired?: boolean;
-  /** Whether this deployment lets the workspace load tracking and pixels on its
-   *  booking pages (`EVENT_TRACKING_ACCOUNTS`). Absent from an older API: off. */
+  /** The earlier name of `eventTrackingHostScriptsEnabled`, same answer. */
   eventTrackingEnabled?: boolean;
+  /** Whether this deployment lets the workspace load Google Tag Manager,
+   *  Google Analytics and HubSpot on its booking pages (`EVENT_TRACKING_ACCOUNTS`).
+   *  Meta Pixel and PostHog need no permission. Absent from an older API: off. */
+  eventTrackingHostScriptsEnabled?: boolean;
 }
 
 export type AccountRole = 'owner' | 'admin' | 'member';
