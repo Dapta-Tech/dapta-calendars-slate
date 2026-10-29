@@ -13,6 +13,7 @@ import {
   ONBOARDING_COHORTS,
   ONBOARDING_QUESTION_KEYS,
   ONBOARDING_TEMPLATE_IDS,
+  hasControlCharacter,
   isSuccessRedirectUrl,
 } from '@slate/engine';
 
@@ -596,18 +597,10 @@ export function normalizeBookingUtm(input: unknown): BookingUtm | null {
     const value = raw[key];
     if (typeof value !== 'string') continue;
     const v = value.trim();
-    if (!v || v.length > MAX_BOOKING_UTM_VALUE || hasControlChar(v)) continue;
+    if (!v || v.length > MAX_BOOKING_UTM_VALUE || hasControlCharacter(v)) continue;
     out[key] = v;
   }
   return Object.keys(out).length > 0 ? out : null;
-}
-
-function hasControlChar(value: string): boolean {
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return true;
-  }
-  return false;
 }
 
 /**

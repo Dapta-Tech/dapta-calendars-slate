@@ -9,7 +9,7 @@
 export const MAX_SUCCESS_REDIRECT_URL = 2048;
 
 /** A C0 control character or DEL anywhere in `value` (a code scan, not a regex: lint forbids those). */
-function hasControlCharacter(value: string): boolean {
+export function hasControlCharacter(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
     if (code < 0x20 || code === 0x7f) return true;
