@@ -18,6 +18,8 @@ import { docsNavHref } from '@/lib/docs-url';
 import { getLocale } from '@/lib/locale';
 import { getProductTheme } from '@/lib/theme.server';
 import { ONBOARDING_SKIP_COOKIE } from '@/lib/onboarding';
+import { PublicOriginProvider } from '@/components/public-origin';
+import { bookingOrigin } from '@/lib/booking-host';
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const jar = await cookies();
@@ -104,6 +106,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         config={analytics}
         identity={analytics ? hostAnalyticsIdentity(me, jar.get(LANDING_ID_COOKIE)?.value) : null}
       />
+      {/* Public booking links (copy, open, embed) name the booking host when
+          booking pages have one, read here at request time. */}
+      <PublicOriginProvider origin={bookingOrigin()}>
       <AdminShell
         initialCollapsed={initialCollapsed}
         initialTheme={initialTheme}
@@ -122,6 +127,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       >
         {children}
       </AdminShell>
+      </PublicOriginProvider>
     </ToastProvider>
   );
 }

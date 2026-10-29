@@ -537,6 +537,10 @@ export const availabilityResponseSchema = z.object({
     /** The event's tracking ids, for the one-off link page, which serves a
      *  hidden event no listing carries. Absent when the event has none. */
     tracking: eventTrackingSchema.nullable().optional(),
+    /** When the tracking carries Google Tag Manager, Google Analytics or HubSpot
+     *  because booking pages have a host of their own: that host's origin, the
+     *  only one the page may start them on. Null or absent: no such limit. */
+    trackingHostScriptsOrigin: z.string().nullable().optional(),
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
@@ -1046,6 +1050,10 @@ export const publicProfileSchema = z.object({
        *  wire; absent and null are both "no tracking". Public by nature: every
        *  one of them is in the page's own markup once it loads. */
       tracking: eventTrackingSchema.nullable().optional(),
+      /** When the tracking carries Google Tag Manager, Google Analytics or HubSpot
+       *  because booking pages have a host of their own: that host's origin, the
+       *  only one the page may start them on. Null or absent: no such limit. */
+      trackingHostScriptsOrigin: z.string().nullable().optional(),
     }),
   ),
 });
@@ -1072,6 +1080,10 @@ export const teamProfileSchema = z.object({
       location: eventLocationSchema.nullable().optional(),
       /** The event's tracking ids; see `publicProfileSchema`. */
       tracking: eventTrackingSchema.nullable().optional(),
+      /** When the tracking carries Google Tag Manager, Google Analytics or HubSpot
+       *  because booking pages have a host of their own: that host's origin, the
+       *  only one the page may start them on. Null or absent: no such limit. */
+      trackingHostScriptsOrigin: z.string().nullable().optional(),
     }),
   ),
   /** The workspace brand kit, which a team page renders directly (a team

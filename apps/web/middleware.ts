@@ -13,6 +13,7 @@ import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
 import { framingHeaders } from '@/lib/framing';
 import { NOINDEX_HEADER_VALUE, deploymentNoindex } from '@/lib/indexing';
 import { requestOrigin } from '@/lib/request-origin';
+import { routeForHost } from '@/lib/booking-host';
 
 /**
  * Canonical-host redirect: the Dapta cloud deployment's canonical hosts are
@@ -130,6 +131,24 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url, 308);
   }
 
+  // Booking pages on a host of their own (`lib/booking-host.ts`): the booking
+  // host bounces the dashboard's paths to the app host, other hosts send public
+  // pages there once the redirects are on, and the app host refuses writes a
+  // page on another host of the same site made the browser send. Inert while
+  // `PUBLIC_BOOKING_URL` is unset.
+  const decision = routeForHost({
+    host: (req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? '').split(',')[0]!.trim().toLowerCase(),
+    method: req.method,
+    pathname: req.nextUrl.pathname,
+    search: req.nextUrl.search,
+    fetchSite: req.headers.get('sec-fetch-site'),
+    fetchMode: req.headers.get('sec-fetch-mode'),
+    fetchDest: req.headers.get('sec-fetch-dest'),
+    purpose: req.headers.get('sec-purpose') ?? req.headers.get('purpose'),
+  });
+  if (decision.kind === 'redirect') return NextResponse.redirect(decision.url, decision.status);
+  if (decision.kind === 'refuse') return new NextResponse(null, { status: decision.status });
+
   // Tag the request with its own path so the ROOT layout can tell a product
   // route from a booking page and stamp the right `data-theme` before paint.
   // The App Router gives a layout its params and never its path, and the root
@@ -171,6 +190,9 @@ export function middleware(req: NextRequest) {
   // which are nothing a search engine lists.)
   if (deploymentNoindex()) res.headers.set('X-Robots-Tag', NOINDEX_HEADER_VALUE);
 
+  // The booking host keeps no cookie of dCal's: nothing to read there, and a
+  // host's own tags share that host.
+  if (decision.bookingHost) return res;
   return parkLandingId(req, parkAttribution(req, res));
 }
 

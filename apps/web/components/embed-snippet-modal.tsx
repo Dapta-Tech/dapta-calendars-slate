@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { Modal } from '@/components/modal';
 import { embedSnippet } from '@/lib/embed';
+import { usePublicOrigin } from '@/components/public-origin';
 
 type EmbedMessages = BookingMessages['embed'];
 
@@ -43,7 +44,9 @@ export function EmbedSnippetModal({
    * client render agree (the same trick `CopyLink` uses).
    */
   const [origin, setOrigin] = useState('');
-  useEffect(() => setOrigin(window.location.origin), []);
+  // The booking host when booking pages have one: the snippet names it.
+  const publicOrigin = usePublicOrigin();
+  useEffect(() => setOrigin(publicOrigin()), [publicOrigin]);
 
   // Per instance. The event-types list mounts one of these per row, and only
   // the open one is in the DOM — but a shared literal id is a duplicate waiting

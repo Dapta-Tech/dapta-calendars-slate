@@ -26,23 +26,23 @@ afterEach(() => {
   resetTrackingForTests();
 });
 
-const mount = async (tracking: Parameters<typeof EventTracking>[0]['tracking']) => {
+const mount = async (tracking: Parameters<typeof EventTracking>[0]['tracking'], hostScriptsOrigin: string | null = null) => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  await act(async () => root!.render(<EventTracking tracking={tracking} />));
+  await act(async () => root!.render(<EventTracking tracking={tracking} hostScriptsOrigin={hostScriptsOrigin} />));
 };
 
 describe('EventTracking', () => {
   it('renders no markup and starts no tag for an event without ids', async () => {
-    expect(renderToStaticMarkup(<EventTracking tracking={null} />)).toBe('');
-    expect(renderToStaticMarkup(<EventTracking tracking={{ gtmId: '  ' }} />)).toBe('');
+    expect(renderToStaticMarkup(<EventTracking tracking={null} hostScriptsOrigin={null} />)).toBe('');
+    expect(renderToStaticMarkup(<EventTracking tracking={{ gtmId: '  ' }} hostScriptsOrigin={null} />)).toBe('');
     await mount(null);
     expect(document.head.querySelectorAll('script')).toHaveLength(0);
   });
 
   it('server-renders only the noscript fallbacks, their ids encoded', () => {
-    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '424242424242', hubspotTrackingId: '7' }} />);
+    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '424242424242', hubspotTrackingId: '7' }} hostScriptsOrigin={null} />);
     expect(html).toContain('<noscript data-testid="tracking-gtm-noscript">');
     expect(html).toContain('https://www.googletagmanager.com/ns.html?id=GTM-AB12');
     expect(html).toContain('<noscript data-testid="tracking-meta-pixel-noscript">');
@@ -50,9 +50,28 @@ describe('EventTracking', () => {
     expect(html).not.toContain('<script');
   });
 
+  it('with a booking host of its own, server-renders no GTM container fallback (the server cannot tell the origin)', () => {
+    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '424242424242' }} hostScriptsOrigin="https://book.example.com" />);
+    expect(html).not.toContain('googletagmanager.com');
+    expect(html).toContain('<noscript data-testid="tracking-meta-pixel-noscript">');
+  });
+
   it('starts the tags after hydration', async () => {
     await mount({ gtmId: 'GTM-AB12', hubspotTrackingId: '7' });
     const srcs = [...document.head.querySelectorAll('script')].map((s) => s.src);
     expect(srcs).toEqual(['https://www.googletagmanager.com/gtm.js?id=GTM-AB12', 'https://js.hs-scripts.com/7.js']);
   });
+
+  it('with a booking host of its own, starts GTM, GA4 and HubSpot only on that origin; Meta and PostHog anywhere', async () => {
+    await mount({ gtmId: 'GTM-AB12', hubspotTrackingId: '7', metaPixelId: '424242424242' }, 'https://book.example.com');
+    const offOrigin = [...document.head.querySelectorAll('script')].map((s) => s.src);
+    expect(offOrigin).toEqual(['https://connect.facebook.net/en_US/fbevents.js']);
+  });
+
+  it('on the booking origin itself, starts them all', async () => {
+    await mount({ gtmId: 'GTM-AB12', hubspotTrackingId: '7' }, window.location.origin);
+    const srcs = [...document.head.querySelectorAll('script')].map((s) => s.src);
+    expect(srcs).toEqual(['https://www.googletagmanager.com/gtm.js?id=GTM-AB12', 'https://js.hs-scripts.com/7.js']);
+  });
 });
+

@@ -11,6 +11,10 @@
       "types": "./dist/env.d.ts",
       "import": "./dist/env.js"
     },
+    "./url": {
+      "types": "./dist/url.d.ts",
+      "import": "./dist/url.js"
+    },
     "./tsconfig/base.json": "./tsconfig/base.json",
     "./tsconfig/nest.json": "./tsconfig/nest.json",
     "./tsconfig/next.json": "./tsconfig/next.json",

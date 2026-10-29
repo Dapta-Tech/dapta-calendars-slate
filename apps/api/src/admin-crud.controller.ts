@@ -186,7 +186,7 @@ export class AdminCrudController {
     // EVENT_TRACKING_ACCOUNTS. LAST and @Optional() for the same reason:
     // absent, no workspace may set GTM, GA4 or HubSpot, which is also the
     // env's default.
-    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS'>,
+    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS' | 'PUBLIC_APP_URL' | 'PUBLIC_BOOKING_URL'>,
   ) {}
 
   /**

@@ -104,6 +104,8 @@ export interface TeamProfile {
     location?: EventLocationDto | null;
     /** The event's own tracking ids (GTM, Meta Pixel, PostHog, HubSpot); absent or null = none. */
     tracking?: EventTracking | null;
+    /** The only origin the page may start GTM, GA4 and HubSpot on, when the API says so. */
+    trackingHostScriptsOrigin?: string | null;
   }>;
   /** The workspace brand kit, worn directly by a team page. Absent on an older API. */
   brand?: BrandKit | null;

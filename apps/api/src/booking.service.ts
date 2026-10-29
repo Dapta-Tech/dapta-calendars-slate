@@ -27,6 +27,7 @@ import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { AnalyticsEffects, type BookingChannel } from './analytics-effects';
 import { trackingAllowedFor } from './event-tracking-gate';
+import { bookingHostIsSeparate, hostScriptsOriginFor, publicBookingBase } from './booking-origin';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
@@ -183,7 +184,7 @@ export class BookingService {
   }
 
   private manageUrl(uid: string, token: string): string {
-    return `${this.env.PUBLIC_APP_URL}/manage/${uid}?token=${token}`;
+    return `${publicBookingBase(this.env)}/manage/${uid}?token=${token}`;
   }
 
   async profile(accountCode: string, handle: string): Promise<PublicProfile | null> {
@@ -193,7 +194,7 @@ export class BookingService {
     const scripts = await this.hostScriptsFor(accountCode, view.eventTypes);
     return {
       ...view,
-      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
+      eventTypes: view.eventTypes.map((e) => this.withHostScriptsOrigin({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
       showBranding: await this.showBrandingByCode(accountCode),
     };
   }
@@ -208,8 +209,20 @@ export class BookingService {
    */
   private async gatedEventType<T extends { tracking?: unknown }>(eventType: T, accountCode: string): Promise<T> {
     if (!hasHostScriptTracking(eventType.tracking)) return eventType;
-    if (await this.trackingAllowedByCode(accountCode)) return eventType;
+    if (await this.trackingAllowedByCode(accountCode)) return this.withHostScriptsOrigin(eventType);
     return { ...eventType, tracking: withoutHostScriptTracking(eventType.tracking) ?? undefined };
+  }
+
+  /**
+   * Name the only origin a page may start the host-script tags on, when they
+   * came through because booking pages have a host of their own. The web keeps
+   * them only when its own setting names the same origin and starts them only
+   * there, so a web whose setting is missing, late or different never runs
+   * them (fail closed).
+   */
+  private withHostScriptsOrigin<T extends { tracking?: unknown }>(eventType: T): T {
+    const origin = hostScriptsOriginFor(this.env);
+    return origin && hasHostScriptTracking(eventType.tracking) ? { ...eventType, trackingHostScriptsOrigin: origin } : eventType;
   }
 
   /** Whether a listing's GTM, GA4 and HubSpot ids may stay; asked only when one has them. */
@@ -219,7 +232,7 @@ export class BookingService {
   }
 
   private async trackingAllowedByCode(accountCode: string): Promise<boolean> {
-    if (!this.env.EVENT_TRACKING_ACCOUNTS?.trim()) return false;
+    if (!this.env.EVENT_TRACKING_ACCOUNTS?.trim() && !bookingHostIsSeparate(this.env)) return false;
     const account = await getAccountByCode(this.db, accountCode);
     return !!account && trackingAllowedFor(this.env, { code: account.code, vanitySlug: account.vanity_slug });
   }
@@ -967,7 +980,7 @@ export class BookingService {
     const scripts = await this.hostScriptsFor(accountCode, view.eventTypes);
     return {
       ...view,
-      eventTypes: view.eventTypes.map((e) => ({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
+      eventTypes: view.eventTypes.map((e) => this.withHostScriptsOrigin({ ...e, tracking: scripts ? e.tracking : withoutHostScriptTracking(e.tracking) })),
       showBranding: await this.showBrandingByCode(accountCode),
     };
   }

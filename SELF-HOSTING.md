@@ -213,14 +213,52 @@ localhost. A TLS-terminating proxy in front of it is fine: the browser sees
 https. A production web served over plain http to other hosts cannot sign
 anyone in (it could not keep a `Secure` cookie before either).
 
-| Var | Default | Required when | Secret? |
-|---|---|---|---|
-| `PUBLIC_BOOKING_URL` | — (booking pages on `PUBLIC_APP_URL`) | booking pages are served from a host of their own (cloud: `https://book.<domain>`); set the same value on the web and the API | no |
+### Booking pages on a host of their own
 
-Set it only together with that host. From the moment it names an origin other
-than `PUBLIC_APP_URL`, the web stops reading the session cookie's pre-`__Host-`
+Booking pages (personal, team, one-off links and the invitee's manage page) can
+live on a host apart from the dashboard, so the hosts' own tags never share an
+origin with a signed-in session. Cloud: `app.<domain>` for the dashboard,
+`book.<domain>` for booking pages.
+
+| Var | Default | Set on | What it does |
+|---|---|---|---|
+| `PUBLIC_BOOKING_URL` | — (booking pages on `PUBLIC_APP_URL`) | web and API, same value | the booking host: it serves every booking page and sends the dashboard's paths to `PUBLIC_APP_URL`; the links the app writes (manage links in emails, MCP booking links, the dashboard's copy, open and embed snippets) name it; every workspace may load Google Tag Manager, Google Analytics and HubSpot, which start only on that host |
+| `BOOKING_HOST_REDIRECTS` | `off` | web | `temporary` (307) or `permanent` (308): every other host answers a booking page's GET with a redirect to the same path and query on the booking host |
+
+Move in steps, each undone by reverting its setting:
+
+1. Point the new host at the web, then set `PUBLIC_BOOKING_URL` on the **web
+   first**. Once every web instance runs with it, set it on the **API**. To
+   roll back, take it off the API first. The API is what opens Google Tag
+   Manager, Google Analytics and HubSpot to every workspace and hands the
+   booking origin over with them. The web keeps them only when that origin
+   matches its own setting, and starts them only on it. With the setting on
+   the API alone, or the two apart, the web drops them. The order still
+   matters while instances roll: a web instance without the setting still
+   reads the session's pre-`__Host-` name, so the API may not open the tags
+   to every workspace until every instance has it. Both hosts now serve
+   booking pages, and new links name the new one. `PUBLIC_APP_URL` must be
+   set on the web too: the booking host sends the dashboard's paths there.
+2. Once every route type and your real traffic answer on the new host, set
+   `BOOKING_HOST_REDIRECTS=temporary`; after a stable month, `permanent`.
+
+From the moment `PUBLIC_BOOKING_URL` names an origin other than
+`PUBLIC_APP_URL`, the web stops reading the session cookie's pre-`__Host-`
 name, because a page on that other host could have planted one: a session
-that has not moved to the `__Host-` name by then signs in once more.
+that has not moved to the `__Host-` name by then signs in once more. Taking
+the setting off the web again makes it read that name again, and a cookie a
+tag planted meanwhile can still be in a browser. So once tags have run on the
+booking host, undo the move by taking the setting off the API (the tags stop)
+and keep it on the web, unless the booking host itself has to go.
+
+What keeps working: a POST is served where it lands (an open tab), except a
+write another host of the same site made the browser send, which the app host
+refuses; `/api/availability` and `embed.js` answer on both hosts; an embed's
+frame is never redirected, so a site whose CSP allows only the old host as a
+frame source keeps booking (new snippets name the booking host; Google Tag
+Manager, Google Analytics and HubSpot run only there). A host page that checks
+`event.origin` on the embed's messages must accept the booking host's origin
+for new snippets.
 
 ### Tracking and pixels per event type
 

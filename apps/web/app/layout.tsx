@@ -12,6 +12,7 @@ import { documentLangAnswers, documentLocale } from '@/lib/locale';
 import { PRODUCT_NAME } from '@/lib/product-name';
 import { isPublicDocument, resolveDocumentTheme } from '@/lib/theme.server';
 import './globals.css';
+import { bookingOrigin } from '@/lib/booking-host';
 
 /**
  * Figtree — the brand face, and the voice that does all the talking.
@@ -33,11 +34,12 @@ const figtree = Figtree({
   display: 'swap',
 });
 
-// Absolute base for OG/twitter URLs (PUBLIC_APP_URL is the deployment's public
-// web origin — already in .env for manage/booking links). Bad value → localhost.
+// Absolute base for OG/twitter URLs: the booking host when booking pages have
+// one (what gets shared is a booking page), else PUBLIC_APP_URL. Bad value →
+// localhost.
 function appBaseUrl(): URL {
   try {
-    return new URL(process.env.PUBLIC_APP_URL || 'http://localhost:3000');
+    return new URL(bookingOrigin() ?? (process.env.PUBLIC_APP_URL || 'http://localhost:3000'));
   } catch {
     return new URL('http://localhost:3000');
   }

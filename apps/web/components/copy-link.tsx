@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { track } from '@/lib/analytics/port';
 import { cn } from '@/lib/cn';
+import { usePublicHref, usePublicOrigin } from '@/components/public-origin';
 
 const stripProtocol = (u: string) => u.replace(/^https?:\/\//, '');
 
@@ -28,14 +29,17 @@ export function CopyLink({
 }) {
   const [copied, setCopied] = useState(false);
   const [display, setDisplay] = useState(() => stripProtocol(path));
+  // The booking host when booking pages have one, else this page's origin.
+  const publicOrigin = usePublicOrigin();
+  const publicHref = usePublicHref();
 
   useEffect(() => {
-    setDisplay(stripProtocol(`${window.location.origin}${path}`));
-  }, [path]);
+    setDisplay(stripProtocol(`${publicOrigin()}${path}`));
+  }, [path, publicOrigin]);
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${path}`);
+      await navigator.clipboard.writeText(`${publicOrigin()}${path}`);
       track('link_copied', { link: 'page' });
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -56,7 +60,7 @@ export function CopyLink({
         {copied ? (labels?.copied ?? 'Copied') : (labels?.copy ?? 'Copy')}
       </Button>
       <a
-        href={path}
+        href={publicHref(path)}
         target="_blank"
         rel="noopener noreferrer"
         className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), 'shrink-0')}
