@@ -71,7 +71,15 @@ test('keyboard only: arrows to a day, Enter, Tab to a time, type, submit', async
   const email = visitorEmail('kbd');
   // Hydrated first: a key pressed on server-rendered markup reaches no handler.
   await page.goto(PAGE, { waitUntil: 'networkidle' });
-  const firstOpen = page.getByRole('grid').getByRole('button', { disabled: false }).first();
+  // Arrows walk the open days of the month on screen, so they need two of
+  // them. Near a month's end the shown month can have one only (on Oct 29 it
+  // was Oct 30 alone): start in the next month then, as a visitor would.
+  const openDays = page.getByRole('grid').getByRole('button', { disabled: false });
+  if ((await openDays.count()) < 2) {
+    await page.getByRole('button', { name: /next month|mes siguiente/i }).click();
+    await expect.poll(() => openDays.count()).toBeGreaterThan(1);
+  }
+  const firstOpen = openDays.first();
   await firstOpen.focus();
   const start = await firstOpen.getAttribute('data-day');
   const focusedDay = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset['day'] ?? null);
