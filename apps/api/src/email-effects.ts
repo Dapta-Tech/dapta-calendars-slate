@@ -128,6 +128,39 @@ export const CONFERENCING_LINK_WAIT_ATTEMPTS = 3;
  */
 const LINK_AWARE_KINDS = new Set(['confirmation', 'reschedule']);
 
+/**
+ * Whether a booking is an online meeting that should carry a join link: a
+ * `conferencing` location, and also a booking whose host set no location at
+ * all. Without a place, the meeting happens online; the organizer's calendar
+ * mints the room, and the link reaches the invitee in this service's own email
+ * and .ics. (Dapta's calendar backend always added a room to such events and
+ * the invitee got it only from the provider's own invitation, which F4 of the
+ * 2026-10-30 production E2E removes.) Any other kind (in person, a phone
+ * number, a custom place) never asks for one. `undefined` is not "no
+ * location": it is a queued row from before the kind was snapshotted, which
+ * never waits for a link.
+ */
+export function wantsConferencingLink(kind: string | null | undefined): boolean {
+  return kind === 'conferencing' || kind === null || kind === '';
+}
+
+/**
+ * Whether the invitee gets this service's own email, with its .ics, for a
+ * change to the booking: the account's attendee toggle for the kind, with the
+ * default the enqueue side applies. The calendar write reads it to decide
+ * whether the provider should invite the guest itself, so the guest is invited
+ * exactly once: never by both, never by neither.
+ */
+export async function attendeeEmailedFor(
+  db: Db,
+  accountId: string,
+  kind: 'confirmation' | 'reschedule' | 'cancellation',
+): Promise<boolean> {
+  const key = emailKeyFor(kind, 'attendee');
+  const stored = (await getNotificationSettings(db, accountId)).get(key);
+  return stored ? stored.enabled : defaultEnabledFor(key);
+}
+
 /** The booking emails the outbox can carry. */
 export type EmailKind =
   | 'confirmation'
@@ -574,7 +607,7 @@ export class EmailEffects {
       // rather than discovered three failed attempts later.
       const waitsForLink =
         LINK_AWARE_KINDS.has(kind) &&
-        ctx.locationKind === 'conferencing' &&
+        wantsConferencingLink(ctx.locationKind) &&
         this.calendar?.enabled === true;
       // The grace must outlast a poll tick, or it expires before the worker
       // has looked at the calendar row even once.
@@ -766,6 +799,8 @@ export class EmailEffects {
       cancellationReason: extra.cancellationReason ?? null,
       previousStartUtc: extra.previousStartUtc ?? null,
       accountCode: ctx.accountCode ?? null,
+      // Only when it differs: a booking never moved to a new uid keeps its own.
+      ...(ctx.calendarUid && ctx.calendarUid !== ctx.uid ? { calendarUid: ctx.calendarUid } : {}),
       bookingLink:
         ctx.bookAgain && this.env
           ? `${publicBookingBase(this.env)}/${ctx.bookAgain.accountCode}/${ctx.bookAgain.handle}/${ctx.bookAgain.slug}`
@@ -921,7 +956,7 @@ export class EmailEffects {
       // for the full budget and log a failure per attempt, for nothing.
       const stillWriting =
         !n.meetingUrl &&
-        n.locationKind === 'conferencing' &&
+        wantsConferencingLink(n.locationKind) &&
         LINK_AWARE_KINDS.has(kind) &&
         (await hasPendingCalendarJob(this.db, n.uid));
       if (stillWriting && attempts < CONFERENCING_LINK_WAIT_ATTEMPTS) {

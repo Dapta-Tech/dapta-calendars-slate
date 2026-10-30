@@ -99,6 +99,78 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     );
   });
 
+  // F4 of the 2026-10-30 production E2E: the invitee got two invitations per
+  // booking (this service's email with its .ics, and the provider's own) and
+  // two cancellations. The provider now stays quiet whenever the invitee gets
+  // this service's email for the change.
+  describe('one invitation per booking (sendInvitations)', () => {
+    it('create, move and delete ask the provider not to invite while the invitee gets our email', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      await (effects as unknown as Awaitable).removeEvent(uid);
+      expect(provider.created[0]!.sendInvitations).toBe(false);
+      expect(provider.updated[0]!.sendInvitations).toBe(false);
+      expect(provider.deleted[0]!.sendInvitations).toBe(false);
+    });
+
+    it('each change follows its own attendee toggle: switched off, the provider invites', async () => {
+      for (const [key, op] of [
+        ['attendee_confirmation', 'create'],
+        ['attendee_reschedule', 'move'],
+        ['attendee_cancellation', 'delete'],
+      ] as const) {
+        await db.run(sql`DELETE FROM notification_setting WHERE account_id = ${accountId}`);
+        await db.run(
+          sql`INSERT INTO notification_setting (id, account_id, email_key, enabled, created_at, updated_at)
+              VALUES (${randomUUID()}, ${accountId}, ${key}, ${0}, ${Date.now()}, ${Date.now()})`,
+        );
+        const provider = new RecordingCalendarProvider();
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        await (effects as unknown as Awaitable).writeEvent(uid);
+        await (effects as unknown as Awaitable).moveEvent(uid);
+        await (effects as unknown as Awaitable).removeEvent(uid);
+        const seen = {
+          create: provider.created[0]!.sendInvitations,
+          move: provider.updated[0]!.sendInvitations,
+          delete: provider.deleted[0]!.sendInvitations,
+        };
+        expect(seen, key).toEqual({ create: op === 'create', move: op === 'move', delete: op === 'delete' });
+      }
+    });
+
+    it('a guest we never email (an extra attendee) keeps the provider inviting', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
+      await db.run(
+        sql`INSERT INTO booking_guest (id, booking_id, email, email_normalized, name, created_at)
+            VALUES (${randomUUID()}, ${bookingId}, ${'extra@example.com'}, ${'extra@example.com'}, ${null}, ${Date.now()})`,
+      );
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      expect(provider.created[0]!.sendInvitations).toBe(true);
+    });
+
+    it('an online meeting or no location asks for a room; in person never does', async () => {
+      for (const [kind, wanted] of [
+        ['conferencing', true],
+        [null, true],
+        ['in_person', false],
+      ] as const) {
+        const provider = new RecordingCalendarProvider();
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        await db.run(sql`UPDATE booking SET location_kind = ${kind} WHERE uid = ${uid}`);
+        await (effects as unknown as Awaitable).writeEvent(uid);
+        expect(provider.created[0]!.requestConferenceLink, String(kind)).toBe(wanted);
+      }
+    });
+  });
+
   it('accept → creates the remote event and persists a booking_reference', async () => {
     const provider = new RecordingCalendarProvider();
     const effects = new CalendarEffects(provider, db);
@@ -112,7 +184,9 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     // has to show who it is with, host then guest).
     expect(provider.created[0]!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com']);
     expect(provider.created[0]!.organizerEmail).toBe('alex@example.com');
-    expect(provider.created[0]!.requestConferenceLink).toBe(false); // no location kind on the booking
+    // No location kind on the booking: an online meeting, so the organizer's
+    // calendar is asked for a room (F4, 2026-10-30 production E2E).
+    expect(provider.created[0]!.requestConferenceLink).toBe(true);
 
     const refs = await db.all<{ external_event_id: string; meeting_url: string }>(
       sql`SELECT br.external_event_id, br.meeting_url
@@ -174,8 +248,9 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       const byRef = Object.fromEntries(provider.updated.map((u) => [u.connectionRef, u.attendeeEmails]));
       expect(byRef[CAL_REF]).toEqual(['alex@example.com', 'sam@example.com', 'jordan@example.com']);
       expect(byRef['cal-dest-2']).toEqual(['sam@example.com', 'jordan@example.com']);
-      // The room is still requested on the organizer's destination only.
-      expect(provider.created.map((c) => !!c.requestConferenceLink)).toEqual([false, false]);
+      // The room is requested on the organizer's destination only (no location
+      // kind: an online meeting).
+      expect(provider.created.map((c) => !!c.requestConferenceLink)).toEqual([true, false]);
     });
 
     it('stays on their event after they switch destination calendar, on the reschedule', async () => {
@@ -327,12 +402,15 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
 
   it('B9: the retired legacy token in `location` no longer triggers a link on its own', async () => {
     // The old trigger read booking.location. The migration backfills the kind
-    // for rows that already carried the token; anything written AFTER that
-    // without a kind must not mint a link — the KIND is the only trigger.
+    // for rows that already carried the token; after that the KIND is the only
+    // trigger, so a booking whose kind is not an online one mints no link
+    // whatever its location text says.
     const provider = new RecordingCalendarProvider();
     const effects = new CalendarEffects(provider, db);
     const uid = await bookFirstSlot();
-    await db.run(sql`UPDATE booking SET location = ${LEGACY_CONFERENCING_VALUE} WHERE uid = ${uid}`);
+    await db.run(
+      sql`UPDATE booking SET location = ${LEGACY_CONFERENCING_VALUE}, location_kind = ${'in_person'} WHERE uid = ${uid}`,
+    );
 
     await (effects as unknown as Awaitable).writeEvent(uid);
     expect(provider.created[0]!.requestConferenceLink).toBe(false);

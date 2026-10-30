@@ -22,6 +22,9 @@ import {
   recipientTimeZone,
 } from './templates';
 
+/** 2026-01-01T00:00:00Z: the zero of the .ics SEQUENCE clock (see `sequence`). */
+const SEQUENCE_EPOCH_MS = Date.UTC(2026, 0, 1);
+
 /** Everything a booking notification needs to render, provider-agnostic. */
 export interface BookingNotification {
   accountId: string;
@@ -111,6 +114,13 @@ export interface BookingNotification {
   previousStartUtc?: string | null;
   /** DTSTAMP for the .ics (injected for determinism). Defaults to startUtc. */
   stamp?: string;
+  /**
+   * The UID the invitee's calendar knows this meeting by, when it is not `uid`:
+   * the first booking of a chain of moves that each minted a new uid (v2 API,
+   * MCP). The .ics uses it, so a move updates the entry the invitee already
+   * has instead of adding a second. Headers and de-duplication keys keep `uid`.
+   */
+  calendarUid?: string | null;
   /**
    * Which side this message is for: `attendee` → attendee only; `host` → host +
    * co-hosts (deduped, `:host`-suffixed idempotency key). ABSENT = legacy: one
@@ -514,13 +524,32 @@ export class BookingNotifier {
     });
   }
 
-  private ics(n: BookingNotification, method: 'REQUEST' | 'CANCEL', sequence: number) {
+  /**
+   * The .ics SEQUENCE. A calendar applies an update only when its SEQUENCE is
+   * higher than the one it holds (Outlook strictly; others fall back to
+   * DTSTAMP), and since the provider's own invitation was muted (F4) this .ics
+   * is the only thing that moves or cancels the invitee's entry. So it must
+   * always grow: the first confirmation of a booking keeps 0, and every later
+   * one (a move, a cancellation, a confirmation inside a chain of moves) uses
+   * the whole seconds from SEQUENCE_EPOCH to the moment the notification was
+   * assembled (`stamp`, set when it was queued), never below 1. Without a
+   * stamp (a caller that builds notifications directly) the fixed 0/1/2 stand.
+   */
+  private sequence(n: BookingNotification, fixed: number): number {
+    const chained = Boolean(n.calendarUid) && n.calendarUid !== n.uid;
+    if (fixed === 0 && !chained) return 0;
+    const stampMs = n.stamp ? Date.parse(n.stamp) : Number.NaN;
+    if (!Number.isFinite(stampMs)) return fixed;
+    return Math.max(1, Math.floor((stampMs - SEQUENCE_EPOCH_MS) / 1000));
+  }
+
+  private ics(n: BookingNotification, method: 'REQUEST' | 'CANCEL', fixedSequence: number) {
     return {
       filename: 'invite.ics',
       content: buildIcs({
-        uid: n.uid,
+        uid: n.calendarUid || n.uid,
         method,
-        sequence,
+        sequence: this.sequence(n, fixedSequence),
         startUtc: n.startUtc,
         endUtc: n.endUtc,
         title: n.title,

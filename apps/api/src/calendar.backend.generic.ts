@@ -43,6 +43,12 @@
  * once: add them all as attendees, in that order, so the event shows its host.
  * On a co-host's copy the organizer is not in the list. Do not send an
  * invitation to the address that owns the calendar you are writing to.
+ *
+ * INVITATIONS (POST, PATCH and DELETE). `sendInvitations: false` means this
+ * service emails the invitee its own invite (.ics) for this change: write the
+ * event WITHOUT the provider's own invitation, update or cancellation email,
+ * or the guest is invited twice. `true` asks for them; absent leaves it to the
+ * backend. POST and PATCH carry it in the body, DELETE as `?sendInvitations=`.
  *   DELETE /v1/connections/:ref/events/:externalEventId  → 204
  *   GET    /v1/connections/:ref/calendars                → { calendars: [{id,name,primaryEmail?,avatarUrl?,isPrimary?}] }
  *   GET    /v1/connections/:ref                          → { ok, detail }
@@ -159,7 +165,9 @@ export class GenericRestWire implements CalendarWire {
   deleteEvent(input: DeleteEventInput): WireRequest {
     return {
       method: 'DELETE',
-      path: `/v1/connections/${enc(input.connectionRef)}/events/${enc(input.externalEventId)}`,
+      path:
+        `/v1/connections/${enc(input.connectionRef)}/events/${enc(input.externalEventId)}` +
+        (typeof input.sendInvitations === 'boolean' ? `?sendInvitations=${input.sendInvitations}` : ''),
       scope: 'tenant',
       subject: input.connectionRef,
     };

@@ -55,7 +55,7 @@ describe('notification matrix', () => {
     expect(m.text).toContain(base.manageUrl!);
     const cal = ics(m);
     expect(cal).toContain('METHOD:REQUEST');
-    expect(cal).toContain('SEQUENCE:0');
+    expect(cal).toMatch(/^SEQUENCE:0\r?$/m);
     expect(cal).toContain('ORGANIZER;CN=Alex Rivera:mailto:alex@example.com');
     expect(m.attachments?.[0]?.contentType).toContain('method=REQUEST');
   });
@@ -79,7 +79,11 @@ describe('notification matrix', () => {
     expect(m.attachments ?? []).toHaveLength(0);
   });
 
-  it('reschedule → attendee+host, REQUEST/SEQ1, previous time line', async () => {
+  // A move and a cancellation carry the seconds from 2026-01-01 to the stamp
+  // (2026-07-09T12:00Z here), so every later .ics outranks the one before it.
+  const LATER = 189 * 86_400 + 12 * 3_600;
+
+  it('reschedule → attendee+host, REQUEST with a higher SEQUENCE, previous time line', async () => {
     await notifier.sendReschedule({ ...base, previousStartUtc: '2026-07-30T15:00:00.000Z' });
     const m = only();
     expect(recipients(m).sort()).toEqual(['alex@example.com', 'sam@example.com']);
@@ -87,10 +91,10 @@ describe('notification matrix', () => {
     expect(m.text).toContain('Was:');
     const cal = ics(m);
     expect(cal).toContain('METHOD:REQUEST');
-    expect(cal).toContain('SEQUENCE:1');
+    expect(cal).toMatch(new RegExp(`^SEQUENCE:${LATER}\r?$`, 'm'));
   });
 
-  it('cancellation → attendee+host, CANCEL/SEQ2', async () => {
+  it('cancellation → attendee+host, CANCEL with a higher SEQUENCE', async () => {
     await notifier.sendCancellation({ ...base, cancellationReason: 'no longer needed' });
     const m = only();
     expect(recipients(m).sort()).toEqual(['alex@example.com', 'sam@example.com']);
@@ -98,7 +102,7 @@ describe('notification matrix', () => {
     expect(m.text).toContain('Reason: no longer needed');
     const cal = ics(m);
     expect(cal).toContain('METHOD:CANCEL');
-    expect(cal).toContain('SEQUENCE:2');
+    expect(cal).toMatch(new RegExp(`^SEQUENCE:${LATER}\r?$`, 'm'));
   });
 
   it('recipients dedupe when the host IS the attendee', async () => {

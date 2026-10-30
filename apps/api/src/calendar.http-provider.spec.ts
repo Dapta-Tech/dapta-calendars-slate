@@ -137,6 +137,39 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(calls[0]!.url).toBe('https://cal.example.test/v1/connections/conn%2FA/events/ext%209');
   });
 
+  it('a delete the backend answers 404 or 410 to is done: the event is already gone', async () => {
+    for (const status of [404, 410]) {
+      const { provider } = makeProvider([{ status, text: 'gone' }]);
+      await expect(provider.deleteEvent({ connectionRef: 'conn-A', externalEventId: 'ext-9' })).resolves.toBeUndefined();
+    }
+    const { provider } = makeProvider([{ status: 503, text: 'upstream down' }]);
+    await expect(provider.deleteEvent({ connectionRef: 'conn-A', externalEventId: 'ext-9' })).rejects.toBeInstanceOf(
+      CalendarHttpError,
+    );
+  });
+
+  it('the generic wire carries sendInvitations: in the body on a write, as a query on a delete', async () => {
+    const { provider, calls } = makeProvider([
+      { status: 200, json: { externalEventId: 'ext-1' } },
+      { status: 204, text: '' },
+      { status: 204, text: '' },
+    ]);
+    await provider.createEvent({
+      connectionRef: 'conn-A',
+      title: 't',
+      startUtc: '2026-08-01T14:00:00.000Z',
+      endUtc: '2026-08-01T14:30:00.000Z',
+      attendeeEmails: [],
+      sendInvitations: false,
+    });
+    expect((calls[0]!.body as { sendInvitations?: boolean }).sendInvitations).toBe(false);
+    await provider.deleteEvent({ connectionRef: 'conn-A', externalEventId: 'ext-1', sendInvitations: false });
+    expect(calls[1]!.url).toBe('https://cal.example.test/v1/connections/conn-A/events/ext-1?sendInvitations=false');
+    // Absent: the delete is the one it always was.
+    await provider.deleteEvent({ connectionRef: 'conn-A', externalEventId: 'ext-1' });
+    expect(calls[2]!.url).toBe('https://cal.example.test/v1/connections/conn-A/events/ext-1');
+  });
+
   it('lists calendars', async () => {
     const { provider } = makeProvider([
       { json: { calendars: [{ id: 'c1', name: 'Work', isPrimary: true }, { id: 'c2', name: 'Home' }] } },

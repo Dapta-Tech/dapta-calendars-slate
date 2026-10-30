@@ -152,6 +152,16 @@ export async function loadBookingHostConnectionRefs(db: Db, uid: string): Promis
 export interface CalendarWriteContext {
   bookingId: string;
   uid: string;
+  /** The booking's account, for the settings the write depends on. Optional on
+   *  this exported shape so a fixture built elsewhere still compiles. */
+  accountId?: string;
+  /**
+   * How many people are on the booking besides its first invitee: extra
+   * attendees and guests added later. This service emails none of them, so
+   * while there are any the calendar provider's own invitation is their only
+   * one. Optional like `accountId`; absent reads as none.
+   */
+  otherGuestCount?: number;
   title: string;
   /**
    * The event's body, rendered from the event type's description template
@@ -167,9 +177,9 @@ export interface CalendarWriteContext {
   /** The human detail of the Where (address, number, custom label). */
   location: string | null;
   /**
-   * B9: a conferencing link is requested when this is `'conferencing'` — the
-   * kind snapshotted on the booking, never a vendor literal (R15).
-   * Null on rows written before the kind existed.
+   * B9: a conferencing link is requested when this is `'conferencing'`, or null
+   * (the host set no location: an online meeting) — the kind snapshotted on the
+   * booking, never a vendor literal (R15).
    */
   locationKind: LocationKind | null;
   attendeeTimeZone: string | null;
@@ -251,6 +261,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   );
   const b = await db.get<{
     id: string;
+    account_id: string;
     uid: string;
     title: string;
     calendar_description: string | null;
@@ -265,7 +276,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     host_locale: string | null;
     metadata: unknown;
   }>(
-    sql`SELECT b.id, b.uid, b.title, b.calendar_description, b.start_ms, b.end_ms, b.location,
+    sql`SELECT b.id, b.account_id, b.uid, b.title, b.calendar_description, b.start_ms, b.end_ms, b.location,
                b.location_kind, b.attendee_time_zone,
                b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email, m.locale AS host_locale
         FROM booking b
@@ -353,6 +364,8 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
 
   return {
     bookingId: b.id,
+    accountId: b.account_id,
+    otherGuestCount: Math.max(0, uniqueEmails(guestEmails).length - 1),
     uid: b.uid,
     title: b.title,
     description: b.calendar_description,

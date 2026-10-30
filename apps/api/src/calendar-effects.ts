@@ -18,7 +18,7 @@ import {
   type Db,
 } from '@slate/db';
 import { BUSY_CACHE_DEFAULTS, BusyCache, CachedBusyProvider } from './busy-cache';
-import { OutboxSkipError } from './email-effects';
+import { OutboxSkipError, attendeeEmailedFor, wantsConferencingLink } from './email-effects';
 import { CALENDAR, DB, ENV } from './tokens';
 
 /** Calendar lifecycle transitions the outbox can carry. */
@@ -225,12 +225,13 @@ export class CalendarEffects {
     const ordered = [...movable].sort((a, b) =>
       Number(b.destination === organizerRef) - Number(a.destination === organizerRef),
     );
-    const wantsLink = ctx.locationKind === 'conferencing';
+    const wantsLink = wantsConferencingLink(ctx.locationKind);
     // Already have a room? Then never ask for another. This is what keeps a
     // RETRIED move (the outbox re-runs the whole job after a partial failure)
     // from churning a fresh room on every attempt against a backend that
     // reissues rather than echoes.
     const storedUrl = refs.find((r) => r.meetingUrl)?.meetingUrl ?? null;
+    const sendInvitations = await this.providerInvites(ctx, 'reschedule');
     let meetingUrl: string | null = null;
     for (const ref of ordered) {
       // Identity, not position: if NO movable ref belongs to the organizer, none
@@ -257,6 +258,7 @@ export class CalendarEffects {
         organizerEmail: ctx.organizerEmail,
         requestConferenceLink: wantsLink && isOrganizer && !storedUrl,
         timeZone: ctx.attendeeTimeZone,
+        sendInvitations,
       });
       if (isOrganizer) meetingUrl = updated.meetingUrl ?? null;
     }
@@ -287,7 +289,8 @@ export class CalendarEffects {
   private async writeEvent(uid: string): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx || ctx.destinationRefs.length === 0) return;
-    const wantsLink = ctx.locationKind === 'conferencing';
+    const wantsLink = wantsConferencingLink(ctx.locationKind);
+    const sendInvitations = await this.providerInvites(ctx, 'confirmation');
     // The room, once the organizer's destination has minted it. Every later
     // destination is told about it instead of asking for one of its own.
     let meetingUrl: string | null = null;
@@ -326,6 +329,7 @@ export class CalendarEffects {
           // vendor literal on the public path (R15, ADR 0008).
           requestConferenceLink: wantsLink && isOrganizer,
           timeZone: ctx.attendeeTimeZone,
+          sendInvitations,
         });
       } catch (err) {
         // createEvent failed → drop the claim so a later retry can re-create.
@@ -348,15 +352,36 @@ export class CalendarEffects {
     }
   }
 
+  /**
+   * F4 (2026-10-30 production E2E): whether the calendar provider should email
+   * the attendees itself for this change. The invitee used to get two
+   * invitations per booking, and two cancellations: this service's email with
+   * its .ics, and the provider's own. So the provider stays quiet whenever the
+   * invitee gets this service's email for the change (the account's attendee
+   * toggle), and invites only when that email is switched off, or when the
+   * booking has guests this service does not email at all (extra attendees,
+   * guests added later), for whom the provider's invitation is the only one.
+   */
+  private async providerInvites(
+    ctx: CalendarWriteContext,
+    kind: 'confirmation' | 'reschedule' | 'cancellation',
+  ): Promise<boolean> {
+    if ((ctx.otherGuestCount ?? 0) > 0) return true;
+    if (!ctx.accountId) return true;
+    return !(await attendeeEmailedFor(this.db, ctx.accountId, kind));
+  }
+
   private async removeEvent(uid: string): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
     const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
+    const sendInvitations = await this.providerInvites(ctx, 'cancellation');
     for (const ref of refs) {
       if (!ref.externalEventId) continue;
       await this.calendar.deleteEvent({
         connectionRef: ref.destination ?? ctx.destinationRefs[0] ?? '',
         externalEventId: ref.externalEventId,
+        sendInvitations,
       });
     }
     // Only the calendar's rows: the CRM's reference points at a meeting that

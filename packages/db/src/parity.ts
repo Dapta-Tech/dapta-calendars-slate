@@ -2086,6 +2086,15 @@ export interface BookingNotificationContext {
   /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
   bookAgain: { accountCode: string; handle: string; slug: string } | null;
   /**
+   * The uid the invitee's calendar knows this meeting by: the FIRST booking of
+   * its reschedule chain. A move through the v2 API or MCP mints a new booking
+   * uid while the meeting stays the same one, and the .ics of every later email
+   * must update that entry rather than add a second. Equal to `uid` for a
+   * booking that was never moved that way. Optional on this exported shape so
+   * a fixture built elsewhere still compiles; this loader always sets it.
+   */
+  calendarUid?: string;
+  /**
    * The EVENT TYPE's reminders + follow-up (#68) — what the enqueue path
    * schedules from, replacing the account's single lead-time list. NULL on the
    * column (never configured) resolves to the shipped defaults here; a booking
@@ -2136,6 +2145,28 @@ function asAnswerRecord(raw: unknown): Record<string, unknown> {
  * multi-host team bookings, every assigned co-host is loaded too so all hosts
  * are notified.
  */
+/**
+ * The first booking of a reschedule chain, walking `rescheduled_from_uid` back.
+ * Bounded and cycle-safe: a chain is short, and bad data must not spin a worker.
+ * A predecessor row that no longer exists still names the uid the invitee's
+ * calendar was given, so the walk stops there and returns it.
+ */
+export async function rescheduleChainRoot(db: Db, uid: string, from: string | null): Promise<string> {
+  const MAX_CHAIN = 10;
+  const seen = new Set<string>([uid]);
+  let root = uid;
+  let previous = from;
+  for (let hop = 0; previous && hop < MAX_CHAIN && !seen.has(previous); hop++) {
+    seen.add(previous);
+    root = previous;
+    const row = await db.get<{ rescheduled_from_uid: string | null }>(
+      sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${previous} LIMIT 1`,
+    );
+    previous = row?.rescheduled_from_uid ?? null;
+  }
+  return root;
+}
+
 export async function loadBookingNotificationContext(
   db: Db,
   uid: string,
@@ -2157,6 +2188,7 @@ export async function loadBookingNotificationContext(
     host_tz: string | null;
     booking_metadata: unknown;
     booking_locale: string | null;
+    rescheduled_from_uid: string | null;
     event_fields: unknown;
     host_locale: string | null;
     host_handle: string | null;
@@ -2176,7 +2208,7 @@ export async function loadBookingNotificationContext(
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                et.reminders AS event_reminders, b.responses AS responses,
                et.booking_fields AS event_fields, b.locale AS booking_locale,
-               b.metadata AS booking_metadata, et.title AS event_name,
+               b.metadata AS booking_metadata, b.rescheduled_from_uid, et.title AS event_name,
                et.description AS event_description, acc.name AS workspace_name, t.name AS team_name
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -2266,6 +2298,7 @@ export async function loadBookingNotificationContext(
     reminders: effectiveReminders(parseEventReminders(row.event_reminders)),
     formAnswers: asAnswerRecord(parseJsonColumn<unknown>(row.responses, null)),
     accountCode: row.account_code ?? null,
+    calendarUid: await rescheduleChainRoot(db, row.uid, row.rescheduled_from_uid),
     bookAgain:
       row.account_code && row.host_handle && row.event_slug
         ? {

@@ -491,7 +491,15 @@ export class ExternalCalendarProvider implements CalendarProvider {
   }
 
   async deleteEvent(input: DeleteEventInput): Promise<void> {
-    await this.send('deleteEvent', this.wire.deleteEvent(input));
+    try {
+      await this.send('deleteEvent', this.wire.deleteEvent(input));
+    } catch (err) {
+      // Already gone is done: a retried cancel, or an event the host deleted by
+      // hand, must not hold the job in the outbox until it gives up. Google
+      // answers 410 to a second DELETE; other backends answer 404.
+      if (err instanceof CalendarHttpError && (err.status === 404 || err.status === 410)) return;
+      throw err;
+    }
   }
 
   async listCalendars(connectionRef: string): Promise<CalendarSummary[]> {
