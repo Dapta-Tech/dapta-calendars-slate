@@ -386,7 +386,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
         expect(provider.updated.filter((u) => u.sendInvitations === true)).toHaveLength(1);
       });
 
-      it('a create retried after its email was refused invites from the event, and leaves no reinvite to do', async () => {
+      it('a create retried after its email was refused stays quiet, and the reinvite invites once', async () => {
         const provider = new RecordingCalendarProvider();
         const effects = new CalendarEffects(provider, db);
         const uid = await bookFirstSlot();
@@ -401,11 +401,13 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
         provider.createEvent = create;
         await db.run(sql`UPDATE outbox SET status = 'skipped' WHERE id = ${emailId}`);
         await effects.runCalendarJob('create', uid, await payload(), { id: rowId, attempts: 1 });
-        expect(provider.created[0]!.sendInvitations).toBe(true);
-        expect(readCalendarChangeMark(await payload())!.providerMuted).toBeUndefined();
+        // A retry of a change written quietly stays quiet: whether the earlier
+        // attempt reached the event is not something it can know.
+        expect(provider.created[0]!.sendInvitations).toBe(false);
+        expect(readCalendarChangeMark(await payload())!.providerMuted).toBe(true);
         await markOutboxDone(db, rowId);
         await effects.runCalendarJob('reinvite', uid, JSON.stringify({ inviteeEmailId: emailId }), { id: 'r', attempts: 0 });
-        expect(provider.updated).toHaveLength(0);
+        expect(provider.updated.map((u) => u.sendInvitations)).toEqual([false, true]);
       });
 
       it('nothing to do when the change invited with the provider itself', async () => {
@@ -718,7 +720,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
     });
 
-    it("create: the organizer's create failing, the email refused: the retry notifies, no reinvite on top", async () => {
+    it("create: the organizer's create failing, the email refused: the retry stays quiet, one notice from the reinvite", async () => {
       const provider = new NotifyingCalendarProvider([GUEST]);
       const effects = new CalendarEffects(provider, db);
       const uid = await teamBooking();
@@ -727,6 +729,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       await expect(c.run()).rejects.toThrow('vendor 503');
       await c.refuse();
       await c.run();
+      expect(provider.notices).toHaveLength(0);
       await c.finish();
       expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
     });
@@ -750,7 +753,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
     });
 
-    it("move: the organizer's move failing, the email refused: the retry's move notifies, no reinvite on top", async () => {
+    it("move: the organizer's move failing, the email refused: the retry stays quiet, one notice from the reinvite", async () => {
       const provider = new NotifyingCalendarProvider([GUEST]);
       const effects = new CalendarEffects(provider, db);
       const uid = await teamBooking();
@@ -762,8 +765,35 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       await expect(c.run()).rejects.toThrow('vendor 503');
       await c.refuse();
       await c.run();
+      expect(provider.notices).toHaveLength(0);
       await c.finish();
-      expect(provider.notices).toEqual([{ to: GUEST, kind: 'update', ref: CAL_REF }]);
+      // Put back on the moved event: the provider's invitation at the new time.
+      expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
+    });
+
+    it('a quiet move that landed before the job failed: the retry stays quiet, one notice from the reinvite', async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      await (await change(effects, uid, 'create')).run();
+      await moveBooking(uid);
+      const c = await change(effects, uid, 'reschedule');
+      // Everything moved, then the job died before it could finish.
+      const move = provider.updateEvent.bind(provider);
+      let die = true;
+      provider.updateEvent = async (input) => {
+        const out = await move(input);
+        if (die && input.connectionRef === 'cal-dest-2') {
+          die = false;
+          throw new Error('worker lost');
+        }
+        return out;
+      };
+      await expect(c.run()).rejects.toThrow('worker lost');
+      await c.refuse();
+      await c.run();
+      await c.finish();
+      expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
     });
 
     it('a refused email on a change that went through in one go: one notice, from the reinvite', async () => {

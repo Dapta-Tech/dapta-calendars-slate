@@ -370,7 +370,6 @@ export class CalendarEffects {
         sendInvitations: notifies && sendInvitations,
       });
       if (isOrganizer) meetingUrl = updated.meetingUrl ?? null;
-      if (notifies && job && inviteeEmailId) await this.recordInvitingMove(job, inviteeEmailId, sendInvitations);
     }
     // Persist ONLY a non-null URL, and ONLY after every move landed — one
     // booking-wide UPDATE rather than per-ref inside the loop. A throw partway
@@ -448,13 +447,6 @@ export class CalendarEffects {
         await releaseBookingReference(this.db, claimId);
         throw err;
       }
-      if (notifies && sendInvitations && job?.mark?.providerMuted) {
-        // An earlier attempt wrote quietly but never reached the inviting
-        // event; this one created it with the provider inviting, so nothing is
-        // left for a reinvite to do. (An inviting event an earlier quiet
-        // attempt already created is skipped above and keeps the record.)
-        await writeCalendarChangeMark(this.db, job.id, { inviteeEmailId: job.mark.inviteeEmailId });
-      }
       if (isOrganizer && wantsLink) meetingUrl = created.meetingUrl ?? null;
       await fillBookingReference(this.db, claimId, {
         externalEventId: created.externalEventId,
@@ -468,27 +460,6 @@ export class CalendarEffects {
         // deterministic without an ORDER BY.
         meetingUrl: isOrganizer ? (created.meetingUrl ?? null) : meetingUrl,
       });
-    }
-  }
-
-  /**
-   * After the inviting event's move landed. Quiet: record that the organizer's
-   * event is already at its new time (`organizerMoved`), since a retry that
-   * then invites saves it at that same time, which notifies nobody, and the
-   * reinvite must still run. Inviting, on an event an earlier quiet attempt
-   * had NOT moved yet: the provider really told the guest about the move, so
-   * the record of a quiet write is cleared and no reinvite follows.
-   */
-  private async recordInvitingMove(job: CalendarJobRow, inviteeEmailId: string, invited: boolean): Promise<void> {
-    if (!invited) {
-      await writeCalendarChangeMark(this.db, job.id, {
-        ...job.mark,
-        inviteeEmailId,
-        providerMuted: true,
-        organizerMoved: true,
-      });
-    } else if (job.mark?.providerMuted && !job.mark.organizerMoved) {
-      await writeCalendarChangeMark(this.db, job.id, { inviteeEmailId });
     }
   }
 
@@ -518,11 +489,13 @@ export class CalendarEffects {
    * An email still on its way can yet be refused. A create or a move written
    * quietly on one is recorded on its own row (`providerMuted`), and if that
    * email then ends unsent, a `reinvite` job has the provider invite the guest
-   * after all (`reinviteGuest`). Only one event ever notifies the guest, the
-   * organizer's (`invitingDestination`); the other hosts' copies are always
-   * written quietly. A retry clears the record only when that event's provider
-   * really told the guest: a create of it, or a move of it that an earlier
-   * quiet attempt had not already made (`recordInvitingMove`). A deleted event cannot be cancelled again, so a
+   * after all (`reinviteGuest`). Once recorded, every retry of that change
+   * stays quiet too, so the reinvite is the one way the guest hears from the
+   * provider about it: a retry cannot tell whether an earlier attempt already
+   * wrote the organizer's event (saving it again unchanged notifies nobody),
+   * and inviting from both would tell the guest twice. Only one event ever
+   * notifies the guest, the organizer's (`invitingDestination`); the other
+   * hosts' copies are always written quietly. A deleted event cannot be cancelled again, so a
    * delete (`waitForEmail`) first looks at its email a few times, stays quiet
    * only once the mail service has accepted it, and otherwise takes the email
    * back (unless it is being sent right now) and lets the provider cancel.
@@ -532,6 +505,10 @@ export class CalendarEffects {
     inviteeEmailId: string | undefined,
     opts: { job?: CalendarJobRow; waitForEmail?: boolean } = {},
   ): Promise<boolean> {
+    // A create or a move an earlier attempt wrote quietly: stay quiet, and
+    // leave the guest to the reinvite if the email never goes out. (A delete
+    // has no reinvite; it decides on its email's outcome every time.)
+    if (!opts.waitForEmail && opts.job?.mark?.providerMuted) return false;
     if ((ctx.otherGuestCount ?? 0) > 0) return true;
     if (this.email?.delivers === false) return true;
     if (!inviteeEmailId) return true;
