@@ -412,6 +412,19 @@ export const openapiSpec = {
           icsUid: { type: 'string' },
           createdAt: isoUtc,
           updatedAt: isoUtc,
+          utm: {
+            type: ['object', 'null'],
+            description:
+              'The campaign the booking came from: the utm_* parameters of the booking page address, or null when it had none.',
+            additionalProperties: false,
+            // BOOKING_UTM_KEYS and MAX_BOOKING_UTM_VALUE in @slate/types (this file is dependency-free).
+            properties: Object.fromEntries(
+              ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'].map((key) => [
+                key,
+                { type: 'string', maxLength: 128 },
+              ]),
+            ),
+          },
         },
       },
       BookingSuccess: {

@@ -4,7 +4,6 @@ import {
   cancelBooking,
   createBooking,
   createTeamBooking,
-  enqueueWebhookDeliveries,
   getAccountByCode,
   getBrandingSwitchByCode,
   getAvailability,
@@ -31,6 +30,7 @@ import { bookingHostIsSeparate, hostScriptsOriginFor, publicBookingBase } from '
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
+import { enqueueBookingWebhook } from './booking-webhook';
 import {
   availabilityQuerySchema,
   availabilityResponseSchema,
@@ -41,6 +41,7 @@ import {
   reserveSlotSchema,
   teamAvailabilityQuerySchema,
   type AvailabilityResponse,
+  type BookingUtm,
   type BookingView,
   type OneOffLinkTargetView,
   type PublicProfile,
@@ -618,13 +619,14 @@ export class BookingService {
       void getAccountByCode(this.db, input.accountCode)
         .then((acc) =>
           acc
-            ? enqueueWebhookDeliveries(this.db, acc.id, 'booking.created', {
+            ? enqueueBookingWebhook(this.db, acc.id, 'booking.created', {
                 uid: b.uid,
                 status: b.status,
                 startUtc,
                 endUtc,
                 title: b.title,
-                ...(utm ? { utm } : {}),
+                // What was just written: null when the page had none.
+                utm: utm ?? null,
               })
             : undefined,
         )
@@ -921,10 +923,18 @@ export class BookingService {
     };
   }
 
-  /** Durable webhook dispatch for a booking lifecycle event (via the outbox). */
-  private fireWebhook(uid: string, event: string, data: Record<string, unknown>): void {
+  /**
+   * Durable webhook dispatch for a booking lifecycle event (via the outbox).
+   * The payload carries the booking's campaign (`utm`, null when none): the
+   * caller's when it passes one, else the booking's stored one.
+   */
+  private fireWebhook(
+    uid: string,
+    event: string,
+    data: { uid: string; utm?: BookingUtm | null } & Record<string, unknown>,
+  ): void {
     void resolveBooking(this.db, uid)
-      .then((bk) => (bk ? enqueueWebhookDeliveries(this.db, bk.account_id, event, data) : undefined))
+      .then((bk) => (bk ? enqueueBookingWebhook(this.db, bk.account_id, event, data) : undefined))
       .catch(() => undefined);
   }
 
@@ -1169,7 +1179,7 @@ export class BookingService {
       uid: out.uid,
       status: 'accepted',
       startUtc: body.startUtc,
-      ...(utm ? { utm } : {}),
+      utm: utm ?? null,
     });
     // Fresh bookings only, as on the personal path: a replay mints no token.
     if (out.manageToken) {

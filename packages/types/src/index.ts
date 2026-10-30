@@ -588,10 +588,32 @@ export const bookingUtmSchema = z.object(
 export type BookingUtm = z.infer<typeof bookingUtmSchema>;
 
 /**
+ * A character that changes how the text around it reads without showing
+ * itself: zero-width marks, bidi embeddings, overrides and isolates, and the
+ * byte-order mark. A UTM with one could pass for another campaign wherever a
+ * host reads it (`\u202Eelgoog` displays as "google").
+ */
+function hasInvisibleFormatCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (
+      (code >= 0x200b && code <= 0x200f) ||
+      (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2060 && code <= 0x2064) ||
+      (code >= 0x2066 && code <= 0x2069) ||
+      code === 0xfeff
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * The UTMs a booking keeps, from whatever a page sent: the five keys only, each
  * trimmed, a blank one left out, one over {@link MAX_BOOKING_UTM_VALUE} or with
- * a control character dropped, and null when none is left. Never a refusal: a
- * booking must not fail over its attribution.
+ * a control or invisible formatting character dropped, and null when none is
+ * left. Never a refusal: a booking must not fail over its attribution.
  */
 export function normalizeBookingUtm(input: unknown): BookingUtm | null {
   if (!input || typeof input !== 'object') return null;
@@ -601,7 +623,7 @@ export function normalizeBookingUtm(input: unknown): BookingUtm | null {
     const value = raw[key];
     if (typeof value !== 'string') continue;
     const v = value.trim();
-    if (!v || v.length > MAX_BOOKING_UTM_VALUE || hasControlCharacter(v)) continue;
+    if (!v || v.length > MAX_BOOKING_UTM_VALUE || hasControlCharacter(v) || hasInvisibleFormatCharacter(v)) continue;
     out[key] = v;
   }
   return Object.keys(out).length > 0 ? out : null;

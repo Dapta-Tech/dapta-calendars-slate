@@ -439,11 +439,11 @@ export class HostController {
   }
 
   /**
-   * One booking, in the list's shape, for the dashboard's page for it: the
-   * host's request email links to that page, and the list it replaced only ever
-   * held the first page of bookings. A GET that changes nothing, inside the
-   * caller's account; a uid from anywhere else is the same 404 as one that does
-   * not exist.
+   * One booking, in the list's shape plus `utm` (the campaign it came from,
+   * null when none), for the dashboard's page for it: the host's request email
+   * links to that page, and the list it replaced only ever held the first page
+   * of bookings. A GET that changes nothing, inside the caller's account; a uid
+   * from anywhere else is the same 404 as one that does not exist.
    */
   @Get('host/bookings/:uid')
   async getBooking(@Req() req: ReqLike, @Param('uid') uid: string) {

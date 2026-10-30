@@ -33,6 +33,10 @@ describe('utmFromQuery', () => {
     ).toEqual({ utm_source: 'google', utm_campaign: 'q4' });
   });
 
+  it('drops a value with an invisible formatting character, so one campaign cannot pass for another', () => {
+    expect(utmFromQuery({ utm_source: '\u202Eelgoog', utm_medium: 'e\u200Bmail', utm_campaign: 'q4' })).toEqual({ utm_campaign: 'q4' });
+  });
+
   it('is null for a page without any', () => {
     expect(utmFromQuery({ embed: '1' })).toBeNull();
     expect(utmFromQuery(undefined)).toBeNull();

@@ -926,6 +926,9 @@ export interface BookingMessages {
       /** A booking's own page, for a uid this workspace does not have (the same for one that does not exist). */
       notFoundTitle: string;
       notFoundBody: string;
+      /** A booking's own page: the campaign it came from (its UTMs), shown only when it has one. */
+      campaignTitle: string;
+      campaignHint: string;
       newSubtitle: string;
       createEventFirst: string;
       slotTaken: string;
@@ -2620,6 +2623,8 @@ export const en: BookingMessages = {
       backToBookings: 'Back to bookings',
       notFoundTitle: 'Booking not found',
       notFoundBody: 'There is no booking at this link in this workspace.',
+      campaignTitle: 'Campaign',
+      campaignHint: 'From the UTM parameters on the link the invitee booked from.',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
@@ -4363,6 +4368,8 @@ export const es: BookingMessages = {
       backToBookings: 'Volver a reservas',
       notFoundTitle: 'Reserva no encontrada',
       notFoundBody: 'No hay ninguna reserva en este enlace dentro de este espacio.',
+      campaignTitle: 'Campaña',
+      campaignHint: 'De los parámetros UTM del enlace desde el que reservó el invitado.',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',

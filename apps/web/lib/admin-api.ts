@@ -11,7 +11,7 @@
  * treats as "sign in again", so the session survives and the page shows
  * something the person can retry.
  */
-import type { BrandKit, EventTracking, SuccessRedirectData, WorkspaceView } from '@slate/types';
+import type { BookingUtm, BrandKit, EventTracking, SuccessRedirectData, WorkspaceView } from '@slate/types';
 import type {
   EventLocationDto,
   EventReminder,
@@ -465,6 +465,9 @@ export interface BookingItem {
   startUtc: string;
   endUtc: string;
   hostMemberId: string | null;
+  /** The campaign the booking came from (its `utm_*`), null when none. Only on
+   *  the one-booking read (`getBooking`); the list leaves it out. */
+  utm?: BookingUtm | null;
 }
 export interface Connection {
   id: string;
