@@ -153,7 +153,7 @@ describe('the campaign where the host reads a booking', () => {
       const withCampaign = await bookIntro('hook@example.org', CAMPAIGN);
       const without = await bookIntro('hook-plain@example.org', undefined, 1);
       expect(await hookData(withCampaign.uid, 'booking.created')).toMatchObject({ uid: withCampaign.uid, utm: CAMPAIGN });
-      expect(await hookData(without.uid, 'booking.created')).toHaveProperty('utm', null);
+      expect(await hookData(without.uid, 'booking.created')).not.toHaveProperty('utm');
     });
 
     it('a team booking.created carries it too', async () => {
@@ -182,7 +182,7 @@ describe('the campaign where the host reads a booking', () => {
         'acme',
       );
       if (!out.ok) throw new Error(`host create failed: ${out.reason}`);
-      expect(await hookData(out.booking.uid, 'booking.created')).toHaveProperty('utm', null);
+      expect(await hookData(out.booking.uid, 'booking.created')).not.toHaveProperty('utm');
     });
 
     it('booking.rescheduled and booking.cancelled carry the stored campaign', async () => {
@@ -211,7 +211,7 @@ describe('the campaign where the host reads a booking', () => {
 
       const declined = await bookIntro('decline@example.org', undefined, 1);
       await admin.decline(principal, declined.uid, 'not a fit');
-      expect(await hookData(declined.uid, 'booking.cancelled')).toEqual({ uid: declined.uid, reason: 'not a fit', utm: null });
+      expect(await hookData(declined.uid, 'booking.cancelled')).toEqual({ uid: declined.uid, reason: 'not a fit' });
     });
 
     it('reads the campaign written after the booking, as a later event would', async () => {
