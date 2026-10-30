@@ -105,8 +105,10 @@ function agentNav(apiDocsHref: string | null): NavItem[] {
       href: DEVELOPERS_HREF,
       icon: 'api',
       // The group is its own pages, not the whole `/admin/developers` prefix,
-      // which the connect guide and Tools share.
-      match: DEVELOPER_PAGES.map((page) => page.href),
+      // which the connect guide and Tools share. The old API docs address
+      // counts too: it renders (a member's no-access panel, a deployment with
+      // no API address) when it does not redirect.
+      match: [...DEVELOPER_PAGES.map((page) => page.href), DEVELOPERS_DOCS_HREF],
       // API docs opens the reference itself, in a new tab like Docs: never an
       // in-app page between, and never the reference inside the dashboard.
       children: [

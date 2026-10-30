@@ -87,7 +87,7 @@ describe('adminNav', () => {
       // The reference itself, never the dashboard page that only redirects to it.
       ['docs', API_DOCS, true],
     ]);
-    expect(JSON.stringify(api)).not.toContain(DEVELOPERS_DOCS_HREF);
+    expect(api?.children?.map((p) => p.href)).not.toContain(DEVELOPERS_DOCS_HREF);
   });
 
   it('has no API docs item when the deployment does not say where its API is served', () => {
@@ -98,7 +98,7 @@ describe('adminNav', () => {
 
   it('marks the group active on its own pages only, never on the connect guide or Tools beside them', () => {
     const api = adminNav({ isAdmin: true, docsHref: null }).find((i) => i.key === 'api')!;
-    for (const page of DEVELOPER_PAGES) {
+    for (const page of [...DEVELOPER_PAGES, { href: DEVELOPERS_DOCS_HREF }]) {
       expect(isNavItemActive(page.href, api.href, api.match)).toBe(true);
       expect(isNavItemActive(`${page.href}/anything`, api.href, api.match)).toBe(true);
     }

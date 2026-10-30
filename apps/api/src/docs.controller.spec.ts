@@ -38,8 +38,9 @@ describe('DocsController: the deployment address', () => {
     expect(configOf(html).url).toBe('/openapi.json');
     expect(html).toContain('<a href="/openapi.json" style="color:inherit">the raw OpenAPI document</a>');
     expect(docs.spec().info.description).toContain('**Base URL:** the address this API is served at');
-    // The way to the raw document from inside the reference, on this address.
-    expect(docs.spec().info.description).toContain('**OpenAPI document:** [`/openapi.json`](/openapi.json)');
+    // The way to the raw document, described: a root-relative link would miss a path prefix.
+    expect(docs.spec().info.description).toContain('**OpenAPI document:** `openapi.json` at the address this API is served at');
+    expect(docs.spec().info.description).not.toContain('](/openapi.json)');
     expect(JSON.stringify(openapiSpec)).not.toMatch(OLD_HOSTS);
   });
 
@@ -60,6 +61,9 @@ describe('DocsController: the deployment address', () => {
     const prefixed = docsFor('https://host.example.com/calendar-api/').docs();
     expect(configOf(prefixed).url).toBe('/calendar-api/openapi.json');
     expect(prefixed).toContain('<a href="https://host.example.com/calendar-api/openapi.json"');
+    expect(docsFor('https://host.example.com/calendar-api/').spec().info.description).toContain(
+      '](https://host.example.com/calendar-api/openapi.json)',
+    );
   });
 
   it('escapes the address in the page (defense in depth: the schema already encodes these)', () => {
