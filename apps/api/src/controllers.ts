@@ -1,9 +1,10 @@
 import { Controller, Get, Header, HttpException, HttpStatus, Inject } from '@nestjs/common';
-import type { ServerEnv } from '@slate/config/env';
+import { cleanPublicUrl, type ServerEnv } from '@slate/config/env';
 import type { Db } from '@slate/db';
 import { countOutbox, sql } from '@slate/db';
 import { DB, ENV } from './tokens';
 import { openapiFor } from './openapi';
+import { renderDocsPage } from './docs-page';
 
 @Controller('health')
 export class HealthController {
@@ -66,15 +67,13 @@ export class HealthController {
   }
 }
 
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const escapeHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
-
 /**
- * Public API documentation: OpenAPI JSON plus an interactive Scalar explorer.
- * Both name this deployment's address from API_PUBLIC_URL; unset, the examples
- * fill it in from the page's own address in the browser, never a hardcoded host.
- * ENV is required, not optional: a module that forgot to provide it must fail
- * to boot rather than quietly serve relative addresses.
+ * Public API documentation: OpenAPI JSON plus the interactive Scalar reference.
+ * Both name this deployment's addresses from its configuration (API_PUBLIC_URL,
+ * PUBLIC_APP_URL, MCP_PUBLIC_URL, DEVELOPER_DOCS_URL); one that is unset stays
+ * relative or is left out, never a hardcoded host. ENV is required, not
+ * optional: a module that forgot to provide it must fail to boot rather than
+ * quietly serve relative addresses.
  */
 @Controller()
 export class DocsController {
@@ -82,102 +81,46 @@ export class DocsController {
   private readonly apiPublicUrl: string | undefined;
   /** The product the docs name: PRODUCT_NAME, else the mail sender name, as the email footer does. */
   private readonly productName: string;
+  /** The dashboard's address, for the API keys page and the page icon. */
+  private readonly appUrl: string | undefined;
+  private readonly document: ReturnType<typeof openapiFor>;
 
-  constructor(@Inject(ENV) env: Pick<ServerEnv, 'API_PUBLIC_URL'> & Partial<Pick<ServerEnv, 'PRODUCT_NAME' | 'MAIL_FROM_NAME'>>) {
+  constructor(
+    @Inject(ENV)
+    env: Pick<ServerEnv, 'API_PUBLIC_URL'> &
+      Partial<Pick<ServerEnv, 'PRODUCT_NAME' | 'MAIL_FROM_NAME' | 'PUBLIC_APP_URL' | 'MCP_ENABLED' | 'MCP_PUBLIC_URL' | 'DEVELOPER_DOCS_URL'>>,
+  ) {
     this.apiPublicUrl = env.API_PUBLIC_URL;
     this.productName = env.PRODUCT_NAME?.trim() || env.MAIL_FROM_NAME?.trim() || 'Calendars';
+    this.appUrl = cleanPublicUrl(env.PUBLIC_APP_URL);
+    const mcpUrl = env.MCP_ENABLED !== false && env.MCP_PUBLIC_URL ? new URL(env.MCP_PUBLIC_URL).href : undefined;
+    this.document = openapiFor(this.apiPublicUrl, this.productName, {
+      keysUrl: this.appUrl && `${this.appUrl}/admin/developers/keys`,
+      mcpUrl,
+      docsUrl: env.DEVELOPER_DOCS_URL,
+    });
   }
 
   @Get('openapi.json')
   spec() {
-    return openapiFor(this.apiPublicUrl, this.productName);
+    return this.document;
   }
 
   @Get('docs')
   @Header('content-type', 'text/html; charset=utf-8')
   docs(): string {
-    const base = this.apiPublicUrl ? escapeHtml(this.apiPublicUrl) : null;
-    const baseUrl = base ?? 'https://api.your-domain.example';
-    const title = escapeHtml(`${this.productName} API`);
-    // Root-relative when unset: serving under a path prefix needs API_PUBLIC_URL.
-    const openapiUrl = base ? `${base}/openapi.json` : '/openapi.json';
     // The explorer fetches its document from the page's own origin (the prefix
     // kept): an absolute URL would be a cross-origin fetch, and CORS allows only
     // the web app, so /docs opened on any other host would show nothing.
+    // Root-relative when unset: serving under a path prefix needs API_PUBLIC_URL.
     const explorerUrl = this.apiPublicUrl
-      ? escapeHtml(`${new URL(this.apiPublicUrl).pathname.replace(/\/$/, '')}/openapi.json`)
+      ? `${new URL(this.apiPublicUrl).pathname.replace(/\/$/, '')}/openapi.json`
       : '/openapi.json';
-    // Unset: this page is served at `<api base>/docs`, so the browser knows the
-    // base. The prefix is kept only when it is plain path characters.
-    const noscriptBase = base
-      ? ''
-      : `\n<noscript><p>Replace <code>BASE_URL</code> with this page's address minus <code>/docs</code>.</p></noscript>`;
-    const fillBase = base
-      ? ''
-      : `<script>(function(){var p=location.pathname.replace(/\\/docs\\/?$/i,'');document.getElementById('base-url').textContent=location.origin+(/^[A-Za-z0-9._~%\\/-]*$/.test(p)?p:'');})();</script>`;
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
-<style>
-body{margin:0;font:15px/1.55 system-ui,sans-serif;color:#17202a;background:#fff}
-.intro{max-width:1040px;margin:0 auto;padding:32px 24px 8px}
-h1{margin:0 0 8px}h2{margin-top:28px}code,pre{font-family:ui-monospace,SFMono-Regular,monospace}
-pre{background:#111827;color:#f9fafb;padding:16px;border-radius:8px;overflow:auto}
-.notice{border-left:4px solid #84cc16;background:#f7fee7;padding:12px 16px}
-a{color:#2563eb}.pins{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}
-</style></head><body>
-<main class="intro">
-<h1>${title}</h1>
-<p>OpenAPI 3.1 source: <a href="${openapiUrl}"><code>/openapi.json</code></a>.
-This production-pilot surface covers discovery, availability, and the booking lifecycle.</p>
-<div class="notice"><strong>Authentication:</strong> choose <em>Authorize</em> below and enter a
-<code>dcl_</code> API key. Never put the key in a URL. Flow Studio should use Bearer auth from Vault,
-raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.</div>
-<h2>Required version pins</h2>
-<div class="pins"><code>GET /v2/event-types</code><code>cal-api-version: 2024-06-14</code>
-<code>GET /v2/slots</code><code>cal-api-version: 2024-09-04</code>
-<code>POST /v2/bookings/{uid}/guests</code><code>cal-api-version: 2024-08-13</code>
-<code>booking create/get/cancel/reschedule</code><code>cal-api-version: 2026-02-25</code></div>
-<h2>Copy-paste discovery request</h2>
-<pre>BASE_URL="<span id="base-url">${baseUrl}</span>"
-curl "$BASE_URL/v2/event-types" \\
-  --header "Authorization: Bearer $DCL_API_KEY" \\
-  --header "cal-api-version: 2024-06-14"</pre>${noscriptBase}
-<h2>Copy-paste slots request</h2>
-<pre>curl --get "$BASE_URL/v2/slots" \\
-  --header "Authorization: Bearer $DCL_API_KEY" \\
-  --header "cal-api-version: 2024-09-04" \\
-  --data-urlencode "eventTypeId=$EVENT_TYPE_ID" \\
-  --data-urlencode "start=2026-07-24T00:00:00Z" \\
-  --data-urlencode "end=2026-07-31T23:59:59Z" \\
-  --data-urlencode "timeZone=America/Bogota"</pre>
-<h2>Copy-paste booking request</h2>
-<pre>curl "$BASE_URL/v2/bookings" \\
-  --request POST \\
-  --header "Authorization: Bearer $DCL_API_KEY" \\
-  --header "cal-api-version: 2026-02-25" \\
-  --header "Idempotency-Key: flow-run-123:create-booking" \\
-  --header "Content-Type: application/json" \\
-  --data '{"eventTypeId":"replace-with-event-type-id","start":"2026-07-24T15:00:00Z","attendee":{"name":"Test Customer","email":"customer@example.com","timeZone":"America/Bogota","language":"es"},"metadata":{"source":"flow-studio"},"bookingFieldsResponses":{"notes":"Created from an automation"}}'</pre>
-<h2>Lifecycle</h2>
-<pre>curl "$BASE_URL/v2/bookings/$BOOKING_UID" \\
-  --header "Authorization: Bearer $DCL_API_KEY" \\
-  --header "cal-api-version: 2026-02-25"
-
-curl "$BASE_URL/v2/bookings/$BOOKING_UID/reschedule" --request POST \\
-  --header "Authorization: Bearer $DCL_API_KEY" \\
-  --header "cal-api-version: 2026-02-25" \\
-  --header "Idempotency-Key: flow-run-123:reschedule" \\
-  --header "Content-Type: application/json" \\
-  --data '{"start":"2026-07-25T16:00:00Z","reschedulingReason":"Customer requested a later time"}'</pre>
-<p>Repository guides: <code>API-CONTRACT.md</code>, <code>FLOW-STUDIO-QUICKSTART.md</code>, and
-<code>CAL-COMPATIBILITY.md</code>.</p>
-</main>
-${fillBase}
-<script id="api-reference" data-url="${explorerUrl}" data-configuration='{"theme":"default","hideModels":false}'></script>
-<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
-<noscript><p class="intro">JavaScript is required for the interactive explorer. Use
-<a href="${openapiUrl}">the raw OpenAPI document</a> instead.</p></noscript>
-</body></html>`;
+    return renderDocsPage({
+      title: `${this.productName} API`,
+      explorerUrl,
+      openapiUrl: this.apiPublicUrl ? `${this.apiPublicUrl}/openapi.json` : '/openapi.json',
+      iconUrl: this.appUrl && `${this.appUrl}/icon.svg`,
+    });
   }
 }

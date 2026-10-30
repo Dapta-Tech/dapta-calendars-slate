@@ -83,6 +83,30 @@ describe('the page a dead session was found on travels with the sign-in', () => 
     await expect(hostFetch('/v1/me')).rejects.toThrow(`NEXT_REDIRECT:/login?signedout=1&${NEXT}`);
   });
 
+  // F8 of the 2026-10-30 production E2E: a first visit to /admin landed on the
+  // signed-out card ("Continue with Dapta") instead of signing in.
+  it('nobody signed in: the plain login with the page as its target, nothing cleared or revoked', async () => {
+    cookieJar.get.mockReturnValue(undefined);
+    fetchMock.mockResolvedValue({ status: 401 });
+
+    await expect(hostFetch('/v1/me')).rejects.toThrow(`NEXT_REDIRECT:/login?${NEXT}`);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // the API call: no refresh, no revoke
+    expect(cookieJar.set).not.toHaveBeenCalled();
+    expect(cookieJar.delete).not.toHaveBeenCalled();
+  });
+
+  it('nobody signed in on the dashboard home: the plain login, so it signs in silently', async () => {
+    cookieJar.get.mockReturnValue(undefined);
+    onPage('/admin');
+    fetchMock.mockResolvedValue({ status: 401 });
+
+    await expect(hostFetch('/v1/me')).rejects.toThrow(
+      `NEXT_REDIRECT:/login?next=${encodeURIComponent('/admin')}`,
+    );
+    expect(redirect).not.toHaveBeenCalledWith(expect.stringContaining('signedout'));
+  });
+
   it('the local provider lands on the login form with the page as its target', async () => {
     vi.stubEnv('AUTH_PROVIDER', 'local');
     withSession({ provider: 'local', email: 'a@b.c' });
