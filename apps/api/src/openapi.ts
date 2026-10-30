@@ -116,14 +116,87 @@ const errorResponse = (description: string) => ({
   },
 });
 
+// --- The introduction (info.description) ------------------------------------
+
+/**
+ * The `cal-api-version` each /v2 operation requires, as the introduction lists
+ * them. openapi.spec.ts asserts this table equals the enums the paths declare,
+ * so the two cannot drift.
+ */
+export const CAL_VERSION_PINS = [
+  ['GET /v2/event-types', '2024-06-14'],
+  ['GET /v2/slots', '2024-09-04'],
+  ['POST /v2/bookings', '2026-02-25'],
+  ['GET /v2/bookings/{uid}', '2026-02-25'],
+  ['POST /v2/bookings/{uid}/reschedule', '2026-02-25'],
+  ['POST /v2/bookings/{uid}/cancel', '2026-02-25'],
+  ['POST /v2/bookings/{uid}/guests', '2024-08-13'],
+] as const;
+
+/** The addresses the introduction names, each from this deployment's configuration. */
+export type ApiDocLinks = {
+  /** This API's public base URL (API_PUBLIC_URL). */
+  apiUrl?: string;
+  /** The dashboard page where API keys are created. */
+  keysUrl?: string;
+  /** The MCP endpoint people paste into an agent (MCP_PUBLIC_URL). */
+  mcpUrl?: string;
+  /** The developer guides (DEVELOPER_DOCS_URL). */
+  docsUrl?: string;
+};
+
+/** A configured address made safe inside a markdown link destination. */
+const mdUrl = (url: string): string => url.replace(/[()\s]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+
+/**
+ * The introduction the API reference shows above the operations (markdown),
+ * written for the people who call the API. Every address comes from the
+ * deployment's configuration; one that is unset is left out or described,
+ * never filled in with someone else's host.
+ */
+export function apiIntroduction(links: ApiDocLinks = {}): string {
+  const { apiUrl, keysUrl, mcpUrl, docsUrl } = links;
+  const base = apiUrl ? `\`${apiUrl}\`` : 'the address this API is served at (the `servers` entry of this document)';
+  const keys = keysUrl ? `on the [API keys](${mdUrl(keysUrl)}) page of your dashboard` : 'on the API keys page of your dashboard';
+  const more = [
+    mcpUrl && `AI assistants and agents can book through the MCP server at \`${mcpUrl}\`, on the same engine.`,
+    docsUrl && `Step-by-step guides with examples: [developer docs](${mdUrl(docsUrl)}).`,
+  ].filter(Boolean);
+  return [
+    'Book meetings from your own systems: list event types, read open times, then create, reschedule and cancel bookings. ' +
+      'The API runs on the same engine as the booking page, so it offers the same times and keeps the same rules.',
+    `**Base URL:** ${base}`,
+    '## Authentication',
+    'Send an API key in the `Authorization` header of every request:',
+    '```http\nAuthorization: Bearer dcl_<prefix>_<secret>\n```',
+    `Create a key ${keys}. A key reaches only what its scopes allow. ` +
+      'Call the API from your server, never from a web page, and never put a key in a URL.',
+    '## Two APIs',
+    '- **REST API**, under `/v1/machine`: read open times, then book, list, reschedule and cancel. The simplest start for a new integration.\n' +
+      "- **Cal.com-compatible API**, under `/v2`: the paths, headers and field names of Cal.com's API v2, so a tool that already speaks Cal.com works with your key. " +
+      'It adds one extension: open times across several of your connected calendars (`POST /v2/calendars/availability`).',
+    'Both share the same booking engine, so they offer the same times.',
+    '## Version header',
+    'Each `/v2` operation below needs a `cal-api-version` header with exactly this value. ' +
+      'A missing or different value answers `400 UNSUPPORTED_API_VERSION`. The calendar endpoints and `/v1/machine` take no version header.',
+    ['| Operation | `cal-api-version` |', '| --- | --- |', ...CAL_VERSION_PINS.map(([op, v]) => `| \`${op}\` | \`${v}\` |`)].join('\n'),
+    '## Safe retries',
+    'Booking, rescheduling and cancelling accept an `Idempotency-Key` header, and so does adding guests on `/v2`. ' +
+      'Use one key per real-world action, built from something stable on your side, of up to 128 characters. ' +
+      'Sending the same key again returns the original result instead of acting twice. ' +
+      'On `/v2`, the same key with a different body answers `409 IDEMPOTENCY_KEY_REUSED`.',
+    ...(more.length ? ['## More', ...more] : []),
+  ].join('\n\n');
+}
+
 export const openapiSpec = {
   openapi: '3.1.0',
   info: {
-    // The served title names the deployment's product (`openapiFor`).
+    // The served title names the deployment's product, and the served
+    // introduction its addresses (`openapiFor`).
     title: 'Calendars API',
-    version: '2.0.0-mvp',
-    description:
-      'Production-pilot scheduling API for generic Flow Studio HTTP nodes. Cal-compatible operations keep their current wire names; multi-calendar availability is an explicit Dapta extension.',
+    version: '2.0.0',
+    description: apiIntroduction(),
     license: { name: 'MIT' },
   },
   // Relative on purpose: the served document names this deployment's address
@@ -1454,13 +1527,19 @@ export const openapiSpec = {
 } as const;
 
 /**
- * The document as served: `servers` names this deployment's public API address
- * when one is configured (API_PUBLIC_URL), and otherwise stays relative to
- * wherever the document is served, so a fork never points at someone else's API.
+ * The document as served: `servers` and the introduction name this deployment's
+ * public addresses when they are configured (API_PUBLIC_URL and the `links`),
+ * and otherwise stay relative to wherever the document is served, so a fork
+ * never points at someone else's API, dashboard or guides.
  */
-export function openapiFor(apiPublicUrl?: string, productName?: string) {
+export function openapiFor(apiPublicUrl?: string, productName?: string, links: Omit<ApiDocLinks, 'apiUrl'> = {}) {
   // Already normalized by the env schema (`cleanPublicUrl`).
   const servers = apiPublicUrl ? [{ url: apiPublicUrl, description: 'This deployment' }] : openapiSpec.servers;
-  const info = productName ? { ...openapiSpec.info, title: `${productName} API` } : openapiSpec.info;
-  return apiPublicUrl || productName ? { ...openapiSpec, info, servers } : openapiSpec;
+  const named = apiPublicUrl || links.keysUrl || links.mcpUrl || links.docsUrl;
+  const info = {
+    ...openapiSpec.info,
+    ...(productName ? { title: `${productName} API` } : {}),
+    ...(named ? { description: apiIntroduction({ ...links, apiUrl: apiPublicUrl }) } : {}),
+  };
+  return apiPublicUrl || productName || named ? { ...openapiSpec, info, servers } : openapiSpec;
 }

@@ -89,6 +89,12 @@ export const serverEnvSchema = z.object({
   // send its readers to someone else's API. Normalized by `cleanPublicUrl`; a
   // value that is not an http(s) URL reads as unset.
   API_PUBLIC_URL: z.string().optional().transform(cleanPublicUrl),
+  // Where this deployment's developer guides live, e.g.
+  // https://docs.calendar.example.com/developers. The API reference (`/docs`)
+  // links it from its introduction. UNSET (a bare fork) shows no such link: a
+  // fork's reference must never send its readers to someone else's guides.
+  // Normalized by `cleanPublicUrl`, like API_PUBLIC_URL.
+  DEVELOPER_DOCS_URL: z.string().optional().transform(cleanPublicUrl),
 
   // Email / notifications
   EMAIL_PROVIDER: z.enum(['log-only', 'noop', 'smtp', 'http']).default('log-only'),
