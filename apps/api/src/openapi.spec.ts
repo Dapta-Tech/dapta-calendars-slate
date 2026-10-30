@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { openapiSpec } from './openapi';
+import { CAL_VERSION_PINS, openapiSpec } from './openapi';
 
 describe('OpenAPI spec (E11)', () => {
   const json = JSON.stringify(openapiSpec);
@@ -56,6 +56,15 @@ describe('OpenAPI spec (E11)', () => {
     expect(openapiSpec.components.schemas.ErrorEnvelope).toBeTruthy();
     expect(openapiSpec.components.schemas.Booking.properties).not.toHaveProperty('startTime');
     expect(openapiSpec.components.schemas.Booking.properties).not.toHaveProperty('endTime');
+  });
+
+  it("lists in the introduction exactly the cal-api-version each path declares", () => {
+    const declared: Array<[string, string]> = [];
+    for (const [path, item] of Object.entries(openapiSpec.paths as unknown as Record<string, Record<string, { parameters?: readonly unknown[] }>>))
+      for (const [method, op] of Object.entries(item))
+        for (const p of (op.parameters ?? []) as Array<{ name?: string; schema?: { enum?: string[] } }>)
+          if (p.name === 'cal-api-version') declared.push([`${method.toUpperCase()} ${path}`, p.schema!.enum![0]!]);
+    expect([...CAL_VERSION_PINS].map(([op, v]) => [op, v]).sort()).toEqual(declared.sort());
   });
 
   it('documents discoverable permissions and the 100-calendar JSON batch extension', () => {
