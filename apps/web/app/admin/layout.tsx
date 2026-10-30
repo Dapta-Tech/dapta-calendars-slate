@@ -15,6 +15,8 @@ import { currentReturnTo, getSession } from '@/lib/auth-session';
 import { withReturnTo } from '@/lib/return-to';
 import { currentAccountId, listWorkspaces, mayPickAccount } from '@/lib/iam';
 import { docsNavHref } from '@/lib/docs-url';
+import { apiDocsNavHref } from '@/lib/admin-nav';
+import { resolveMcpConfig } from '@/lib/mcp-config';
 import { getLocale } from '@/lib/locale';
 import { getProductTheme } from '@/lib/theme.server';
 import { ONBOARDING_SKIP_COOKIE } from '@/lib/onboarding';
@@ -117,6 +119,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         // Runtime env, in the reader's language; null on a deployment with no
         // docs configured, and the rail then has no Docs item.
         docsHref={docsNavHref(locale)}
+        // The API's own reference, on the API's origin (runtime env); null
+        // when the deployment does not say where its API is served.
+        apiDocsHref={apiDocsNavHref(resolveMcpConfig().apiOrigin)}
         user={{ displayName: me.displayName, email: me.email, handle: me.handle, accountCode: me.accountCode }}
         accounts={accounts.items}
         accountsHasMore={accounts.hasMore}

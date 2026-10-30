@@ -38,6 +38,8 @@ describe('DocsController: the deployment address', () => {
     expect(configOf(html).url).toBe('/openapi.json');
     expect(html).toContain('<a href="/openapi.json" style="color:inherit">the raw OpenAPI document</a>');
     expect(docs.spec().info.description).toContain('**Base URL:** the address this API is served at');
+    // The way to the raw document from inside the reference, on this address.
+    expect(docs.spec().info.description).toContain('**OpenAPI document:** [`/openapi.json`](/openapi.json)');
     expect(JSON.stringify(openapiSpec)).not.toMatch(OLD_HOSTS);
   });
 
@@ -45,6 +47,9 @@ describe('DocsController: the deployment address', () => {
     const docs = docsFor('https://api.calendar.example.com/');
     expect(docs.spec().servers).toEqual([{ url: 'https://api.calendar.example.com', description: 'This deployment' }]);
     expect(docs.spec().info.description).toContain('**Base URL:** `https://api.calendar.example.com`');
+    expect(docs.spec().info.description).toContain(
+      '**OpenAPI document:** [`https://api.calendar.example.com/openapi.json`](https://api.calendar.example.com/openapi.json)',
+    );
     const html = docs.docs();
     expect(html).toContain('<a href="https://api.calendar.example.com/openapi.json" style="color:inherit">');
     expect(html).not.toContain('href="/openapi.json"');

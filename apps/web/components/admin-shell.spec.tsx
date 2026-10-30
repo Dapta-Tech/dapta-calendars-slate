@@ -48,6 +48,7 @@ import { signOutAction } from '@/app/login/actions';
 import { AdminShell } from './admin-shell';
 
 const DOCS = 'https://docs.example.test/?utm_source=calendars&utm_medium=sidebar';
+const API_DOCS = 'https://api.example.test/docs';
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -86,6 +87,7 @@ interface ShellOpts {
   pathname?: string;
   isAdmin?: boolean;
   docsHref?: string | null;
+  apiDocsHref?: string | null;
   collapsed?: boolean;
   locale?: Locale;
   accounts?: { id: string; accountId: string; name: string }[];
@@ -102,6 +104,7 @@ function shell(opts: ShellOpts) {
       initialCollapsed={opts.collapsed ?? false}
       isAdmin={opts.isAdmin ?? true}
       docsHref={opts.docsHref === undefined ? DOCS : opts.docsHref}
+      apiDocsHref={opts.apiDocsHref === undefined ? API_DOCS : opts.apiDocsHref}
     >
       <p>page</p>
     </AdminShell>
@@ -234,9 +237,14 @@ describe('AdminShell: the API and webhooks group', () => {
       expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
         ['API keys', '/admin/developers/keys'],
         ['Webhooks', '/admin/developers/webhooks'],
-        ['API docs', '/admin/developers/docs'],
+        ['API docs (opens in a new tab)', API_DOCS],
       ]);
       expect(links.map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null]);
+      // API docs leaves the app like Docs: a new tab, the external-link arrow.
+      const apiDocs = links[2]!;
+      expect(apiDocs.getAttribute('target')).toBe('_blank');
+      expect(apiDocs.getAttribute('rel')).toBe('noopener noreferrer');
+      expect(apiDocs.querySelector('.pi-external-link')).not.toBeNull();
     }
   });
 
@@ -279,7 +287,7 @@ describe('AdminShell: the API and webhooks group', () => {
     expect(menu.getAttribute('aria-label')).toBe('API and webhooks');
     expect(button.getAttribute('aria-expanded')).toBe('true');
     const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(items.map((i) => i.textContent)).toEqual(['API keys', 'Webhooks', 'API docs']);
+    expect(items.map((i) => i.textContent)).toEqual(['API keys', 'Webhooks', 'API docs (opens in a new tab)']);
     expect(items[0]!.getAttribute('aria-current')).toBe('page');
     expect(document.activeElement).toBe(items[0]);
 
@@ -315,10 +323,10 @@ describe('AdminShell: the API and webhooks group', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false');
     await navigate('/admin/bookings');
     expect(button.getAttribute('aria-expanded')).toBe('false');
-    await navigate('/admin/developers/docs');
+    await navigate('/admin/developers/webhooks');
     expect(button.getAttribute('aria-expanded')).toBe('true');
     const current = rails(el).desktop.querySelector('[data-testid="nav-api-pages"] [aria-current="page"]');
-    expect(current?.textContent).toBe('API docs');
+    expect(current?.textContent).toBe('Webhooks');
   });
 
   it('closes the flyout on a click elsewhere, and after a page is picked', async () => {
@@ -333,14 +341,29 @@ describe('AdminShell: the API and webhooks group', () => {
     expect(document.querySelector('[data-testid="nav-api-flyout"]')).toBeNull();
 
     await act(async () => button.click());
-    await act(async () => document.querySelector<HTMLElement>('[data-testid="nav-api-flyout-docs"]')!.click());
+    const external = document.querySelector<HTMLAnchorElement>('[data-testid="nav-api-flyout-docs"]')!;
+    expect(external.getAttribute('href')).toBe(API_DOCS);
+    expect(external.getAttribute('target')).toBe('_blank');
+    expect(external.getAttribute('role')).toBe('menuitem');
+    expect(external.textContent).toContain('(opens in a new tab)');
+    await act(async () => external.click());
     expect(document.querySelector('[data-testid="nav-api-flyout"]')).toBeNull();
+  });
+
+  it('has no API docs item when the deployment does not say where its API is served', async () => {
+    const el = await mount({ pathname: '/admin/developers/keys', apiDocsHref: null });
+    const pages = rails(el).desktop.querySelectorAll('[data-testid="nav-api-pages"] a');
+    expect(Array.from(pages).map((a) => a.textContent)).toEqual(['API keys', 'Webhooks']);
   });
 
   it('reads in Spanish for a Spanish reader', async () => {
     const el = await mount({ pathname: '/admin/developers/keys', locale: 'es' });
     const pages = rails(el).desktop.querySelectorAll('[data-testid="nav-api-pages"] a');
-    expect(Array.from(pages).map((a) => a.textContent)).toEqual(['Claves API', 'Webhooks', 'Docs de la API']);
+    expect(Array.from(pages).map((a) => a.textContent)).toEqual([
+      'Claves API',
+      'Webhooks',
+      `Docs de la API ${getMessages('es').admin.common.switcher.opensNewTab}`,
+    ]);
   });
 });
 

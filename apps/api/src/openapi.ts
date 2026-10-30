@@ -156,6 +156,9 @@ const mdUrl = (url: string): string => url.replace(/[()\s]/g, (c) => `%${c.charC
 export function apiIntroduction(links: ApiDocLinks = {}): string {
   const { apiUrl, keysUrl, mcpUrl, docsUrl } = links;
   const base = apiUrl ? `\`${apiUrl}\`` : 'the address this API is served at (the `servers` entry of this document)';
+  // The raw document, linked where every reader of the reference sees it: the
+  // reference is what the dashboard opens, so this is the way to the file.
+  const spec = apiUrl ? `${apiUrl}/openapi.json` : '/openapi.json';
   const keys = keysUrl ? `on the [API keys](${mdUrl(keysUrl)}) page of your dashboard` : 'on the API keys page of your dashboard';
   const more = [
     mcpUrl && `AI assistants and agents can book through the MCP server at \`${mcpUrl}\`, on the same engine.`,
@@ -165,6 +168,7 @@ export function apiIntroduction(links: ApiDocLinks = {}): string {
     'Book meetings from your own systems: list event types, read open times, then create, reschedule and cancel bookings. ' +
       'The API runs on the same engine as the booking page, so it offers the same times and keeps the same rules.',
     `**Base URL:** ${base}`,
+    `**OpenAPI document:** [\`${spec}\`](${mdUrl(spec)}), to import into an API client or a code generator.`,
     '## Authentication',
     'Send an API key in the `Authorization` header of every request:',
     '```http\nAuthorization: Bearer dcl_<prefix>_<secret>\n```',

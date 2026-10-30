@@ -6,8 +6,8 @@ import { E2E, HOST, rail, signIn } from './stack';
  * webhooks" group and its Docs item, in the real app on both projects (the
  * 1440 desktop rail and the 360 drawer): the old addresses land on the connect
  * guide, every page is one click from anywhere, a plain member never gets a
- * door that opens on "no access", and Docs leaves the app in a new tab in the
- * reader's language.
+ * door that opens on "no access", Docs leaves the app in a new tab in the
+ * reader's language, and API docs opens the API's own reference the same way.
  */
 
 const JORDAN = 'jordan@example.com';
@@ -57,15 +57,23 @@ test('an owner follows an old link through the login to the guide, then walks To
   await nav.getByRole('link', { name: 'Webhooks' }).click();
   await expect(page).toHaveURL(/\/admin\/developers\/webhooks$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Webhooks' })).toBeVisible();
-
-  nav = await rail(page, isMobile);
-  await nav.getByRole('link', { name: 'API docs' }).click();
-  await expect(page).toHaveURL(/\/admin\/developers\/docs$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'API docs' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'API reference' })).toBeVisible();
   // Picking a page closes the drawer (it slides off screen, so it is still
   // "visible" to a locator; the toggle says whether it is open).
   if (isMobile) await expect(page.getByTestId('nav-open')).toHaveAttribute('aria-expanded', 'false');
+
+  // API docs is the API's own reference, in a new tab like Docs: no page in
+  // the dashboard between, and the reference never drawn on the dashboard.
+  nav = await rail(page, isMobile);
+  const apiDocs = nav.getByTestId('nav-api-docs');
+  await expect(apiDocs).toHaveAttribute('href', `${E2E.api}/docs`);
+  await expect(apiDocs).toHaveAttribute('target', '_blank');
+  await expect(apiDocs).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(apiDocs).not.toHaveAttribute('aria-current', /.*/);
+  await expect(apiDocs).toContainText('(opens in a new tab)');
+
+  // A link made before to the old page lands on the reference itself.
+  await page.goto('/admin/developers/docs');
+  await expect(page).toHaveURL(`${E2E.api}/docs`);
 });
 
 test('on the collapsed rail API and webhooks is a menu: open it, arrow down, pick a page', async ({ page, context, isMobile }) => {
@@ -81,7 +89,7 @@ test('on the collapsed rail API and webhooks is a menu: open it, arrow down, pic
   await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
   await trigger.click();
   const menu = page.getByRole('menu', { name: 'API and webhooks' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['API keys', 'Webhooks', 'API docs']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['API keys', 'Webhooks', /^API docs/]);
   await expect(menu.getByRole('menuitem', { name: 'API keys' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem', { name: 'Webhooks' })).toBeFocused();
@@ -96,10 +104,13 @@ test('on the collapsed rail API and webhooks is a menu: open it, arrow down, pic
   await expect(menu).toBeHidden();
   await expect(aside.getByTestId('nav-docs')).toBeFocused();
 
+  // The last item leaves the app: the API's reference, in a new tab.
   await trigger.click();
   await page.keyboard.press('End');
-  await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/admin\/developers\/docs$/);
+  const last = menu.getByRole('menuitem', { name: /API docs/ });
+  await expect(last).toBeFocused();
+  await expect(last).toHaveAttribute('href', `${E2E.api}/docs`);
+  await expect(last).toHaveAttribute('target', '_blank');
 });
 
 test('Docs opens the deployment’s docs in a new tab, in the reader’s language', async ({ page, isMobile }) => {
