@@ -202,18 +202,31 @@ export const openapiSpec = {
   // Relative on purpose: the served document names this deployment's address
   // through `openapiFor` (API_PUBLIC_URL), never a hardcoded host.
   servers: [{ url: '/', description: 'This deployment' }],
+  // The reference's sidebar groups, in this order. Display only: renaming one
+  // changes no path, schema or operation id.
   tags: [
     {
-      name: 'Cal-compatible MVP',
-      description: 'Implemented and fixture-tested Cal.com-compatible discovery and booking operations.',
+      name: 'REST API',
+      description:
+        'Read open times, then book, list, reschedule and cancel bookings with an API key. The simplest start for a new integration.',
     },
     {
-      name: 'Dapta MVP extension',
-      description: 'JSON-first multi-calendar availability for generic automation nodes.',
+      name: 'Cal.com-compatible API',
+      description:
+        "The paths, headers and field names of Cal.com's API v2, so a tool that already speaks Cal.com works with your key. Each operation needs its `cal-api-version` header.",
     },
     {
-      name: 'Legacy v1',
-      description: 'Existing v1 operations; behavior is preserved.',
+      name: 'Calendar availability',
+      description: 'An addition to the Cal.com shape: open times across up to 100 of your connected calendars in one call.',
+    },
+    {
+      name: 'Booking page',
+      description:
+        "The public endpoints behind the booking page and the invitee's manage link. They take no API key; a manage link's token reaches only its own booking.",
+    },
+    {
+      name: 'Health',
+      description: 'Whether this deployment and its database are up.',
     },
   ],
   'x-dapta-compatibility': {
@@ -556,7 +569,7 @@ export const openapiSpec = {
   paths: {
     '/v2/slots': {
       get: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'getV2Slots',
         summary: 'Get slots for a personal or team event type',
         description:
@@ -638,7 +651,7 @@ export const openapiSpec = {
             in: 'query',
             required: false,
             schema: { type: 'string' },
-            description: 'Recognized but returns 422 in the MVP.',
+            description: 'Recognized but not supported: returns 422.',
           },
         ],
         responses: {
@@ -660,19 +673,19 @@ export const openapiSpec = {
           '401': errorResponse('Missing or invalid API key.'),
           '403': errorResponse('API key lacks availability:read.'),
           '404': errorResponse('Event type is absent, cross-tenant, or outside the key allowlist.'),
-          '422': errorResponse('Recognized Cal variant is not implemented in the MVP.'),
+          '422': errorResponse('A recognized Cal.com variant that is not supported.'),
         },
       },
     },
     '/v2/bookings': {
       post: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'createV2Booking',
         summary: 'Create a personal or team booking',
         description:
-          'Uses the current 2026-02-25 request and response names. All guests are persisted as booking attendees. Idempotency-Key is a Dapta extension and is required by the Flow Studio guide.',
+          'Uses the current 2026-02-25 request and response names. All guests are persisted as booking attendees. Idempotency-Key is an addition to the Cal.com shape: send one so a retry never books twice.',
         security: [{ dclBearer: [] }],
-        parameters: [calVersion('2026-02-25'), idempotencyParameter('flow-run-123:create-booking')],
+        parameters: [calVersion('2026-02-25'), idempotencyParameter('crm-lead-4821:create-booking')],
         'x-dapta-idempotency': idempotencyExtension,
         requestBody: jsonBody({
           type: 'object',
@@ -759,9 +772,9 @@ export const openapiSpec = {
     },
     '/v2/bookings/{uid}': {
       get: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'getV2Booking',
-        summary: 'Get a booking by lifecycle UID',
+        summary: 'Get a booking',
         security: [{ dclBearer: [] }],
         parameters: [
           calVersion('2026-02-25'),
@@ -790,13 +803,14 @@ export const openapiSpec = {
     },
     '/v2/bookings/{uid}/cancel': {
       post: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'cancelV2Booking',
-        summary: 'Cancel a booking without changing its UID',
+        summary: 'Cancel a booking',
+        description: 'The booking keeps its UID. A retry returns the same UID and response.',
         security: [{ dclBearer: [] }],
         parameters: [
           calVersion('2026-02-25'),
-          idempotencyParameter('flow-run-123:cancel-booking'),
+          idempotencyParameter('crm-lead-4821:cancel-booking'),
           {
             name: 'uid',
             in: 'path',
@@ -840,13 +854,14 @@ export const openapiSpec = {
     },
     '/v2/bookings/{uid}/reschedule': {
       post: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'rescheduleV2Booking',
-        summary: 'Reschedule a booking and mint a new UID',
+        summary: 'Reschedule a booking',
+        description: 'The moved booking gets a new UID; the response links the old and the new one.',
         security: [{ dclBearer: [] }],
         parameters: [
           calVersion('2026-02-25'),
-          idempotencyParameter('flow-run-123:reschedule-booking'),
+          idempotencyParameter('crm-lead-4821:reschedule-booking'),
           {
             name: 'uid',
             in: 'path',
@@ -890,13 +905,13 @@ export const openapiSpec = {
     },
     '/v2/bookings/{uid}/guests': {
       post: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'addV2BookingGuests',
-        summary: 'Add and deduplicate booking guests',
+        summary: 'Add guests to a booking',
         security: [{ dclBearer: [] }],
         parameters: [
           calVersion('2024-08-13'),
-          idempotencyParameter('flow-run-123:add-guests'),
+          idempotencyParameter('crm-lead-4821:add-guests'),
           {
             name: 'uid',
             in: 'path',
@@ -949,9 +964,9 @@ export const openapiSpec = {
     },
     '/v2/event-types': {
       get: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'getV2EventTypes',
-        summary: 'Discover personal and team event types',
+        summary: 'List event types',
         security: [{ dclBearer: [] }],
         parameters: [
           calVersion('2024-06-14'),
@@ -1001,9 +1016,9 @@ export const openapiSpec = {
     },
     '/v2/calendars': {
       get: {
-        tags: ['Cal-compatible MVP'],
+        tags: ['Cal.com-compatible API'],
         operationId: 'getV2Calendars',
-        summary: 'Discover provider-visible calendars and permissions',
+        summary: 'List connected calendars',
         security: [{ dclBearer: [] }],
         responses: {
           '200': {
@@ -1042,11 +1057,11 @@ export const openapiSpec = {
     },
     '/v2/calendars/availability': {
       post: {
-        tags: ['Dapta MVP extension'],
+        tags: ['Calendar availability'],
         operationId: 'getV2CalendarAvailability',
-        summary: 'Compute availability for one to 100 discovered calendars',
+        summary: 'Get open times across calendars',
         description:
-          'JSON-first batch operation for Flow Studio. Every requested calendar is either represented in results or in failures; provider errors are never silently omitted.',
+          'One call for one to 100 calendars from GET /v2/calendars. Every requested calendar is either represented in results or in failures; provider errors are never silently omitted.',
         security: [{ dclBearer: [] }],
         requestBody: jsonBody({
           $ref: '#/components/schemas/CalendarAvailabilityInput',
@@ -1081,13 +1096,17 @@ export const openapiSpec = {
     },
     '/health': {
       get: {
-        summary: 'Liveness + DB probe',
+        tags: ['Health'],
+        summary: 'Health check',
+        description: 'Liveness plus a database probe. Answers 200 even when the database is down, with `db: "down"`.',
         responses: { '200': { description: 'ok | degraded' } },
       },
     },
     '/v1/availability': {
       get: {
-        summary: 'Public availability (slots, seat-aware)',
+        tags: ['Booking page'],
+        summary: 'Get open times of an event',
+        description: 'The times a public booking page offers. On a group event each slot carries the seats left.',
         parameters: [
           ...['accountCode', 'handle', 'slug', 'from', 'to', 'timeZone'].map((name) => ({
             name,
@@ -1106,9 +1125,10 @@ export const openapiSpec = {
     },
     '/v1/public/teams/{accountCode}/{teamSlug}/availability': {
       get: {
-        summary: 'Public team availability (round-robin / collective)',
+        tags: ['Booking page'],
+        summary: 'Get open times of a team event',
         description:
-          'The team counterpart to GET /v1/availability. The window is capped at ' +
+          'Round-robin and collective team events: the team counterpart to GET /v1/availability. The window is capped at ' +
           '60 days from `from`: a wider range is clamped, not rejected. `from` and ' +
           '`to` must be ISO-8601 instants with an offset.',
         parameters: [
@@ -1132,7 +1152,8 @@ export const openapiSpec = {
     },
     '/v1/public/one-off/{token}': {
       get: {
-        summary: 'Resolve a one-off invite link',
+        tags: ['Booking page'],
+        summary: 'Resolve a one-off link',
         description:
           'A one-off invite link is a grant a host mints over an event type they already ' +
           'have: it books that event once and then stops working. This answers WHERE the ' +
@@ -1173,7 +1194,8 @@ export const openapiSpec = {
     },
     '/v1/reservations': {
       post: {
-        summary: 'Place a 10-minute hold on a slot',
+        tags: ['Booking page'],
+        summary: 'Hold a time for 10 minutes',
         // One-off invite links (#110). Optional everywhere it appears: absent,
         // nothing about the route changes. Present and live, it lets THIS
         // request see the one hidden event type that token opens.
@@ -1198,7 +1220,8 @@ export const openapiSpec = {
     },
     '/v1/reservations/release': {
       post: {
-        summary: 'Give a held slot back',
+        tags: ['Booking page'],
+        summary: 'Release a held time',
         description:
           'Releases a hold placed by POST /v1/reservations so the slot is offered ' +
           'to other visitors again, rather than waiting out its ten-minute TTL. ' +
@@ -1224,7 +1247,9 @@ export const openapiSpec = {
     },
     '/v1/bookings': {
       post: {
-        summary: 'Create a booking (consumes a hold; intake-validated)',
+        tags: ['Booking page'],
+        summary: 'Book a held time',
+        description: 'Consumes the hold. The event\'s required booking questions must be answered in `answers`.',
         // One-off invite links (#110). Optional everywhere it appears: absent,
         // nothing about the route changes. Present and live, it lets THIS
         // request see the one hidden event type that token opens.
@@ -1285,7 +1310,9 @@ export const openapiSpec = {
     },
     '/v1/bookings/{uid}': {
       get: {
-        summary: 'Manage view (attendee self-service; token via X-Manage-Token header, ?token=, or body)',
+        tags: ['Booking page'],
+        summary: 'Get a booking from its manage link',
+        description: 'The manage token goes in the X-Manage-Token header, the `token` query parameter or the body.',
         parameters: [
           {
             name: 'uid',
@@ -1302,8 +1329,10 @@ export const openapiSpec = {
     },
     '/v1/bookings/{uid}/availability': {
       get: {
-        summary:
-          'Slots this booking can move to (manage token; scoped to the host set the booking already has, so the picker cannot offer a time the reschedule refuses)',
+        tags: ['Booking page'],
+        summary: 'Get times a booking can move to',
+        description:
+          'Needs the manage token. Scoped to the hosts the booking already has, so the picker never offers a time the reschedule refuses.',
         parameters: [
           { name: 'uid', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'from', in: 'query', required: true, schema: { type: 'string', format: 'date-time' } },
@@ -1319,7 +1348,9 @@ export const openapiSpec = {
     },
     '/v1/bookings/{uid}/cancel': {
       post: {
-        summary: 'Attendee cancel (manage token; pending and accepted both cancel; idempotent)',
+        tags: ['Booking page'],
+        summary: 'Cancel from the manage link',
+        description: 'Needs the manage token. Pending and accepted bookings both cancel; a retry changes nothing.',
         parameters: [
           {
             name: 'uid',
@@ -1350,7 +1381,9 @@ export const openapiSpec = {
     },
     '/v1/bookings/{uid}/reschedule': {
       post: {
-        summary: 'Attendee reschedule (manage token rotates on success)',
+        tags: ['Booking page'],
+        summary: 'Reschedule from the manage link',
+        description: 'Needs the manage token, which is replaced by a new one on success.',
         parameters: [
           {
             name: 'uid',
@@ -1379,7 +1412,9 @@ export const openapiSpec = {
     },
     '/v1/machine/availability': {
       get: {
-        summary: 'Agent availability (60-day cap)',
+        tags: ['REST API'],
+        summary: 'Get open times',
+        description: 'The open times of one event. A window longer than 60 days is cut to 60 days.',
         security: [{ apiKey: [] }],
         parameters: ['eventTypeId', 'handle', 'slug', 'from', 'to', 'timeZone'].map((name) => ({
           name,
@@ -1396,7 +1431,9 @@ export const openapiSpec = {
     },
     '/v1/machine/bookings': {
       post: {
-        summary: 'Agent create booking (attendees[]; Idempotency-Key)',
+        tags: ['REST API'],
+        summary: 'Create a booking',
+        description: 'Books a time for the people in `attendees`. Send an Idempotency-Key so a retry never books twice.',
         security: [{ apiKey: [] }],
         parameters: [
           {
@@ -1428,7 +1465,8 @@ export const openapiSpec = {
         responses: { '201': { description: '{uid,status,startUtc,endUtc}' } },
       },
       get: {
-        summary: 'Agent list bookings',
+        tags: ['REST API'],
+        summary: 'List bookings',
         security: [{ apiKey: [] }],
         parameters: ['status', 'from', 'to', 'cursor', 'limit'].map((name) => ({
           name,
@@ -1441,7 +1479,8 @@ export const openapiSpec = {
     },
     '/v1/machine/bookings/{uid}': {
       patch: {
-        summary: 'Agent reschedule',
+        tags: ['REST API'],
+        summary: 'Reschedule a booking',
         security: [{ apiKey: [] }],
         parameters: [
           {
@@ -1470,7 +1509,9 @@ export const openapiSpec = {
     },
     '/v1/machine/bookings/{uid}/cancel': {
       post: {
-        summary: 'Agent cancel (pending and accepted both cancel; idempotent on retry)',
+        tags: ['REST API'],
+        summary: 'Cancel a booking',
+        description: 'Pending and accepted bookings both cancel; a retry changes nothing and says it was already applied.',
         security: [{ apiKey: [] }],
         parameters: [
           {
@@ -1498,7 +1539,8 @@ export const openapiSpec = {
     },
     '/v1/machine/bookings/{uid}/attendees': {
       post: {
-        summary: 'Agent add attendee to an existing booking (group/guest use)',
+        tags: ['REST API'],
+        summary: 'Add a guest to a booking',
         security: [{ apiKey: [] }],
         parameters: [
           {
