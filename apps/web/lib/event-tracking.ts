@@ -176,6 +176,11 @@ export function loadGtm(w: TrackingWindow, id: string): void {
  * default writes them on the widest domain it can (`.example.com` from
  * `book.example.com`), so every request to the dashboard's host and the API
  * would carry the host's analytics ids.
+ *
+ * They are also `SameSite=None; Secure`, so GA4 counts an embedded page:
+ * inside a frame on another site the browser refuses gtag's default
+ * (`SameSite=Lax`) cookies, and gtag then sends nothing at all, neither the
+ * page view nor `booking_scheduled`.
  */
 export function loadGa4(w: TrackingWindow, id: string): void {
   if (started.has(`ga4:${id}`)) return;
@@ -193,7 +198,7 @@ export function loadGa4(w: TrackingWindow, id: string): void {
     addScript(w, ga4Src(id));
   }
   // `none`: no Domain attribute, so the cookies belong to this host alone.
-  gtag('config', id, { cookie_domain: 'none' });
+  gtag('config', id, { cookie_domain: 'none', cookie_flags: 'SameSite=None;Secure' });
 }
 
 /**
