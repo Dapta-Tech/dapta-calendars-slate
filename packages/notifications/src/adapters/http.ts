@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import type { EmailAttachment, EmailMessage, EmailProvider, EmailResult } from '../email.port';
+import { EmailRefusedError, type EmailAttachment, type EmailMessage, type EmailProvider, type EmailResult } from '../email.port';
 import { normalizeRecipients } from '../util';
 
 /**
@@ -266,8 +266,9 @@ interface TransactionalResponseBody {
  *                                          rate-limited, retried up to 72h). A valid
  *                                          idempotent duplicate arrives with
  *                                          `duplicate:true` — still dispatched.
- *   - `blocked_by_policy`               → throw (a real, non-retryable refusal,
- *                                          surfaced so it lands in the outbox log)
+ *   - `blocked_by_policy`               → throw `EmailRefusedError` (a real,
+ *                                          non-retryable refusal, surfaced so it
+ *                                          lands in the outbox log once)
  *   - any other / missing status        → throw (malformed — do not assume
  *                                          success)
  *
@@ -299,7 +300,7 @@ export function interpretTransactionalResponse(
     return { delivered: true, messageId, driver: 'http' };
   }
   if (status === 'blocked_by_policy') {
-    throw new Error(
+    throw new EmailRefusedError(
       `transactional email blocked by policy${b.blockedReason ? `: ${b.blockedReason}` : ''}`,
     );
   }

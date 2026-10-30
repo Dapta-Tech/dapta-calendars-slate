@@ -55,7 +55,7 @@ describe('notification matrix', () => {
     expect(m.text).toContain(base.manageUrl!);
     const cal = ics(m);
     expect(cal).toContain('METHOD:REQUEST');
-    expect(cal).toContain('SEQUENCE:0');
+    expect(cal).toMatch(/^SEQUENCE:0\r?$/m);
     expect(cal).toContain('ORGANIZER;CN=Alex Rivera:mailto:alex@example.com');
     expect(m.attachments?.[0]?.contentType).toContain('method=REQUEST');
   });
@@ -79,6 +79,7 @@ describe('notification matrix', () => {
     expect(m.attachments ?? []).toHaveLength(0);
   });
 
+  // No claimed number on these notifications: the fixed 1 and 2 stand.
   it('reschedule → attendee+host, REQUEST/SEQ1, previous time line', async () => {
     await notifier.sendReschedule({ ...base, previousStartUtc: '2026-07-30T15:00:00.000Z' });
     const m = only();
@@ -87,7 +88,7 @@ describe('notification matrix', () => {
     expect(m.text).toContain('Was:');
     const cal = ics(m);
     expect(cal).toContain('METHOD:REQUEST');
-    expect(cal).toContain('SEQUENCE:1');
+    expect(cal).toMatch(/^SEQUENCE:1\r?$/m);
   });
 
   it('cancellation → attendee+host, CANCEL/SEQ2', async () => {
@@ -98,7 +99,7 @@ describe('notification matrix', () => {
     expect(m.text).toContain('Reason: no longer needed');
     const cal = ics(m);
     expect(cal).toContain('METHOD:CANCEL');
-    expect(cal).toContain('SEQUENCE:2');
+    expect(cal).toMatch(/^SEQUENCE:2\r?$/m);
   });
 
   it('recipients dedupe when the host IS the attendee', async () => {

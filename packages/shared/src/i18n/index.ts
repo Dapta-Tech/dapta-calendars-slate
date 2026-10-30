@@ -937,6 +937,13 @@ export interface BookingMessages {
       /** A booking's own page: the campaign it came from (its UTMs), shown only when it has one. */
       campaignTitle: string;
       campaignHint: string;
+      /** A booking's own page: who booked and what they answered, as the host's email lists them. */
+      guestTitle: string;
+      guestName: string;
+      guestEmail: string;
+      guestPhone: string;
+      guestOthers: string;
+      guestAnswersTitle: string;
       newSubtitle: string;
       createEventFirst: string;
       slotTaken: string;
@@ -1367,10 +1374,6 @@ export interface BookingMessages {
       keyExpired: string;
       keyLastUsed: string;
       keyNeverUsed: string;
-      apiRefTitle: string;
-      apiRefLead: string;
-      apiDocs: string;
-      apiOpenApi: string;
       apiRefMissing: string;
       /** Connected apps: OAuth grants with revoke. */
       connectedTitle: string;
@@ -1387,8 +1390,6 @@ export interface BookingMessages {
       connectedRevokeBody: string;
       connectedRevokedToast: string;
       connectedExpiryNote: string;
-      /** The API docs page's lead (the API keys page uses `pageLead`). */
-      docsPageLead: string;
       /**
        * On the API keys page: the way in for an agent without MCP, a zip that
        * teaches it the REST API. `{product}` is the product's name. The
@@ -2639,6 +2640,12 @@ export const en: BookingMessages = {
       notFoundBody: 'There is no booking at this link in this workspace.',
       campaignTitle: 'Campaign',
       campaignHint: 'From the UTM parameters on the link the invitee booked from.',
+      guestTitle: 'Guest details',
+      guestName: 'Name',
+      guestEmail: 'Email',
+      guestPhone: 'Phone',
+      guestOthers: 'Other guests',
+      guestAnswersTitle: 'Their answers',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
@@ -3080,10 +3087,6 @@ export const en: BookingMessages = {
       keyExpired: 'Expired {date}',
       keyLastUsed: 'Last used {date}',
       keyNeverUsed: 'Never used',
-      apiRefTitle: 'API reference',
-      apiRefLead: 'Every route a key can call, with a try-it console and the machine-readable spec.',
-      apiDocs: 'Interactive reference',
-      apiOpenApi: 'openapi.json',
       apiRefMissing: 'This installation has no public API address yet. Ask whoever runs it to set API_PUBLIC_URL.',
       connectedTitle: 'Connected apps',
       connectedLead:
@@ -3102,7 +3105,6 @@ export const en: BookingMessages = {
       connectedRevokedToast: 'App disconnected.',
       connectedExpiryNote:
         'Disconnecting stops an app from renewing its access right away. Access it already holds runs out within {minutes} min.',
-      docsPageLead: 'For your own code: every route a key can call, with a try-it console and the machine-readable spec.',
       guideSkillTitle: 'No MCP in your agent?',
       guideSkillBody:
         'Download the skill: a zip that teaches any agent with a terminal to use the {product} API with the same key.',
@@ -4390,6 +4392,12 @@ export const es: BookingMessages = {
       notFoundBody: 'No hay ninguna reserva en este enlace dentro de este espacio.',
       campaignTitle: 'Campaña',
       campaignHint: 'De los parámetros UTM del enlace desde el que reservó el invitado.',
+      guestTitle: 'Datos del invitado',
+      guestName: 'Nombre',
+      guestEmail: 'Correo',
+      guestPhone: 'Teléfono',
+      guestOthers: 'Otros invitados',
+      guestAnswersTitle: 'Sus respuestas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
@@ -4829,10 +4837,6 @@ export const es: BookingMessages = {
       keyExpired: 'Venció el {date}',
       keyLastUsed: 'Último uso {date}',
       keyNeverUsed: 'Sin usar',
-      apiRefTitle: 'Referencia de la API',
-      apiRefLead: 'Todas las rutas que una clave puede llamar, con consola de pruebas y la especificación legible por máquinas.',
-      apiDocs: 'Referencia interactiva',
-      apiOpenApi: 'openapi.json',
       apiRefMissing: 'Esta instalación aún no tiene una dirección pública de la API. Pide a quien la administra que defina API_PUBLIC_URL.',
       connectedTitle: 'Apps conectadas',
       connectedLead:
@@ -4851,7 +4855,6 @@ export const es: BookingMessages = {
       connectedRevokedToast: 'App desconectada.',
       connectedExpiryNote:
         'Desconectar impide de inmediato que la app renueve su acceso. El acceso que ya tiene se agota en menos de {minutes} min.',
-      docsPageLead: 'Para tu propio código: cada ruta que una clave puede llamar, con una consola de prueba y la especificación legible por máquinas.',
       guideSkillTitle: '¿Tu agente no tiene MCP?',
       guideSkillBody:
         'Descarga el skill: un zip que le enseña a cualquier agente con terminal a usar la API de {product} con la misma clave API.',

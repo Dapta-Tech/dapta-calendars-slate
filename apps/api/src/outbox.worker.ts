@@ -57,6 +57,12 @@ export const OUTBOX_LANES: ReadonlyArray<{ name: string; kinds: readonly OutboxK
 const NO_RETRY_HORIZON = new Set<string>(['analytics']);
 const NAMED_KINDS = OUTBOX_LANES.flatMap((l) => l.kinds ?? []);
 
+/**
+ * How soon a row whose end was held back (its follow-up could not be queued:
+ * `OutboxWorker.compensate`) is looked at again.
+ */
+const COMPENSATION_RETRY_MS = 30_000;
+
 /** A duration for a log line: "45s", "12m", "3h". */
 function span(ms: number): string {
   if (ms < 120_000) return `${Math.round(ms / 1000)}s`;
@@ -339,17 +345,34 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
 
   private async recordFailure(row: OutboxRow, err: unknown, clock: () => number): Promise<void> {
     const now = clock();
-    if (err instanceof OutboxSkipError) {
-      // A decision, not a failure: record the reason ONCE and stop: waiting
-      // and retrying cannot change the outcome.
-      await markOutboxSkipped(this.db, row.id, { reason: err.message, now, leaseToken: row.leaseToken });
-      this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${err.message}`);
-      return;
-    }
     const attempts = row.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);
     const horizonMs = NO_RETRY_HORIZON.has(row.kind) ? 0 : this.horizonMs;
-    if (outboxRetriesExhausted(row, attempts, now, horizonMs)) {
+    const skip = err instanceof OutboxSkipError;
+    const exhausted = !skip && outboxRetriesExhausted(row, attempts, now, horizonMs);
+    // An unsent email's follow-up is queued BEFORE its end is recorded. When it
+    // cannot be, the row does not end: it is looked at again shortly, and that
+    // costs it none of its own attempts, since the email itself did nothing new.
+    if ((skip || exhausted) && !(await this.compensate(row))) {
+      const delayMs = COMPENSATION_RETRY_MS;
+      await markOutboxRetry(this.db, row.id, {
+        attempts: row.attempts,
+        error: `${message} (kept queued: its follow-up could not be queued)`,
+        now,
+        delayMs,
+        leaseToken: row.leaseToken,
+      });
+      this.wake(now + delayMs);
+      return;
+    }
+    if (skip) {
+      // A decision, not a failure: record the reason ONCE and stop: waiting
+      // and retrying cannot change the outcome.
+      await markOutboxSkipped(this.db, row.id, { reason: message, now, leaseToken: row.leaseToken });
+      this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${message}`);
+      return;
+    }
+    if (exhausted) {
       await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
       const tried = row.firstFailedAt == null ? '' : ` over ${span(now - row.firstFailedAt)}`;
       this.log.error(
@@ -376,11 +399,33 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     this.wake(now + delayMs);
   }
 
+  /**
+   * Before a row ends unsent: an invitee email that never goes out may leave a
+   * calendar change that counted on it without the provider's invitation, so
+   * the email side queues the provider's invitation after all. Answers false
+   * when that could not be queued: the row is then retried, not ended, so the
+   * follow-up is never lost. Always true for any other kind.
+   */
+  private async compensate(row: OutboxRow): Promise<boolean> {
+    if (row.kind !== 'email') return true;
+    try {
+      // Optional: a worker built in a spec with a bare email stub has none.
+      await this.email.afterGaveUp?.(row);
+      return true;
+    } catch (err) {
+      this.log.error(`outbox ${row.kind}:${row.action} (${row.id}) kept queued: its follow-up could not be queued: ${String(err)}`);
+      return false;
+    }
+  }
+
   /** Perform the row's side-effect. Throws on failure so `process` can retry. */
   private async execute(row: OutboxRow): Promise<void> {
     if (row.kind === 'calendar') {
       if (!row.bookingUid) throw new Error('calendar outbox row missing booking_uid');
-      await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid);
+      await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid, row.payload, {
+        id: row.id,
+        attempts: row.attempts,
+      });
       return;
     }
     // H1a (#63): ONE row does both halves of the CRM write-out — resolve the

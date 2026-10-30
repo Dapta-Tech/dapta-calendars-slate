@@ -457,6 +457,77 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(after[0]!.nextAttemptAt).not.toBe(before.nextAttemptAt);
   });
 
+  // F4 (2026-10-30 production E2E): with the provider's invitation muted, this
+  // .ics alone moves and cancels the invitee's entry, so each change carries a
+  // number that outranks the last, the same on both sides' copies.
+  it('each move and the cancellation claim a higher .ics SEQUENCE, shared by both copies', async () => {
+    const uid = await book();
+    await settle();
+    const seq = async (action: string) =>
+      (await emailRows(uid, action)).map((r) => (JSON.parse(r.payload!) as { icsSequence?: number }).icsSequence);
+    expect(await seq('confirmation')).toEqual([undefined, undefined]); // a first confirmation keeps 0
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 4 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    for (const slot of [a!.slots[5]!, a!.slots[7]!]) {
+      const out = await booking.reschedule(uid, { newStartUtc: slot.startUtc, byHost: true });
+      expect('error' in out).toBe(false);
+      await settle();
+    }
+    expect((await seq('reschedule')).sort()).toEqual([3, 3, 4, 4]);
+    await booking.cancel(uid, { byHost: true, reason: 'done', accountId });
+    await settle();
+    expect(await seq('cancellation')).toEqual([5, 5]);
+  });
+
+  it('a move whose first booking row is gone still claims a number above the fixed ones', async () => {
+    const uid = await book();
+    await settle();
+    // The meeting began as another booking whose row no longer exists: the .ics
+    // keeps that uid, and the count lives on the oldest row still there.
+    await db.run(sql`UPDATE booking SET rescheduled_from_uid = ${'gone-first-booking'} WHERE uid = ${uid}`);
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 4 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    for (const slot of [a!.slots[5]!, a!.slots[7]!]) {
+      const out = await booking.reschedule(uid, { newStartUtc: slot.startUtc, byHost: true });
+      expect('error' in out).toBe(false);
+      await settle();
+    }
+    const payloads = (await emailRows(uid, 'reschedule')).map(
+      (r) => JSON.parse(r.payload!) as { icsSequence?: number; calendarUid?: string },
+    );
+    expect(payloads.map((p) => p.icsSequence).sort()).toEqual([3, 3, 4, 4]);
+  });
+
+  it("the invitee's email marks the pending calendar change it goes out with", async () => {
+    const uid = await book();
+    await settle();
+    // The calendar row a calendar-enabled deployment queues for the move.
+    const calendarId = await enqueueOutbox(db, { kind: 'calendar', action: 'reschedule', bookingUid: uid });
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 4 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const out = await booking.reschedule(uid, { newStartUtc: a!.slots[5]!.startUtc, byHost: true });
+    expect('error' in out).toBe(false);
+    await settle();
+    const invitee = (await emailRows(uid, 'reschedule')).find((r) => r.orderKey === `${uid}|attendee`)!;
+    const calendar = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === calendarId)!;
+    expect(JSON.parse(calendar.payload!)).toEqual({ inviteeEmailId: invitee.id });
+  });
+
   it('cancel deletes the pending follow-up', async () => {
     await setReminders(withFollowUp());
     const uid = await book();

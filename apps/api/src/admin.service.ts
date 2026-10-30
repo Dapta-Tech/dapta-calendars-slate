@@ -32,6 +32,7 @@ import {
   getHostBooking,
   getBookingUtm,
   getMe,
+  loadBookingNotificationContext,
   getSchedule,
   listApiKeys,
   listBookings,
@@ -73,6 +74,7 @@ import {
   TEMPLATE_VARIABLES,
   bookingDetails,
   bookingDetailsText,
+  collectBookingAnswers,
   defaultEnabledFor,
   defaultTemplate,
   renderTemplate,
@@ -284,12 +286,50 @@ export class AdminService {
    * email links there). Null when the uid is not this account's: the caller
    * answers 404 either way, so another tenant's booking is never told apart
    * from one that does not exist.
+   *
+   * `guest` is who booked and what they answered, built the way the host's
+   * copy of the booking email builds it (`bookingDetails`), in `locale` (the
+   * page's language; absent, the member's own). Only for the members that copy
+   * goes to: the booking's host, the one the bookings list shows it to, and the
+   * co-hosts assigned to it. Anyone else in the account reads the booking with
+   * `guest: null`.
    */
-  async getBooking(p: HostPrincipal, uid: string) {
+  async getBooking(p: HostPrincipal, uid: string, locale?: string) {
     const booking = await getHostBooking(this.db, { accountId: p.accountId, uid });
+    if (!booking) return null;
     // The campaign it came from (`booking.utm`), for the page's Campaign block;
     // null when none. Read only for a booking the account owns.
-    return booking ? { ...booking, utm: await getBookingUtm(this.db, booking.uid) } : null;
+    const utm = await getBookingUtm(this.db, booking.uid);
+    const guest = (await this.hostsBooking(p, booking)) ? await this.guestDetails(p, booking.uid, locale) : null;
+    return { ...booking, utm, guest };
+  }
+
+  /** Whether the caller is the booking's host or one of its assigned co-hosts. */
+  private async hostsBooking(p: HostPrincipal, booking: { uid: string; hostMemberId: string | null }): Promise<boolean> {
+    if (booking.hostMemberId === p.memberId) return true;
+    const coHost = await this.db.get<{ one: number }>(
+      sql`SELECT 1 AS one FROM booking_host bh JOIN booking b ON b.id = bh.booking_id
+          WHERE b.account_id = ${p.accountId} AND b.uid = ${booking.uid} AND bh.member_id = ${p.memberId} LIMIT 1`,
+    );
+    return Boolean(coHost);
+  }
+
+  /**
+   * The host email's "Guest details" and "Their answers" for one booking: the
+   * invitee, everyone else it invites, the event's questions with their answers
+   * and the notes, cleaned and bounded by the same code. Visitor input: plain
+   * text, never markup. Null when the booking has no invitee row.
+   */
+  private async guestDetails(p: HostPrincipal, uid: string, locale?: string) {
+    const ctx = await loadBookingNotificationContext(this.db, uid);
+    if (!ctx) return null;
+    const lang =
+      locale === 'es' || locale === 'en' ? locale : (await getMe(this.db, p.accountId, p.memberId))?.locale === 'es' ? 'es' : 'en';
+    const d = bookingDetails(
+      { attendee: ctx.attendee, guests: ctx.guests, answers: collectBookingAnswers(ctx.bookingFields, ctx.formAnswers) },
+      lang,
+    );
+    return { name: d.guest.name, email: d.guest.email, phone: d.guest.phone || null, others: d.others, answers: d.answers };
   }
 
   async hostCreate(

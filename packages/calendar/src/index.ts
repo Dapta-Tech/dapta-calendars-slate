@@ -40,6 +40,13 @@ export interface CreateEventInput {
   /** Request a conferencing link when true. */
   requestConferenceLink?: boolean;
   timeZone?: string | null;
+  /**
+   * Whether the calendar provider should email the attendees itself (its own
+   * invitation, update or cancellation). `false` when this service already
+   * emails the invitee its own invite (.ics) for this change, so the guest is
+   * not invited twice. Absent: the backend's own default.
+   */
+  sendInvitations?: boolean;
 }
 
 export interface CreatedEvent {
@@ -51,6 +58,13 @@ export interface CreatedEvent {
 export interface DeleteEventInput {
   connectionRef: string;
   externalEventId: string;
+  /**
+   * Whether the calendar provider should email the attendees itself (its own
+   * invitation, update or cancellation). `false` when this service already
+   * emails the invitee its own invite (.ics) for this change, so the guest is
+   * not invited twice. Absent: the backend's own default.
+   */
+  sendInvitations?: boolean;
 }
 
 /**
@@ -83,6 +97,13 @@ export interface UpdateEventInput {
    */
   requestConferenceLink?: boolean;
   timeZone?: string | null;
+  /**
+   * Whether the calendar provider should email the attendees itself (its own
+   * invitation, update or cancellation). `false` when this service already
+   * emails the invitee its own invite (.ics) for this change, so the guest is
+   * not invited twice. Absent: the backend's own default.
+   */
+  sendInvitations?: boolean;
 }
 
 /** One calendar exposed by a connected account (for the post-connect pick). */

@@ -12,6 +12,14 @@ import {
   type InvitationSendClaim,
   loadBookingMeetingUrl,
   loadBookingNotificationContext,
+  claimIcsSequence,
+  tagCalendarChangeWithInviteeEmail,
+  findCalendarChangeForInviteeEmail,
+  hasReinviteFor,
+  bookingCalendarUid,
+  oldestLiveChainUid,
+  parseJsonColumn,
+  type OutboxRow,
   defaultNotificationSetting,
   type BookingNotificationContext,
   type EventReminder,
@@ -26,6 +34,7 @@ import {
   collectBookingAnswers,
   defaultEnabledFor,
   deliversEmail,
+  EmailRefusedError,
   extractTokens,
   resolveTemplate,
   type BookingNotification,
@@ -48,6 +57,21 @@ import { publicBookingBase } from './booking-origin';
  * row `skipped` ONCE with this reason — it never burns the retry schedule.
  */
 export class OutboxSkipError extends Error {}
+
+/**
+ * A refusal from the mail service (`EmailRefusedError`: a suppressed recipient,
+ * a policy block) is final, so the row is recorded once as `skipped` with the
+ * service's reason instead of being retried for a day. Any other error is
+ * passed on and retried as before.
+ */
+async function refusalIsFinal<T>(send: Promise<T>): Promise<T> {
+  try {
+    return await send;
+  } catch (err) {
+    if (err instanceof EmailRefusedError) throw new OutboxSkipError(err.message);
+    throw err;
+  }
+}
 
 /**
  * Thrown by `deliver` while a conferencing booking's link has not been minted
@@ -127,6 +151,41 @@ export const CONFERENCING_LINK_WAIT_ATTEMPTS = 3;
  * declines carry no join line at all.
  */
 const LINK_AWARE_KINDS = new Set(['confirmation', 'reschedule']);
+
+/** The calendar change each invitee email goes out with (`markCalendarChange`). */
+const CALENDAR_ACTION_FOR_EMAIL: Partial<Record<EmailKind, 'create' | 'reschedule' | 'delete'>> = {
+  confirmation: 'create',
+  reschedule: 'reschedule',
+  cancellation: 'delete',
+};
+
+/**
+ * The highest .ics SEQUENCE a booking email carried before changes were
+ * counted (a cancellation's fixed 2). Every counted change starts above it.
+ */
+const LEGACY_ICS_SEQUENCE_CEILING = 2;
+
+/**
+ * Whether a booking is an online meeting that should carry a join link: a
+ * `conferencing` location, and also a booking whose host set no location at
+ * all. Without a place, the meeting happens online; the organizer's calendar
+ * mints the room, and the link reaches the invitee in this service's own email
+ * and .ics. (Dapta's calendar backend always added a room to such events and
+ * the invitee got it only from the provider's own invitation, which F4 of the
+ * 2026-10-30 production E2E removes.) Any other kind (in person, a phone
+ * number, a custom place) never asks for one. "No location" means no kind AND
+ * no location text: a booking written before the kind existed can carry an
+ * address with a null kind, and it is not an online meeting. `undefined` is a
+ * queued row from before the kind was snapshotted, which never waits for a
+ * link.
+ */
+export function wantsConferencingLink(
+  kind: string | null | undefined,
+  location?: string | null,
+): boolean {
+  if (kind === 'conferencing') return true;
+  return (kind === null || kind === '') && !location?.trim();
+}
 
 /** The booking emails the outbox can carry. */
 export type EmailKind =
@@ -549,6 +608,70 @@ export class EmailEffects {
   }
 
   /**
+   * Tell the calendar write for this change that the invitee's email is queued
+   * (`tagCalendarChangeWithInviteeEmail`), so it may write the host's event
+   * without the provider's own invitation. Never throws: a failure only leaves
+   * the provider inviting, as before.
+   */
+  private async markCalendarChange(kind: Exclude<EmailKind, 'reminder'>, uid: string, emailOutboxId: string): Promise<void> {
+    const action = CALENDAR_ACTION_FOR_EMAIL[kind];
+    if (!action) return;
+    try {
+      await tagCalendarChangeWithInviteeEmail(this.db, { bookingUid: uid, action, emailOutboxId });
+    } catch (err) {
+      this.log.warn(`could not mark the calendar ${action} for ${uid}: ${err instanceof Error ? err.name : 'error'}`);
+    }
+  }
+
+  /**
+   * An email row is about to end without being sent (`skipped` or `failed`).
+   * When it is the invitee's confirmation or reschedule email and it marked
+   * the calendar change it went with, that change may have been written
+   * without the provider's own invitation, counting on this email: queue a
+   * `reinvite` calendar job, which has the provider invite the guest after all
+   * if so (`CalendarEffects`). Behind the change in the booking's calendar
+   * queue, so it runs once the change has.
+   *
+   * Called by the worker BEFORE it records the row's end, and THROWS when the
+   * job could not be queued, so the row stays queued and is retried rather
+   * than ending with nobody left to invite the guest. Queues at most one job
+   * per email, so a row that ends twice (a lost lease) queues it once.
+   */
+  async afterGaveUp(row: Pick<OutboxRow, 'id' | 'action' | 'bookingUid' | 'payload'>): Promise<void> {
+    if (!this.calendar?.enabled || !row.bookingUid) return;
+    if (row.action !== 'confirmation' && row.action !== 'reschedule') return;
+    if (parseJsonColumn<{ audience?: unknown }>(row.payload, {}).audience !== 'attendee') return;
+    const change = await findCalendarChangeForInviteeEmail(this.db, row.bookingUid, row.id);
+    if (!change || change.action === 'delete') return;
+    const live = await this.db.get<{ status: string }>(
+      sql`SELECT status FROM booking WHERE uid = ${row.bookingUid} LIMIT 1`,
+    );
+    if (live?.status !== 'accepted') return;
+    if (await hasReinviteFor(this.db, row.bookingUid, row.id)) return;
+    await enqueueOutbox(this.db, {
+      kind: 'calendar',
+      action: 'reinvite',
+      bookingUid: row.bookingUid,
+      payload: JSON.stringify({ inviteeEmailId: row.id }),
+    });
+  }
+
+  /** The .ics SEQUENCE change number for this email, or null when it carries the fixed one. */
+  private async claimSequenceFor(kind: Exclude<EmailKind, 'reminder'>, uid: string): Promise<number | null> {
+    if (kind !== 'reschedule' && kind !== 'cancellation' && kind !== 'confirmation') return null;
+    const calendarUid = await bookingCalendarUid(this.db, uid);
+    // A first confirmation keeps 0; one inside a chain of moves must outrank it.
+    if (kind === 'confirmation' && calendarUid === uid) return null;
+    const claimed = await claimIcsSequence(this.db, calendarUid);
+    if (claimed !== null || calendarUid === uid) return claimed;
+    // The first booking's row is gone (nothing in the app deletes one): count
+    // on the oldest row left in the chain, so the number still grows past the
+    // fixed 1 / 2 instead of falling back to them.
+    const live = await oldestLiveChainUid(this.db, uid);
+    return live ? claimIcsSequence(this.db, live) : null;
+  }
+
+  /**
    * Build the notification snapshots from the DB + caller overrides and enqueue
    * one durable email row per ENABLED side. Never throws — a failure to enqueue
    * is logged, so the caller's `void`-ed fire-and-forget never blocks or
@@ -557,15 +680,25 @@ export class EmailEffects {
   private async enqueue(
     kind: Exclude<EmailKind, 'reminder'>,
     uid: string,
-    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
   ): Promise<void> {
     try {
+      // The .ics SEQUENCE of this change, claimed ONCE so both sides' copies
+      // carry the same number: a move, a cancellation, and a confirmation of a
+      // booking that took over a moved meeting. It starts above the fixed 1 / 2
+      // the .ics carried before, so a meeting already moved once still updates.
+      // Claimed BEFORE the booking is read: the change that claims the highest
+      // number then reads a booking at least as new as every change before it,
+      // so the .ics a calendar keeps (the highest) always holds the latest time,
+      // even when two moves are queued at once.
+      const claimed = await this.claimSequenceFor(kind, uid);
       const ctx = await loadBookingNotificationContext(this.db, uid);
       if (!ctx) {
         this.log.warn(`skip ${kind} email — no notification context for booking ${uid}`);
         return;
       }
       const settings = await getNotificationSettings(this.db, ctx.accountId);
+      const sideExtra = claimed === null ? extra : { ...extra, icsSequence: LEGACY_ICS_SEQUENCE_CEILING + claimed };
       // ADR 0007: a conferencing booking's mail is made due slightly LATE, so
       // the calendar row that mints the link gets a head start. Every other
       // booking is due immediately — the wait must never tax a booking that
@@ -574,15 +707,15 @@ export class EmailEffects {
       // rather than discovered three failed attempts later.
       const waitsForLink =
         LINK_AWARE_KINDS.has(kind) &&
-        ctx.locationKind === 'conferencing' &&
+        wantsConferencingLink(ctx.locationKind, ctx.location) &&
         this.calendar?.enabled === true;
       // The grace must outlast a poll tick, or it expires before the worker
       // has looked at the calendar row even once.
       const graceMs = Math.max(CONFERENCING_LINK_GRACE_MS, (this.env?.OUTBOX_POLL_MS ?? 0) * 3);
       for (const side of KIND_SIDES[kind]) {
-        const n = this.sideNotification(kind, ctx, side, settings, extra);
+        const n = this.sideNotification(kind, ctx, side, settings, sideExtra);
         if (!n) continue;
-        await enqueueOutbox(this.db, {
+        const emailOutboxId = await enqueueOutbox(this.db, {
           kind: 'email',
           action: kind,
           bookingUid: uid,
@@ -597,6 +730,7 @@ export class EmailEffects {
               }
             : {}),
         });
+        if (side.audience === 'attendee') await this.markCalendarChange(kind, uid, emailOutboxId);
       }
     } catch (err) {
       this.log.error(`failed to enqueue ${kind} email for ${uid}: ${String(err)}`);
@@ -612,7 +746,7 @@ export class EmailEffects {
     ctx: BookingNotificationContext,
     side: { key: EmailTemplateKey; audience: 'attendee' | 'host' },
     settings: Map<string, NotificationSetting>,
-    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
     // Present for reminder / follow_up: the EVENT TYPE's row, which owns the
     // switch, the lead and the copy for both sides (#68).
     reminder?: EventReminder,
@@ -718,7 +852,7 @@ export class EmailEffects {
 
   private toNotification(
     ctx: BookingNotificationContext,
-    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
     // The language this copy is written in, which the Where is worded in too.
     locale: string | null = ctx.hostLocale,
     // The variables this copy's template reads, when it has one.
@@ -765,7 +899,10 @@ export class EmailEffects {
       manageUrl: extra.manageUrl ?? null,
       cancellationReason: extra.cancellationReason ?? null,
       previousStartUtc: extra.previousStartUtc ?? null,
+      ...(extra.icsSequence !== undefined ? { icsSequence: extra.icsSequence } : {}),
       accountCode: ctx.accountCode ?? null,
+      // Only when it differs: a booking never moved to a new uid keeps its own.
+      ...(ctx.calendarUid && ctx.calendarUid !== ctx.uid ? { calendarUid: ctx.calendarUid } : {}),
       bookingLink:
         ctx.bookAgain && this.env
           ? `${publicBookingBase(this.env)}/${ctx.bookAgain.accountCode}/${ctx.bookAgain.handle}/${ctx.bookAgain.slug}`
@@ -802,7 +939,7 @@ export class EmailEffects {
   ): Promise<void> {
     // Not a booking email: none of what follows (booking state, reminders,
     // conferencing links, branding) applies to it.
-    if (kind === MEMBER_INVITE_ACTION) return this.deliverMemberInvite(payloadJson);
+    if (kind === MEMBER_INVITE_ACTION) return refusalIsFinal(this.deliverMemberInvite(payloadJson));
     const n = JSON.parse(payloadJson) as BookingNotification & {
       reminderLeadMinutes?: number;
       /** The event-type reminder that scheduled this row; absent on rows queued
@@ -921,7 +1058,7 @@ export class EmailEffects {
       // for the full budget and log a failure per attempt, for nothing.
       const stillWriting =
         !n.meetingUrl &&
-        n.locationKind === 'conferencing' &&
+        wantsConferencingLink(n.locationKind, n.location) &&
         LINK_AWARE_KINDS.has(kind) &&
         (await hasPendingCalendarJob(this.db, n.uid));
       if (stillWriting && attempts < CONFERENCING_LINK_WAIT_ATTEMPTS) {
@@ -944,6 +1081,11 @@ export class EmailEffects {
     // the same way it brings the badge back. Cache only, never a wait on the
     // upstream (`EntitlementGate.showBranding`).
     n.showBranding = await this.gate.showBranding(n.accountId);
+    await refusalIsFinal(this.send(kind, n));
+  }
+
+  /** Hand one booking email to the notifier, by kind. */
+  private async send(kind: string, n: BookingNotification): Promise<void> {
     switch (kind) {
       case 'confirmation':
         await this.notifier.sendConfirmation(n);

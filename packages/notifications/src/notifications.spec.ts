@@ -341,3 +341,60 @@ describe('BookingNotifier: the invitee footer matches the page badge', () => {
     expect(smtp.sent[0]!.html).toContain('Este es un mensaje automático.');
   });
 });
+
+// F4 of the 2026-10-30 production E2E: with the provider's own invitation
+// muted, this .ics is the only thing that moves or cancels the invitee's entry.
+describe('BookingNotifier: the .ics keeps updating the same calendar entry', () => {
+  const booking = {
+    accountId: 'acc_1',
+    uid: 'bk_chain_2',
+    title: 'Intro call',
+    startUtc: '2026-08-01T14:00:00.000Z',
+    endUtc: '2026-08-01T14:30:00.000Z',
+    host: { name: 'Riley Chen', email: 'riley@example.com' },
+    attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'UTC' },
+    audience: 'attendee' as const,
+    stamp: '2026-07-09T12:00:00.000Z',
+  };
+  const capture = () => {
+    const sent: Array<{ headers?: Record<string, string>; idempotencyKey?: string; attachments?: Array<{ content: unknown }> }> = [];
+    const provider = {
+      send: (m: (typeof sent)[number]) => {
+        sent.push(m);
+        return Promise.resolve({ delivered: false, driver: 'log-only' as const });
+      },
+    };
+    return { sent, provider };
+  };
+  const ics = (m: { attachments?: Array<{ content: unknown }> }) => String(m.attachments?.[0]?.content);
+  const line = (cal: string, name: string) => cal.split('\r\n').find((l) => l.startsWith(`${name}:`));
+
+  it('a booking moved to a new uid keeps the first booking\'s UID; headers and keys keep its own', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never).sendReschedule({ ...booking, calendarUid: 'bk_chain_1' });
+    const m = sent[0]!;
+    expect(line(ics(m), 'UID')).toBe('UID:bk_chain_1');
+    expect(m.headers?.['X-Booking-Uid']).toBe('bk_chain_2');
+    expect(m.idempotencyKey).toContain('bk_chain_2');
+  });
+
+  it('SEQUENCE: the number claimed for the change when it was queued', async () => {
+    const moved = capture();
+    await new BookingNotifier(moved.provider as never).sendReschedule({ ...booking, icsSequence: 3 });
+    expect(line(ics(moved.sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:3');
+    const cancelled = capture();
+    await new BookingNotifier(cancelled.provider as never).sendCancellation({ ...booking, icsSequence: 4 });
+    expect(line(ics(cancelled.sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:4');
+    const chained = capture();
+    await new BookingNotifier(chained.provider as never).sendConfirmation({ ...booking, calendarUid: 'bk_chain_1', icsSequence: 5 });
+    expect(line(ics(chained.sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:5');
+  });
+
+  it('without a claimed number the fixed 0 / 1 / 2 stand, as before', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never).sendConfirmation(booking);
+    await new BookingNotifier(provider as never).sendReschedule(booking);
+    await new BookingNotifier(provider as never).sendCancellation(booking);
+    expect(sent.map((m) => line(ics(m), 'SEQUENCE'))).toEqual(['SEQUENCE:0', 'SEQUENCE:1', 'SEQUENCE:2']);
+  });
+});

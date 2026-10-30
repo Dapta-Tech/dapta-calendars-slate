@@ -346,6 +346,11 @@ export const booking = pgTable('booking', {
    * in @slate/types). NULL = none. See migration 0037 (pg).
    */
   utm: jsonb('utm'),
+  /**
+   * The .ics SEQUENCE counter of the meeting this booking starts (the first of
+   * its reschedule chain), bumped by `claimIcsSequence`. See migration 0038 (pg).
+   */
+  icsSequence: integer('ics_sequence').notNull().default(0),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });

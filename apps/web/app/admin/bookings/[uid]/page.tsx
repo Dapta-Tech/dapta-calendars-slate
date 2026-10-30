@@ -2,7 +2,7 @@ import { Fragment } from 'react';
 import { notFound } from 'next/navigation';
 import { ADMIN_BOOKINGS_PATH, getMessages, safeTimeZone, t } from '@slate/shared';
 import { BOOKING_UTM_KEYS, type BookingUtm } from '@slate/types';
-import { adminApi, ApiError } from '@/lib/admin-api';
+import { adminApi, ApiError, type BookingGuestDetails } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { FormHeader } from '@/components/ui/page-header';
 import { CancelAction, PendingActions } from '../booking-actions';
@@ -14,17 +14,20 @@ export const dynamic = 'force-dynamic';
  * One booking, on its own page: where the host's request email sends its
  * "Confirm or decline" button (`adminBookingPath`), and where each row of the
  * bookings list leads. It reads the booking by uid, so it opens whatever the
- * list's first page leaves out, offers the same action the list would, and
- * shows the campaign the booking came from when it has one. A uid that is not
- * this account's is a 404, the same as one that does not exist.
+ * list's first page leaves out, offers the same action the list would, shows
+ * who booked and what they answered (to the booking's host and co-hosts, as
+ * the host's email does), and the campaign the booking came from when it has
+ * one. A uid that is not this account's is a 404, the same as one that does
+ * not exist.
  *
  * Signed out, the admin gate sends the person through the login with this page
  * as the return target, so they land back here.
  */
 export default async function BookingPage({ params }: { params: Promise<{ uid: string }> }) {
   const { uid } = await params;
+  const locale = await getLocale();
   const [booking, me] = await Promise.all([
-    adminApi.getBooking(uid).catch((e: unknown) => {
+    adminApi.getBooking(uid, locale).catch((e: unknown) => {
       if (e instanceof ApiError && e.status === 404) return null;
       throw e;
     }),
@@ -34,7 +37,7 @@ export default async function BookingPage({ params }: { params: Promise<{ uid: s
 
   // safeTimeZone: a corrupt stored zone must never crash the page (QA fix 1).
   const tz = safeTimeZone(me?.timeZone);
-  const m = getMessages(await getLocale()).admin.bookings;
+  const m = getMessages(locale).admin.bookings;
   const section = bookingSection(booking, Date.now());
 
   return (
@@ -62,8 +65,57 @@ export default async function BookingPage({ params }: { params: Promise<{ uid: s
       </section>
       {/* Which zone the short "MST"-style label above refers to (QA2 fix 8c). */}
       <p className="mt-field text-sm text-muted-foreground">{t(m.timesShownIn, { tz: tz.replaceAll('_', ' ') })}</p>
+      <Guest guest={booking.guest} m={m} />
       <Campaign utm={booking.utm} m={m} />
     </div>
+  );
+}
+
+/**
+ * Who booked and what they answered: the host email's "Guest details" and
+ * "Their answers", built by the API with the same code (the event's questions
+ * in its order, labelled as the host wrote them, then the notes). Nothing at
+ * all when the API sends none: the caller is not the booking's host or a
+ * co-host, or the booking has no invitee. Everything but the labels was typed
+ * by a visitor: React escapes it as text, never a link.
+ */
+function Guest({ guest, m }: { guest: BookingGuestDetails | null | undefined; m: BookingsMessages }) {
+  if (!guest) return null;
+  const who = (
+    [
+      [m.guestName, guest.name],
+      [m.guestEmail, guest.email],
+      [m.guestPhone, guest.phone ?? ''],
+      [m.guestOthers, guest.others.join(', ')],
+    ] as const
+  ).filter(([, value]) => value);
+  return (
+    <section aria-labelledby="booking-guest" className="mt-section" data-testid="booking-guest">
+      <h2 id="booking-guest" className="mb-field text-sm font-semibold text-muted-foreground">
+        {m.guestTitle}
+      </h2>
+      <Details rows={who} />
+      {guest.answers.length > 0 ? (
+        <>
+          <h3 className="mb-field mt-group text-sm font-semibold text-muted-foreground">{m.guestAnswersTitle}</h3>
+          <Details rows={guest.answers.map((a) => [a.label, a.value] as const)} />
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** Label and value pairs in a card; a value keeps the lines it was typed with. */
+function Details({ rows }: { rows: ReadonlyArray<readonly [string, string]> }) {
+  return (
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-group gap-y-inline rounded-md border border-border bg-card p-card text-sm">
+      {rows.map(([label, value], i) => (
+        <Fragment key={i}>
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 whitespace-pre-line break-words font-medium">{value}</dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 }
 

@@ -50,6 +50,17 @@ export interface EmailResult {
   driver: EmailDriver;
 }
 
+/**
+ * Thrown by a transport when the mail service refuses a message for good: a
+ * recipient it has suppressed (an earlier bounce, a spam report, an
+ * unsubscribe) or another policy block. Sending the same message again cannot
+ * change the answer, so a caller that queues mail records the refusal once
+ * instead of retrying it.
+ */
+export class EmailRefusedError extends Error {
+  override readonly name = 'EmailRefusedError';
+}
+
 export interface EmailProvider {
   /**
    * Deliver one email. Implementations resolve with `delivered:false` for an
@@ -72,4 +83,11 @@ export interface EmailProvider {
    * support footer, not two. Absent = false: SMTP and the rest keep the line.
    */
   readonly addsSupportFooter?: boolean;
+  /**
+   * False for a transport that never delivers anything (log-only, noop): a
+   * caller that would rely on this service's email reaching someone (the
+   * calendar write muting the provider's own invitation) must not. Absent =
+   * a real transport.
+   */
+  readonly delivers?: boolean;
 }

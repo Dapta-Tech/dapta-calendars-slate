@@ -152,6 +152,21 @@ export async function loadBookingHostConnectionRefs(db: Db, uid: string): Promis
 export interface CalendarWriteContext {
   bookingId: string;
   uid: string;
+  /** The booking's account, for the settings the write depends on. Optional on
+   *  this exported shape so a fixture built elsewhere still compiles. */
+  accountId?: string;
+  /**
+   * How many people are on the booking besides its first invitee: extra
+   * attendees and guests added later. This service emails none of them, so
+   * while there are any the calendar provider's own invitation is their only
+   * one. Optional like `accountId`; absent reads as none.
+   */
+  otherGuestCount?: number;
+  /**
+   * The booking's invitee, normalized (`primaryAttendeeKey`): the one person
+   * this service emails about the booking. Optional like `accountId`.
+   */
+  inviteeKey?: string | null;
   title: string;
   /**
    * The event's body, rendered from the event type's description template
@@ -167,9 +182,9 @@ export interface CalendarWriteContext {
   /** The human detail of the Where (address, number, custom label). */
   location: string | null;
   /**
-   * B9: a conferencing link is requested when this is `'conferencing'` — the
-   * kind snapshotted on the booking, never a vendor literal (R15).
-   * Null on rows written before the kind existed.
+   * B9: a conferencing link is requested when this is `'conferencing'`, or null
+   * (the host set no location: an online meeting) — the kind snapshotted on the
+   * booking, never a vendor literal (R15).
    */
   locationKind: LocationKind | null;
   attendeeTimeZone: string | null;
@@ -204,6 +219,19 @@ export interface CalendarWriteContext {
   destinationRefs: string[];
   /** Optional provider calendar beneath each connection, selected by the v2 pilot. */
   destinationCalendarIds: Record<string, string>;
+}
+
+/**
+ * The booking's invitee, as a normalized address: the attendee the booking
+ * named as primary (`metadata._primaryAttendee`), else the first attendee row
+ * (rows ordered by creation, then insertion). The one person this service
+ * emails about the booking; `loadBookingNotificationContext` picks the same one.
+ */
+export function primaryAttendeeKey(rows: Array<{ email: string | null }>, metadata: unknown): string | null {
+  const named = parseJsonColumn<{ _primaryAttendee?: { email?: unknown } }>(metadata, {})._primaryAttendee?.email;
+  const namedKey = typeof named === 'string' ? normalizeAttendeeEmail(named) : null;
+  const match = namedKey ? rows.find((r) => normalizeAttendeeEmail(r.email) === namedKey) : undefined;
+  return normalizeAttendeeEmail((match ?? rows[0])?.email) || null;
 }
 
 /** Each address once, in first-seen order, compared as the duplicate guard does. */
@@ -251,6 +279,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   );
   const b = await db.get<{
     id: string;
+    account_id: string;
     uid: string;
     title: string;
     calendar_description: string | null;
@@ -265,7 +294,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     host_locale: string | null;
     metadata: unknown;
   }>(
-    sql`SELECT b.id, b.uid, b.title, b.calendar_description, b.start_ms, b.end_ms, b.location,
+    sql`SELECT b.id, b.account_id, b.uid, b.title, b.calendar_description, b.start_ms, b.end_ms, b.location,
                b.location_kind, b.attendee_time_zone,
                b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email, m.locale AS host_locale
         FROM booking b
@@ -350,9 +379,25 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   const copyAttendeeEmails = uniqueEmails([...guestEmails, ...coHostEmails]).filter(
     (e) => normalizeAttendeeEmail(e) !== organizerKey,
   );
+  // Everyone on the booking this service does not email: not the invitee (who
+  // gets our email), and not the organizer (whose own calendar holds the event,
+  // so no provider invites them), whichever of the two a host who booked
+  // themselves happens to be.
+  const insertionOrder = db.dialect === 'postgres' ? sql`ctid ASC` : sql`rowid ASC`;
+  const attendeeOrder = await db.all<{ email: string | null }>(
+    sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id} ORDER BY created_at ASC, ${insertionOrder}`,
+  );
+  const inviteeKey = primaryAttendeeKey(attendeeOrder, b.metadata);
+  const otherGuestCount = uniqueEmails(guestEmails).filter((e) => {
+    const key = normalizeAttendeeEmail(e);
+    return key !== inviteeKey && key !== organizerKey;
+  }).length;
 
   return {
     bookingId: b.id,
+    accountId: b.account_id,
+    otherGuestCount,
+    inviteeKey,
     uid: b.uid,
     title: b.title,
     description: b.calendar_description,
@@ -493,12 +538,14 @@ export async function setBookingReferenceMeetingUrl(
  * The precise answer to "is it worth waiting for a link" (ADR 0007). It is
  * FALSE by construction on a bare fork — a disabled provider enqueues no
  * calendar row at all — and false once the job has finished or given up, so a
- * booking that can never receive a link is never delayed for one.
+ * booking that can never receive a link is never delayed for one. A
+ * `reinvite` row only asks the provider to invite and never mints a room, so
+ * it is not a write-out to wait for.
  */
 export async function hasPendingCalendarJob(db: Db, uid: string): Promise<boolean> {
   const row = await db.get<{ n: number }>(
     sql`SELECT COUNT(*) AS n FROM outbox
-        WHERE kind = 'calendar' AND booking_uid = ${uid} AND status = 'pending'`,
+        WHERE kind = 'calendar' AND booking_uid = ${uid} AND status = 'pending' AND action <> 'reinvite'`,
   );
   return Number(row?.n ?? 0) > 0;
 }

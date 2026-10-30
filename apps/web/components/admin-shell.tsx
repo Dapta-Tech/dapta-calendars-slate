@@ -172,6 +172,7 @@ function NavGroup({
   collapsed,
   label,
   labels,
+  newTab,
   onNavigate,
 }: {
   item: NavItem;
@@ -179,6 +180,8 @@ function NavGroup({
   collapsed: boolean;
   label: string;
   labels: AdminMessages['developerNav'];
+  /** "(opens in a new tab)", read out after an external page's label. */
+  newTab: string;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
@@ -236,26 +239,44 @@ function NavGroup({
       {!collapsed && open ? (
         <ul id={listId} className="mt-tight flex flex-col gap-tight" data-testid={`nav-${item.key}-pages`}>
           {pages.map((page) => {
-            const active = isNavItemActive(pathname, page.href);
+            // An external page is never "here": its href is another origin.
+            const active = !page.external && isNavItemActive(pathname, page.href);
+            // pl-11 sets the label on the parent label's column (12px
+            // padding + 20px icon + 12px gap), which is what reads as
+            // "under the group" without a second icon per row.
+            const className = [
+              'relative flex min-h-control items-center rounded-md py-inline pl-11 pr-field text-sm transition-colors active:scale-[0.99]',
+              active
+                ? `bg-muted font-medium text-foreground ${ACTIVE_BAR}`
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            ].join(' ');
             return (
               <li key={page.key}>
-                <Link
-                  href={page.href}
-                  onClick={onNavigate}
-                  aria-current={active ? 'page' : undefined}
-                  data-testid={`nav-${item.key}-${page.key}`}
-                  // pl-11 sets the label on the parent label's column (12px
-                  // padding + 20px icon + 12px gap), which is what reads as
-                  // "under the group" without a second icon per row.
-                  className={[
-                    'relative flex min-h-control items-center rounded-md py-inline pl-11 pr-field text-sm transition-colors active:scale-[0.99]',
-                    active
-                      ? `bg-muted font-medium text-foreground ${ACTIVE_BAR}`
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  ].join(' ')}
-                >
-                  <span className="min-w-0 truncate">{labels[page.key]}</span>
-                </Link>
+                {page.external ? (
+                  <a
+                    href={page.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={onNavigate}
+                    data-testid={`nav-${item.key}-${page.key}`}
+                    className={className}
+                  >
+                    <span className="min-w-0 truncate">{labels[page.key]}</span>
+                    {/* The arrow Docs and Dapta Agents carry: this one leaves the app too. */}
+                    <i aria-hidden className="pi pi-external-link ml-auto text-muted-foreground" style={{ fontSize: 14 }} />
+                    <span className="sr-only"> {newTab}</span>
+                  </a>
+                ) : (
+                  <Link
+                    href={page.href}
+                    onClick={onNavigate}
+                    aria-current={active ? 'page' : undefined}
+                    data-testid={`nav-${item.key}-${page.key}`}
+                    className={className}
+                  >
+                    <span className="min-w-0 truncate">{labels[page.key]}</span>
+                  </Link>
+                )}
               </li>
             );
           })}
@@ -278,28 +299,50 @@ function NavGroup({
           {label}
         </p>
         {pages.map((page) => {
-          const active = isNavItemActive(pathname, page.href);
-          return (
-            <Link
-              key={page.key}
-              href={page.href}
-              role="menuitem"
-              aria-current={active ? 'page' : undefined}
-              data-testid={`nav-${item.key}-flyout-${page.key}`}
-              onClick={() => {
-                closeFlyout();
-                onNavigate?.();
-              }}
-              className={`flex min-h-control w-full items-center gap-inline px-field text-left text-sm transition-colors hover:bg-muted focus-visible:bg-muted ${
-                active ? 'bg-muted font-medium text-foreground' : 'text-foreground'
-              }`}
-            >
+          const active = !page.external && isNavItemActive(pathname, page.href);
+          const className = `flex min-h-control w-full items-center gap-inline px-field text-left text-sm transition-colors hover:bg-muted focus-visible:bg-muted ${
+            active ? 'bg-muted font-medium text-foreground' : 'text-foreground'
+          }`;
+          const pick = () => {
+            closeFlyout();
+            onNavigate?.();
+          };
+          const body = (
+            <>
               <i
                 aria-hidden
                 className={`pi ${page.icon} ${active ? 'text-foreground' : 'text-muted-foreground'}`}
                 style={{ fontSize: 14 }}
               />
               <span className="min-w-0 flex-1 truncate">{labels[page.key]}</span>
+            </>
+          );
+          return page.external ? (
+            <a
+              key={page.key}
+              href={page.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              role="menuitem"
+              data-testid={`nav-${item.key}-flyout-${page.key}`}
+              onClick={pick}
+              className={className}
+            >
+              {body}
+              <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 12 }} />
+              <span className="sr-only"> {newTab}</span>
+            </a>
+          ) : (
+            <Link
+              key={page.key}
+              href={page.href}
+              role="menuitem"
+              aria-current={active ? 'page' : undefined}
+              data-testid={`nav-${item.key}-flyout-${page.key}`}
+              onClick={pick}
+              className={className}
+            >
+              {body}
             </Link>
           );
         })}
@@ -342,6 +385,7 @@ function NavLinks({
                 collapsed={collapsed}
                 label={label}
                 labels={pages}
+                newTab={newTab}
                 onNavigate={onNavigate}
               />
             </li>
@@ -431,6 +475,7 @@ export function AdminShell({
   initialTheme,
   isAdmin = false,
   docsHref = null,
+  apiDocsHref = null,
   children,
 }: {
   user: ShellUser | null;
@@ -452,11 +497,13 @@ export function AdminShell({
   isAdmin?: boolean;
   /** The documentation in the reader's language, already tagged; null hides the Docs item. */
   docsHref?: string | null;
+  /** The API reference on the API's origin (`apiDocsNavHref`); null hides the API docs item. */
+  apiDocsHref?: string | null;
   children: ReactNode;
 }) {
   const pathname = usePathname();
   const c = messages.common;
-  const items = adminNav({ isAdmin, docsHref, platformHref: PLATFORM_HREF });
+  const items = adminNav({ isAdmin, docsHref, apiDocsHref, platformHref: PLATFORM_HREF });
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   // Owned here, not in ThemeToggle: the footer renders twice (desktop rail and
   // mobile drawer) and both instances have to agree across a resize.

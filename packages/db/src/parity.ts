@@ -68,7 +68,7 @@ import {
   oneOffGuardApplies,
   type OneOffLinkRecord,
 } from './one-off-link';
-import { loadExternalBusy } from './calendar-refs';
+import { loadExternalBusy, primaryAttendeeKey } from './calendar-refs';
 import { applyCalendarTemplates } from './calendar-text';
 import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 import { getAccountBranding } from './account-branding';
@@ -2086,6 +2086,15 @@ export interface BookingNotificationContext {
   /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
   bookAgain: { accountCode: string; handle: string; slug: string } | null;
   /**
+   * The uid the invitee's calendar knows this meeting by: the FIRST booking of
+   * its reschedule chain. A move through the v2 API or MCP mints a new booking
+   * uid while the meeting stays the same one, and the .ics of every later email
+   * must update that entry rather than add a second. Equal to `uid` for a
+   * booking that was never moved that way. Optional on this exported shape so
+   * a fixture built elsewhere still compiles; this loader always sets it.
+   */
+  calendarUid?: string;
+  /**
    * The EVENT TYPE's reminders + follow-up (#68) — what the enqueue path
    * schedules from, replacing the account's single lead-time list. NULL on the
    * column (never configured) resolves to the shipped defaults here; a booking
@@ -2130,6 +2139,82 @@ function asAnswerRecord(raw: unknown): Record<string, unknown> {
 }
 
 /**
+ * The first booking of a reschedule chain, walking `rescheduled_from_uid` back.
+ * Cycle-safe, and bounded only so bad data cannot spin a worker: the bound is
+ * far above any real chain, because stopping short would hand the invitee's
+ * calendar a different UID mid-chain and add a second entry.
+ * A predecessor row that no longer exists still names the uid the invitee's
+ * calendar was given, so the walk stops there and returns it.
+ */
+export async function rescheduleChainRoot(db: Db, uid: string, from: string | null): Promise<string> {
+  const MAX_CHAIN = 1000;
+  const seen = new Set<string>([uid]);
+  let root = uid;
+  let previous = from;
+  for (let hop = 0; previous && hop < MAX_CHAIN && !seen.has(previous); hop++) {
+    seen.add(previous);
+    root = previous;
+    const row = await db.get<{ rescheduled_from_uid: string | null }>(
+      sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${previous} LIMIT 1`,
+    );
+    previous = row?.rescheduled_from_uid ?? null;
+  }
+  return root;
+}
+
+/** The uid the invitee's calendar knows a booking's meeting by (`rescheduleChainRoot` from its row). */
+export async function bookingCalendarUid(db: Db, uid: string): Promise<string> {
+  const row = await db.get<{ rescheduled_from_uid: string | null }>(
+    sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${uid} LIMIT 1`,
+  );
+  return rescheduleChainRoot(db, uid, row?.rescheduled_from_uid ?? null);
+}
+
+/**
+ * The oldest booking of a reschedule chain whose row still exists, walking
+ * `rescheduled_from_uid` back from `uid` (itself when its predecessor is gone
+ * or it has none). Where a meeting's .ics SEQUENCE is counted when the first
+ * booking's row is gone: nothing in the app deletes a booking row, so this is
+ * a guard against data removed by hand, and a later move in the chain still
+ * finds the same row. Null when `uid` itself is gone. Cycle-safe and bounded
+ * like `rescheduleChainRoot`.
+ */
+export async function oldestLiveChainUid(db: Db, uid: string): Promise<string | null> {
+  const MAX_CHAIN = 1000;
+  const first = await db.get<{ rescheduled_from_uid: string | null }>(
+    sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${uid} LIMIT 1`,
+  );
+  if (!first) return null;
+  const seen = new Set<string>([uid]);
+  let oldest = uid;
+  let previous = first.rescheduled_from_uid;
+  for (let hop = 0; previous && hop < MAX_CHAIN && !seen.has(previous); hop++) {
+    seen.add(previous);
+    const row = await db.get<{ rescheduled_from_uid: string | null }>(
+      sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${previous} LIMIT 1`,
+    );
+    if (!row) break;
+    oldest = previous;
+    previous = row.rescheduled_from_uid;
+  }
+  return oldest;
+}
+
+/**
+ * Claim the next .ics SEQUENCE change number for a meeting, by its calendar uid
+ * (the first booking of its reschedule chain). One atomic increment per change,
+ * so two changes queued in the same instant still get distinct, increasing
+ * numbers. Null when that booking row is gone (see `oldestLiveChainUid` for
+ * where the count then lives).
+ */
+export async function claimIcsSequence(db: Db, calendarUid: string): Promise<number | null> {
+  const row = await db.get<{ ics_sequence: number | string }>(
+    sql`UPDATE booking SET ics_sequence = ics_sequence + 1 WHERE uid = ${calendarUid} RETURNING ics_sequence`,
+  );
+  return row ? Number(row.ics_sequence) : null;
+}
+
+/**
  * Load the attendee + host + timing a booking email needs (B1-B4). Returns null
  * if the booking or its attendee is gone. Host email is included so the .ics
  * carries an ORGANIZER and the host can be a recipient (parity with old). On
@@ -2157,6 +2242,7 @@ export async function loadBookingNotificationContext(
     host_tz: string | null;
     booking_metadata: unknown;
     booking_locale: string | null;
+    rescheduled_from_uid: string | null;
     event_fields: unknown;
     host_locale: string | null;
     host_handle: string | null;
@@ -2176,7 +2262,7 @@ export async function loadBookingNotificationContext(
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                et.reminders AS event_reminders, b.responses AS responses,
                et.booking_fields AS event_fields, b.locale AS booking_locale,
-               b.metadata AS booking_metadata, et.title AS event_name,
+               b.metadata AS booking_metadata, b.rescheduled_from_uid, et.title AS event_name,
                et.description AS event_description, acc.name AS workspace_name, t.name AS team_name
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -2204,11 +2290,10 @@ export async function loadBookingNotificationContext(
     sql`SELECT id, name, email, time_zone, phone, notes FROM booking_attendee
         WHERE booking_id = ${row.id} ORDER BY created_at ASC, ${insertionOrder}`,
   );
-  const named = parseJsonColumn<{ _primaryAttendee?: { email?: unknown } }>(row.booking_metadata, {})
-    ._primaryAttendee?.email;
-  const namedKey = typeof named === 'string' ? normalizeAttendeeEmail(named) : null;
+  // The same rule the calendar write uses to tell the invitee from other guests.
+  const inviteeKey = primaryAttendeeKey(attendeeRows, row.booking_metadata);
   const invitee =
-    (namedKey && attendeeRows.find((a) => normalizeAttendeeEmail(a.email) === namedKey)) || attendeeRows[0];
+    (inviteeKey && attendeeRows.find((a) => normalizeAttendeeEmail(a.email) === inviteeKey)) || attendeeRows[0];
   if (!invitee?.email) return null;
   // Multi-host bookings: every assigned co-host (excluding the organizer) is
   // notified too. Round-robin bookings have no booking_host rows → empty.
@@ -2266,6 +2351,7 @@ export async function loadBookingNotificationContext(
     reminders: effectiveReminders(parseEventReminders(row.event_reminders)),
     formAnswers: asAnswerRecord(parseJsonColumn<unknown>(row.responses, null)),
     accountCode: row.account_code ?? null,
+    calendarUid: await rescheduleChainRoot(db, row.uid, row.rescheduled_from_uid),
     bookAgain:
       row.account_code && row.host_handle && row.event_slug
         ? {
