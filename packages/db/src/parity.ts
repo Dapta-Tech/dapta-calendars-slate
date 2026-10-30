@@ -2079,9 +2079,10 @@ export interface BookingNotificationContext {
   /**
    * The account's public code (vanity slug, else code): the one its booking
    * pages carry, which tags the invitee's "Made with" link. Set for team
-   * bookings too, which have no `bookAgain`.
+   * bookings too, which have no `bookAgain`. Optional so a context built
+   * elsewhere (a fork's fixture) still compiles; this loader always sets it.
    */
-  accountCode: string | null;
+  accountCode?: string | null;
   /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
   bookAgain: { accountCode: string; handle: string; slug: string } | null;
   /**
