@@ -13,6 +13,7 @@ import {
   loadBookingMeetingUrl,
   loadBookingNotificationContext,
   claimIcsSequence,
+  tagCalendarChangeWithInviteeEmail,
   bookingCalendarUid,
   defaultNotificationSetting,
   type BookingNotificationContext,
@@ -129,6 +130,13 @@ export const CONFERENCING_LINK_WAIT_ATTEMPTS = 3;
  * declines carry no join line at all.
  */
 const LINK_AWARE_KINDS = new Set(['confirmation', 'reschedule']);
+
+/** The calendar change each invitee email goes out with (`markCalendarChange`). */
+const CALENDAR_ACTION_FOR_EMAIL: Partial<Record<EmailKind, 'create' | 'reschedule' | 'delete'>> = {
+  confirmation: 'create',
+  reschedule: 'reschedule',
+  cancellation: 'delete',
+};
 
 /**
  * The highest .ics SEQUENCE a booking email carried before changes were
@@ -578,6 +586,22 @@ export class EmailEffects {
     await this.enqueueFollowUps(uid, opts);
   }
 
+  /**
+   * Tell the calendar write for this change that the invitee's email is queued
+   * (`tagCalendarChangeWithInviteeEmail`), so it may write the host's event
+   * without the provider's own invitation. Never throws: a failure only leaves
+   * the provider inviting, as before.
+   */
+  private async markCalendarChange(kind: Exclude<EmailKind, 'reminder'>, uid: string, emailOutboxId: string): Promise<void> {
+    const action = CALENDAR_ACTION_FOR_EMAIL[kind];
+    if (!action) return;
+    try {
+      await tagCalendarChangeWithInviteeEmail(this.db, { bookingUid: uid, action, emailOutboxId });
+    } catch (err) {
+      this.log.warn(`could not mark the calendar ${action} for ${uid}: ${err instanceof Error ? err.name : 'error'}`);
+    }
+  }
+
   /** The .ics SEQUENCE change number for this email, or null when it carries the fixed one. */
   private async claimSequenceFor(kind: Exclude<EmailKind, 'reminder'>, uid: string): Promise<number | null> {
     if (kind !== 'reschedule' && kind !== 'cancellation' && kind !== 'confirmation') return null;
@@ -631,7 +655,7 @@ export class EmailEffects {
       for (const side of KIND_SIDES[kind]) {
         const n = this.sideNotification(kind, ctx, side, settings, sideExtra);
         if (!n) continue;
-        await enqueueOutbox(this.db, {
+        const emailOutboxId = await enqueueOutbox(this.db, {
           kind: 'email',
           action: kind,
           bookingUid: uid,
@@ -646,6 +670,7 @@ export class EmailEffects {
               }
             : {}),
         });
+        if (side.audience === 'attendee') await this.markCalendarChange(kind, uid, emailOutboxId);
       }
     } catch (err) {
       this.log.error(`failed to enqueue ${kind} email for ${uid}: ${String(err)}`);

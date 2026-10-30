@@ -237,6 +237,34 @@ export async function enqueueOutbox(db: Db, input: EnqueueOutboxInput): Promise<
 }
 
 /**
+ * Mark a booking's change on the calendar with the invitee email queued for that
+ * same change: the newest still-pending calendar row of `action` gets
+ * `{ inviteeEmailId }` as its payload. The calendar write reads it to mute the
+ * provider's own invitation only when this exact email exists (F4, 2026-10-30
+ * production E2E). Matches nothing when the calendar row is gone, already run,
+ * or was never queued (no calendar), and the write then lets the provider
+ * invite. Returns whether a row was marked.
+ */
+export async function tagCalendarChangeWithInviteeEmail(
+  db: Db,
+  input: { bookingUid: string; action: string; emailOutboxId: string; now?: number },
+): Promise<boolean> {
+  const target = await db.get<{ id: string }>(
+    sql`SELECT id FROM outbox
+        WHERE kind = 'calendar' AND booking_uid = ${input.bookingUid} AND action = ${input.action}
+          AND status = 'pending'
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+  );
+  if (!target) return false;
+  await db.run(
+    sql`UPDATE outbox SET payload = ${JSON.stringify({ inviteeEmailId: input.emailOutboxId })},
+          updated_at = ${input.now ?? Date.now()}
+        WHERE id = ${target.id} AND status = 'pending'`,
+  );
+  return true;
+}
+
+/**
  * Delete still-PENDING rows matching a booking + kind + action — used to cancel
  * scheduled reminders when a booking is cancelled/declined or moved (before they
  * fire). Never touches rows already `done`/`failed`.

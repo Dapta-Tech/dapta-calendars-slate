@@ -484,6 +484,26 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(await seq('cancellation')).toEqual([5, 5]);
   });
 
+  it("the invitee's email marks the pending calendar change it goes out with", async () => {
+    const uid = await book();
+    await settle();
+    // The calendar row a calendar-enabled deployment queues for the move.
+    const calendarId = await enqueueOutbox(db, { kind: 'calendar', action: 'reschedule', bookingUid: uid });
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 4 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const out = await booking.reschedule(uid, { newStartUtc: a!.slots[5]!.startUtc, byHost: true });
+    expect('error' in out).toBe(false);
+    await settle();
+    const invitee = (await emailRows(uid, 'reschedule')).find((r) => r.orderKey === `${uid}|attendee`)!;
+    const calendar = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === calendarId)!;
+    expect(JSON.parse(calendar.payload!)).toEqual({ inviteeEmailId: invitee.id });
+  });
+
   it('cancel deletes the pending follow-up', async () => {
     await setReminders(withFollowUp());
     const uid = await book();
