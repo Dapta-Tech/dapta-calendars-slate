@@ -175,6 +175,28 @@ describe('a refused invitee email still leaves the guest one invitation', () => 
     expect((await listOutbox(db, { kind: 'calendar', bookingUid: uid })).every((r) => r.status === 'done')).toBe(true);
   });
 
+  it('when the follow-up cannot be queued, the refused email stays queued and ends only once it is', async () => {
+    mail.suppressed.add('sam@example.com');
+    const uid = await book();
+    const t0 = Date.now();
+    await worker.drainOnce(t0 + INVITEE_EMAIL_GRACE_MS + 1_000);
+    const queue = emailEffects.afterGaveUp.bind(emailEffects);
+    let down = true;
+    emailEffects.afterGaveUp = (row) => (down ? Promise.reject(new Error('db blip')) : queue(row));
+    await worker.drainOnce(t0 + CONFERENCING_LINK_GRACE_MS + 5_000);
+    const kept = await inviteeEmail(uid, 'confirmation');
+    expect(kept.status).toBe('pending');
+    expect(kept.attempts).toBe(1);
+    expect(calendar.updated).toHaveLength(0);
+    down = false;
+    await worker.drainOnce(t0 + 120_000);
+    expect((await inviteeEmail(uid, 'confirmation')).status).toBe('skipped');
+    expect(calendar.updated.map((u) => u.sendInvitations)).toEqual([false, true]);
+    // Queued once, however many times the email ends.
+    await emailEffects.afterGaveUp({ ...kept, payload: kept.payload });
+    expect((await listOutbox(db, { kind: 'calendar', bookingUid: uid })).filter((r) => r.action === 'reinvite')).toHaveLength(1);
+  });
+
   it('a confirmation that goes out leaves the event quiet, and nothing is re-sent', async () => {
     const uid = await book();
     const t0 = Date.now();

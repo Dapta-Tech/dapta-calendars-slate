@@ -147,22 +147,60 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.deleted[0]!.sendInvitations).toBe(false);
     });
 
-    it('a delete waits a few attempts for its cancellation email, then lets the provider cancel', async () => {
+    /** A delete row marked with this cancellation email, run the way the worker runs it. */
+    async function deleteJob(effects: CalendarEffects, uid: string, cancellation: string) {
+      const rowId = await enqueueOutbox(db, { kind: 'calendar', action: 'delete', bookingUid: uid });
+      await tagCalendarChangeWithInviteeEmail(db, { bookingUid: uid, action: 'delete', emailOutboxId: cancellation });
+      let attempts = 0;
+      return async () => {
+        const row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === rowId)!;
+        return effects.runCalendarJob('delete', uid, row.payload, { id: rowId, attempts: attempts++ });
+      };
+    }
+
+    it('a delete looks at its cancellation email a few times, then takes it back and lets the provider cancel', async () => {
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);
       const uid = await bookFirstSlot();
-      const write = effects as unknown as Awaitable;
-      await write.writeEvent(uid);
+      await (effects as unknown as Awaitable).writeEvent(uid);
       const cancellation = await queueInviteeEmail(uid, 'cancellation');
-      for (let attempts = 0; attempts < INVITEE_EMAIL_WAIT_ATTEMPTS; attempts++) {
-        const wait = write.removeEvent(uid, cancellation, { id: 'row-1', attempts });
+      const run = await deleteJob(effects, uid, cancellation);
+      for (let look = 0; look < INVITEE_EMAIL_WAIT_ATTEMPTS; look++) {
+        const wait = run();
         await expect(wait).rejects.toBeInstanceOf(InviteeEmailPendingError);
         await expect(wait).rejects.toMatchObject({ retryAfterMs: INVITEE_EMAIL_RETRY_MS });
       }
       expect(provider.deleted).toHaveLength(0);
-      // Still on its way after the wait: the provider's own cancellation, as before.
-      await write.removeEvent(uid, cancellation, { id: 'row-1', attempts: INVITEE_EMAIL_WAIT_ATTEMPTS });
+      // Still not sent after the wait: ours is taken back, the provider cancels.
+      await run();
       expect(provider.deleted[0]!.sendInvitations).toBe(true);
+      const email = (await listOutbox(db, { kind: 'email', bookingUid: uid })).find((r) => r.id === cancellation)!;
+      expect(email.status).toBe('skipped');
+      expect(email.lastError).toMatch(/calendar sent its own cancellation/);
+    });
+
+    it('the looks are counted apart from failures, and an email being sent is waited for', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      const cancellation = await queueInviteeEmail(uid, 'cancellation');
+      const rowId = await enqueueOutbox(db, { kind: 'calendar', action: 'delete', bookingUid: uid });
+      const mark = JSON.stringify({ inviteeEmailId: cancellation });
+      // Many failed attempts before (a provider outage) leave the wait whole.
+      await expect(effects.runCalendarJob('delete', uid, mark, { id: rowId, attempts: 7 })).rejects.toBeInstanceOf(
+        InviteeEmailPendingError,
+      );
+      // Wait spent, but a worker is sending the email right now: still waiting.
+      await db.run(sql`UPDATE outbox SET lease_until = ${Date.now() + 60_000}, lease_token = ${'w1'} WHERE id = ${cancellation}`);
+      const spent = JSON.stringify({ inviteeEmailId: cancellation, emailWaits: INVITEE_EMAIL_WAIT_ATTEMPTS });
+      await expect(effects.runCalendarJob('delete', uid, spent, { id: rowId, attempts: 8 })).rejects.toBeInstanceOf(
+        InviteeEmailPendingError,
+      );
+      // It went out: the delete stays quiet.
+      await markOutboxDone(db, cancellation);
+      await effects.runCalendarJob('delete', uid, spent, { id: rowId, attempts: 9 });
+      expect(provider.deleted[0]!.sendInvitations).toBe(false);
     });
 
     it('a cancellation the mail service refused, or that was given up on, never mutes the delete', async () => {
@@ -173,7 +211,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
         await (effects as unknown as Awaitable).writeEvent(uid);
         const cancellation = await queueInviteeEmail(uid, 'cancellation');
         await db.run(sql`UPDATE outbox SET status = ${status} WHERE id = ${cancellation}`);
-        await (effects as unknown as Awaitable).removeEvent(uid, cancellation, { id: 'row-2', attempts: 0 });
+        await (await deleteJob(effects, uid, cancellation))();
         expect(provider.deleted[0]!.sendInvitations, status).toBe(true);
       }
     });
@@ -249,6 +287,49 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
           await effects.runCalendarJob('reinvite', uid, reinvite, { id: 'reinvite-1', attempts: 1 });
           expect(provider.updated).toHaveLength(2);
         }
+      });
+
+      it('a retry after the guest was taken off only puts them back', async () => {
+        const provider = new RecordingCalendarProvider();
+        const { effects, uid, rowId, reinvite } = await quietCreate(provider);
+        const putBack = provider.updateEvent.bind(provider);
+        let failNext = true;
+        provider.updateEvent = (input) => {
+          if (input.sendInvitations && failNext) {
+            failNext = false;
+            return Promise.reject(new Error('vendor 503'));
+          }
+          return putBack(input);
+        };
+        await expect(effects.runCalendarJob('reinvite', uid, reinvite, { id: 'r', attempts: 0 })).rejects.toThrow('vendor 503');
+        const after = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === rowId)!;
+        expect(readCalendarChangeMark(after.payload)).toMatchObject({ guestRemoved: true });
+        await effects.runCalendarJob('reinvite', uid, reinvite, { id: 'r', attempts: 1 });
+        // One quiet removal in all, and the guest put back once with the provider inviting.
+        expect(provider.updated.filter((u) => u.sendInvitations === false)).toHaveLength(1);
+        expect(provider.updated.filter((u) => u.sendInvitations === true)).toHaveLength(1);
+      });
+
+      it('a create retried after its email was refused invites from the event, and leaves no reinvite to do', async () => {
+        const provider = new RecordingCalendarProvider();
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        const emailId = await queueInviteeEmail(uid, 'confirmation');
+        const rowId = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid });
+        await tagCalendarChangeWithInviteeEmail(db, { bookingUid: uid, action: 'create', emailOutboxId: emailId });
+        const create = provider.createEvent.bind(provider);
+        provider.createEvent = () => Promise.reject(new Error('vendor 503'));
+        const payload = async () => (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === rowId)!.payload;
+        await expect(effects.runCalendarJob('create', uid, await payload(), { id: rowId, attempts: 0 })).rejects.toThrow();
+        expect(readCalendarChangeMark(await payload())!.providerMuted).toBe(true);
+        provider.createEvent = create;
+        await db.run(sql`UPDATE outbox SET status = 'skipped' WHERE id = ${emailId}`);
+        await effects.runCalendarJob('create', uid, await payload(), { id: rowId, attempts: 1 });
+        expect(provider.created[0]!.sendInvitations).toBe(true);
+        expect(readCalendarChangeMark(await payload())!.providerMuted).toBeUndefined();
+        await markOutboxDone(db, rowId);
+        await effects.runCalendarJob('reinvite', uid, JSON.stringify({ inviteeEmailId: emailId }), { id: 'r', attempts: 0 });
+        expect(provider.updated).toHaveLength(0);
       });
 
       it('nothing to do when the change invited with the provider itself', async () => {

@@ -5,9 +5,11 @@ import { migrate } from './migrate';
 import {
   enqueueOutbox,
   findCalendarChangeForInviteeEmail,
+  hasReinviteFor,
   listOutbox,
   markOutboxDone,
   readCalendarChangeMark,
+  skipQueuedOutboxRow,
   tagCalendarChangeWithInviteeEmail,
   writeCalendarChangeMark,
 } from './outbox';
@@ -124,6 +126,32 @@ describe('the calendar change mark', () => {
       inviteeEmailId: 'em-7',
       reinvited: true,
     });
+    expect(
+      readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', emailWaits: 2, guestRemoved: true })),
+    ).toEqual({ inviteeEmailId: 'em-7', emailWaits: 2, guestRemoved: true });
+    expect(readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', emailWaits: -1 }))).toEqual({
+      inviteeEmailId: 'em-7',
+    });
+  });
+
+  it('knows a reinvite already queued for an email, and only for that email', async () => {
+    expect(await hasReinviteFor(db, 'bk-9', 'em-9')).toBe(false);
+    await enqueueOutbox(db, { kind: 'calendar', action: 'reinvite', bookingUid: 'bk-9', payload: JSON.stringify({ inviteeEmailId: 'em-9' }) });
+    expect(await hasReinviteFor(db, 'bk-9', 'em-9')).toBe(true);
+    expect(await hasReinviteFor(db, 'bk-9', 'em-90')).toBe(false);
+  });
+
+  it('takes back a queued row, never one being sent or already finished', async () => {
+    const queued = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'bk-10' });
+    expect(await skipQueuedOutboxRow(db, queued, 'superseded')).toBe(true);
+    const row = (await listOutbox(db, { bookingUid: 'bk-10' }))[0]!;
+    expect([row.status, row.lastError]).toEqual(['skipped', 'superseded']);
+    const leased = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'bk-11' });
+    await db.run(sql`UPDATE outbox SET lease_until = ${Date.now() + 60_000}, lease_token = ${'w1'} WHERE id = ${leased}`);
+    expect(await skipQueuedOutboxRow(db, leased, 'superseded')).toBe(false);
+    const sent = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'bk-12' });
+    await markOutboxDone(db, sent);
+    expect(await skipQueuedOutboxRow(db, sent, 'superseded')).toBe(false);
   });
 
   it('a pending reinvite is not a write-out an email waits on for its link', async () => {

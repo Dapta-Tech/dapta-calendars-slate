@@ -339,19 +339,24 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
 
   private async recordFailure(row: OutboxRow, err: unknown, clock: () => number): Promise<void> {
     const now = clock();
-    if (err instanceof OutboxSkipError) {
+    // An unsent email's follow-up is queued BEFORE its end is recorded; when it
+    // cannot be, the row is retried instead of ending (`compensate`).
+    if (err instanceof OutboxSkipError && (await this.compensate(row))) {
       // A decision, not a failure: record the reason ONCE and stop: waiting
       // and retrying cannot change the outcome.
-      const skipped = await markOutboxSkipped(this.db, row.id, { reason: err.message, now, leaseToken: row.leaseToken });
+      await markOutboxSkipped(this.db, row.id, { reason: err.message, now, leaseToken: row.leaseToken });
       this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${err.message}`);
-      if (skipped) await this.afterGaveUp(row);
       return;
     }
     const attempts = row.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);
     const horizonMs = NO_RETRY_HORIZON.has(row.kind) ? 0 : this.horizonMs;
-    if (outboxRetriesExhausted(row, attempts, now, horizonMs)) {
-      const failed = await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
+    if (
+      !(err instanceof OutboxSkipError) &&
+      outboxRetriesExhausted(row, attempts, now, horizonMs) &&
+      (await this.compensate(row))
+    ) {
+      await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
       const tried = row.firstFailedAt == null ? '' : ` over ${span(now - row.firstFailedAt)}`;
       this.log.error(
         `outbox ${row.kind}:${row.action} (${row.id}) failed for good after ${attempts} attempts${tried}: ${message}`,
@@ -361,7 +366,6 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
           () => undefined,
         );
       }
-      if (failed) await this.afterGaveUp(row);
       return;
     }
     // A failure that names its own wait (a calendar backend's Retry-After,
@@ -379,18 +383,21 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * A row that ended unsent. An invitee email that never went out may leave a
+   * Before a row ends unsent: an invitee email that never goes out may leave a
    * calendar change that counted on it without the provider's invitation, so
-   * the email side gets to queue the provider's invitation after all. Never
-   * throws.
+   * the email side queues the provider's invitation after all. Answers false
+   * when that could not be queued: the row is then retried, not ended, so the
+   * follow-up is never lost. Always true for any other kind.
    */
-  private async afterGaveUp(row: OutboxRow): Promise<void> {
-    if (row.kind !== 'email') return;
+  private async compensate(row: OutboxRow): Promise<boolean> {
+    if (row.kind !== 'email') return true;
     try {
       // Optional: a worker built in a spec with a bare email stub has none.
       await this.email.afterGaveUp?.(row);
-    } catch {
-      // Logged by the email side; the row's own outcome is already written.
+      return true;
+    } catch (err) {
+      this.log.error(`outbox ${row.kind}:${row.action} (${row.id}) kept queued: its follow-up could not be queued: ${String(err)}`);
+      return false;
     }
   }
 

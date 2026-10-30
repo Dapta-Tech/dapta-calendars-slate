@@ -17,8 +17,10 @@ import {
   readCalendarChangeMark,
   releaseBookingReference,
   setBookingReferenceMeetingUrl,
+  skipQueuedOutboxRow,
   sql,
   writeCalendarChangeMark,
+  type CalendarChangeMark,
   type CalendarWriteContext,
   type Db,
 } from '@slate/db';
@@ -35,10 +37,12 @@ import { CALENDAR, DB, EMAIL, ENV } from './tokens';
  */
 export type CalendarAction = 'create' | 'delete' | 'reschedule' | 'reinvite';
 
-/** The outbox row a calendar job runs for: its id, and how many times it has already failed. */
+/** The outbox row a calendar job runs for: its id, how many times it has already failed, and its mark. */
 export interface CalendarJobRow {
   id: string;
   attempts: number;
+  /** What the row recorded about the invitee email it goes with, as claimed. */
+  mark?: CalendarChangeMark | null;
 }
 
 /**
@@ -69,13 +73,15 @@ export function eventBody(
 export const INVITEE_EMAIL_GRACE_MS = 3_000;
 
 /**
- * How many attempts a calendar DELETE waits for the invitee's cancellation
- * email to be accepted by the mail service before deciding who tells the
- * guest. A deleted event cannot be cancelled again later, so unlike a create
- * or a move (see `reinvite`) the delete must know first. The wait gets its own
- * attempt budget on top of the write's (the delete row is queued with
- * `DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_WAIT_ATTEMPTS`), and once it is spent
- * the provider sends its own cancellation, as it did before.
+ * How many times a calendar DELETE looks at the invitee's cancellation email
+ * before deciding who tells the guest. A deleted event cannot be cancelled
+ * again later, so unlike a create or a move (see `reinvite`) the delete must
+ * know first. The looks are counted on the row's own mark (`emailWaits`),
+ * apart from the write's failures, and have their own room in its attempt
+ * budget (the delete row is queued with `DEFAULT_MAX_ATTEMPTS +
+ * INVITEE_EMAIL_WAIT_ATTEMPTS`). Once they are spent, the email is taken back
+ * if it has not started going out, and the provider sends its own
+ * cancellation, as it did before; one already being sent is waited for.
  */
 export const INVITEE_EMAIL_WAIT_ATTEMPTS = 3;
 
@@ -244,7 +250,9 @@ export class CalendarEffects {
   ): Promise<void> {
     if (!this.calendar.enabled) return;
     // The invitee email queued for this very change, when there is one.
-    const inviteeEmailId = readCalendarChangeMark(payload)?.inviteeEmailId;
+    const mark = readCalendarChangeMark(payload);
+    const inviteeEmailId = mark?.inviteeEmailId;
+    if (job) job = { ...job, mark };
     if (action !== 'delete') {
       // A write or a move is for a booking that is ON. One that was cancelled
       // or declined while this row waited (a retry can wait hours) must not
@@ -406,6 +414,11 @@ export class CalendarEffects {
         await releaseBookingReference(this.db, claimId);
         throw err;
       }
+      if (isOrganizer && sendInvitations && job?.mark?.providerMuted) {
+        // An earlier attempt wrote quietly but never reached this event; this
+        // one invited from it, so nothing is left for a reinvite to do.
+        await writeCalendarChangeMark(this.db, job.id, { inviteeEmailId: job.mark.inviteeEmailId });
+      }
       if (isOrganizer && wantsLink) meetingUrl = created.meetingUrl ?? null;
       await fillBookingReference(this.db, claimId, {
         externalEventId: created.externalEventId,
@@ -448,9 +461,11 @@ export class CalendarEffects {
    * An email still on its way can yet be refused. A create or a move written
    * quietly on one is recorded on its own row (`providerMuted`), and if that
    * email then ends unsent, a `reinvite` job has the provider invite the guest
-   * after all (`reinviteGuest`). A deleted event cannot be cancelled again, so
-   * a delete (`waitForEmail`) first waits a few attempts for its email's
-   * outcome, and stays quiet only once the mail service has accepted it.
+   * after all (`reinviteGuest`); a retry that invites from the organizer's
+   * event clears that record. A deleted event cannot be cancelled again, so a
+   * delete (`waitForEmail`) first looks at its email a few times, stays quiet
+   * only once the mail service has accepted it, and otherwise takes the email
+   * back (unless it is being sent right now) and lets the provider cancel.
    */
   private async providerInvites(
     ctx: CalendarWriteContext,
@@ -468,14 +483,26 @@ export class CalendarEffects {
     // Refused (skipped), given up on (failed) or dropped (gone): it replaces nothing.
     if (email?.status !== 'pending' && email?.status !== 'done') return true;
     if (email.status === 'pending' && opts.waitForEmail) {
-      const attempts = opts.job?.attempts ?? INVITEE_EMAIL_WAIT_ATTEMPTS;
-      if (attempts < INVITEE_EMAIL_WAIT_ATTEMPTS) {
+      const job = opts.job;
+      const waits = job?.mark?.emailWaits ?? 0;
+      if (job && waits < INVITEE_EMAIL_WAIT_ATTEMPTS) {
+        await writeCalendarChangeMark(this.db, job.id, { inviteeEmailId, emailWaits: waits + 1 });
         throw new InviteeEmailPendingError(
-          `waiting for the invitee's email before deleting the event of ${ctx.uid} (attempt ${attempts + 1}/${INVITEE_EMAIL_WAIT_ATTEMPTS}); the calendar's own cancellation goes out after that`,
+          `waiting for the invitee's email before deleting the event of ${ctx.uid} (look ${waits + 1}/${INVITEE_EMAIL_WAIT_ATTEMPTS}); the calendar's own cancellation goes out after that`,
         );
       }
-      // Still not accepted after the wait: the provider tells the guest, as before.
-      return true;
+      // Still not sent after the wait: take it back, so the guest does not get
+      // ours later on top of the provider's, and let the provider tell them.
+      const reason = `not sent: the calendar sent its own cancellation for ${ctx.uid}`;
+      if (await skipQueuedOutboxRow(this.db, inviteeEmailId, reason)) return true;
+      const now = await this.db.get<{ status: string }>(
+        sql`SELECT status FROM outbox WHERE id = ${inviteeEmailId} LIMIT 1`,
+      );
+      if (now?.status === 'pending') {
+        // Being sent right now: its outcome decides.
+        throw new InviteeEmailPendingError(`the invitee's email for ${ctx.uid} is being sent; deciding after it`);
+      }
+      if (now?.status !== 'done') return true;
     }
     if (opts.job) {
       // Recorded before the write: a quiet write that lands and then fails to
@@ -562,9 +589,17 @@ export class CalendarEffects {
       organizerEmail: ctx.organizerEmail,
       timeZone: ctx.attendeeTimeZone,
     };
-    await this.calendar.updateEvent({ ...event, attendeeEmails: withoutGuest, sendInvitations: false });
+    // Two steps, each recorded once done. A retry never takes the guest off
+    // again, and putting back a guest who is already on changes nothing, so
+    // the provider never invites them twice.
+    let mark = change.mark;
+    if (!mark.guestRemoved) {
+      await this.calendar.updateEvent({ ...event, attendeeEmails: withoutGuest, sendInvitations: false });
+      mark = { ...mark, guestRemoved: true };
+      await writeCalendarChangeMark(this.db, change.id, mark);
+    }
     await this.calendar.updateEvent({ ...event, attendeeEmails: attendees, sendInvitations: true });
-    await writeCalendarChangeMark(this.db, change.id, { ...change.mark, reinvited: true });
+    await writeCalendarChangeMark(this.db, change.id, { ...mark, reinvited: true });
     this.log.log(`the provider invited the guest of ${uid}: the invitee email ${inviteeEmailId} was never sent`);
   }
 }

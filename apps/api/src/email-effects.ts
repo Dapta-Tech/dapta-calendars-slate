@@ -15,6 +15,7 @@ import {
   claimIcsSequence,
   tagCalendarChangeWithInviteeEmail,
   findCalendarChangeForInviteeEmail,
+  hasReinviteFor,
   bookingCalendarUid,
   oldestLiveChainUid,
   parseJsonColumn,
@@ -623,34 +624,36 @@ export class EmailEffects {
   }
 
   /**
-   * An email row ended without being sent (`skipped` or `failed`). When it was
-   * the invitee's confirmation or reschedule email and it marked the calendar
-   * change it went with, that change may have been written without the
-   * provider's own invitation, counting on this email: queue a `reinvite`
-   * calendar job, which has the provider invite the guest after all if so
-   * (`CalendarEffects`). Behind the change in the booking's calendar queue, so
-   * it runs once the change has. Never throws: a failure here is logged.
+   * An email row is about to end without being sent (`skipped` or `failed`).
+   * When it is the invitee's confirmation or reschedule email and it marked
+   * the calendar change it went with, that change may have been written
+   * without the provider's own invitation, counting on this email: queue a
+   * `reinvite` calendar job, which has the provider invite the guest after all
+   * if so (`CalendarEffects`). Behind the change in the booking's calendar
+   * queue, so it runs once the change has.
+   *
+   * Called by the worker BEFORE it records the row's end, and THROWS when the
+   * job could not be queued, so the row stays queued and is retried rather
+   * than ending with nobody left to invite the guest. Queues at most one job
+   * per email, so a row that ends twice (a lost lease) queues it once.
    */
   async afterGaveUp(row: Pick<OutboxRow, 'id' | 'action' | 'bookingUid' | 'payload'>): Promise<void> {
     if (!this.calendar?.enabled || !row.bookingUid) return;
     if (row.action !== 'confirmation' && row.action !== 'reschedule') return;
     if (parseJsonColumn<{ audience?: unknown }>(row.payload, {}).audience !== 'attendee') return;
-    try {
-      const change = await findCalendarChangeForInviteeEmail(this.db, row.bookingUid, row.id);
-      if (!change || change.action === 'delete') return;
-      const live = await this.db.get<{ status: string }>(
-        sql`SELECT status FROM booking WHERE uid = ${row.bookingUid} LIMIT 1`,
-      );
-      if (live?.status !== 'accepted') return;
-      await enqueueOutbox(this.db, {
-        kind: 'calendar',
-        action: 'reinvite',
-        bookingUid: row.bookingUid,
-        payload: JSON.stringify({ inviteeEmailId: row.id }),
-      });
-    } catch (err) {
-      this.log.error(`could not queue the provider invitation for ${row.bookingUid}: ${String(err)}`);
-    }
+    const change = await findCalendarChangeForInviteeEmail(this.db, row.bookingUid, row.id);
+    if (!change || change.action === 'delete') return;
+    const live = await this.db.get<{ status: string }>(
+      sql`SELECT status FROM booking WHERE uid = ${row.bookingUid} LIMIT 1`,
+    );
+    if (live?.status !== 'accepted') return;
+    if (await hasReinviteFor(this.db, row.bookingUid, row.id)) return;
+    await enqueueOutbox(this.db, {
+      kind: 'calendar',
+      action: 'reinvite',
+      bookingUid: row.bookingUid,
+      payload: JSON.stringify({ inviteeEmailId: row.id }),
+    });
   }
 
   /** The .ics SEQUENCE change number for this email, or null when it carries the fixed one. */
