@@ -12,6 +12,7 @@
  * something the person can retry.
  */
 import type { BookingUtm, BrandKit, EventTracking, SuccessRedirectData, WorkspaceView } from '@slate/types';
+import type { Locale } from '@slate/shared';
 import type {
   EventLocationDto,
   EventReminder,
@@ -306,8 +307,10 @@ export const adminApi = {
   // Bookings (host)
   listBookings: (q = '') =>
     req<{ items: BookingItem[] }>('GET', `/v1/host/bookings${q ? `?${q}` : ''}`),
-  /** One booking by uid, in the list's shape; a 404 when it is not this account's. */
-  getBooking: (uid: string) => req<BookingItem>('GET', `/v1/host/bookings/${encodeURIComponent(uid)}`),
+  /** One booking by uid, in the list's shape; a 404 when it is not this account's.
+   *  `locale` is the page's language, for the words the API adds inside `guest`. */
+  getBooking: (uid: string, locale?: Locale) =>
+    req<BookingItem>('GET', `/v1/host/bookings/${encodeURIComponent(uid)}${locale ? `?locale=${locale}` : ''}`),
 
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),
@@ -468,6 +471,20 @@ export interface BookingItem {
   /** The campaign the booking came from (its `utm_*`), null when none. Only on
    *  the one-booking read (`getBooking`); the list leaves it out. */
   utm?: BookingUtm | null;
+  /** Who booked and what they answered, as the host's email lists them. Only on
+   *  the one-booking read, and only for the booking's host and co-hosts: null
+   *  for anyone else in the account and for a booking without an invitee. */
+  guest?: BookingGuestDetails | null;
+}
+/** The host email's "Guest details" and "Their answers": visitor input, plain text. */
+export interface BookingGuestDetails {
+  name: string;
+  email: string;
+  phone: string | null;
+  /** Everyone else the booking invites, e.g. "Ana Ruiz (ana@example.com)". */
+  others: string[];
+  /** The event's questions with their answers, in its order, then the notes. */
+  answers: { label: string; value: string }[];
 }
 export interface Connection {
   id: string;

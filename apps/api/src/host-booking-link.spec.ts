@@ -97,6 +97,8 @@ describe('one booking for the dashboard page the request email opens', () => {
       hostMemberId: alex.memberId,
       // No campaign on this booking (booking-utm-visible.spec.ts reads one).
       utm: null,
+      // No invitee row on this one either (booking-detail-guest.spec.ts reads one).
+      guest: null,
     });
   });
 
