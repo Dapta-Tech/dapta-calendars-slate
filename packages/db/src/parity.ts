@@ -2147,12 +2147,14 @@ function asAnswerRecord(raw: unknown): Record<string, unknown> {
  */
 /**
  * The first booking of a reschedule chain, walking `rescheduled_from_uid` back.
- * Bounded and cycle-safe: a chain is short, and bad data must not spin a worker.
+ * Cycle-safe, and bounded only so bad data cannot spin a worker: the bound is
+ * far above any real chain, because stopping short would hand the invitee's
+ * calendar a different UID mid-chain and add a second entry.
  * A predecessor row that no longer exists still names the uid the invitee's
  * calendar was given, so the walk stops there and returns it.
  */
 export async function rescheduleChainRoot(db: Db, uid: string, from: string | null): Promise<string> {
-  const MAX_CHAIN = 10;
+  const MAX_CHAIN = 1000;
   const seen = new Set<string>([uid]);
   let root = uid;
   let previous = from;

@@ -11,7 +11,6 @@ import {
   loadBookingHostConnectionRefs,
   attendeesFor,
   loadBookingReferences,
-  parseJsonColumn,
   releaseBookingReference,
   setBookingReferenceMeetingUrl,
   sql,
@@ -19,8 +18,9 @@ import {
   type Db,
 } from '@slate/db';
 import { BUSY_CACHE_DEFAULTS, BusyCache, CachedBusyProvider } from './busy-cache';
-import { OutboxSkipError, attendeeEmailedFor, wantsConferencingLink } from './email-effects';
-import { CALENDAR, DB, ENV } from './tokens';
+import type { EmailProvider } from '@slate/notifications';
+import { OutboxSkipError, wantsConferencingLink } from './email-effects';
+import { CALENDAR, DB, EMAIL, ENV } from './tokens';
 
 /** Calendar lifecycle transitions the outbox can carry. */
 export type CalendarAction = 'create' | 'delete' | 'reschedule';
@@ -43,12 +43,20 @@ export function eventBody(
   return [ctx.description, join].filter(Boolean).join('\n\n') || null;
 }
 
-/** The invitee email each calendar change goes out with. */
-const CHANGE_FOR_ACTION: Record<CalendarAction, 'confirmation' | 'reschedule' | 'cancellation'> = {
-  create: 'confirmation',
-  reschedule: 'reschedule',
-  delete: 'cancellation',
-};
+/**
+ * How long a calendar change waits before its first attempt, so the invitee's
+ * email that the same request queues is already in the outbox when the write
+ * looks for it. Far below the conferencing grace on that email
+ * (`CONFERENCING_LINK_GRACE_MS`), so the join link is still minted first.
+ */
+export const INVITEE_EMAIL_GRACE_MS = 3_000;
+
+/**
+ * How far before the calendar row the invitee's email may have been queued and
+ * still count as this change's: the two are queued by the same request, in
+ * either order. An earlier change's email is older than this.
+ */
+const INVITEE_EMAIL_WINDOW_MS = 10_000;
 
 /**
  * The single place the booking lifecycle reaches the CalendarProvider PORT to
@@ -81,6 +89,9 @@ export class CalendarEffects {
     // Optional and LAST so the specs that build this positionally keep working.
     // Without an env there is no cache, and `displayProvider` is the raw one.
     @Optional() @Inject(ENV) env?: ServerEnv,
+    // The mail transport, read only for whether it delivers at all
+    // (`providerInvites`). Absent: assumed to.
+    @Optional() @Inject(EMAIL) private readonly email?: Pick<EmailProvider, 'delivers'>,
   ) {
     const ttlMs = env?.CALENDAR_BUSY_CACHE_TTL_MS ?? 0;
     this.busyCache =
@@ -170,38 +181,18 @@ export class CalendarEffects {
    */
   private enqueue(action: CalendarAction, uid: string): void {
     if (!this.calendar.enabled) return;
-    void this.invitationSnapshot(action, uid)
-      .then((sendInvitations) =>
-        enqueueOutbox(this.db, {
-          kind: 'calendar',
-          action,
-          bookingUid: uid,
-          payload: sendInvitations === null ? null : JSON.stringify({ sendInvitations }),
-        }),
-      )
-      .catch((err) => {
-        this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
-      });
-  }
-
-  /**
-   * Decide whether the provider invites for this change NOW, in the same
-   * request that queues the invitee's email from the same settings, and keep
-   * the answer on the calendar row. A row can wait (retries back off for
-   * hours); deciding again when it runs would read a toggle the email row
-   * never saw, and the guest could get both invitations or neither. Null when
-   * it cannot be decided now: the job then decides when it runs, as a row
-   * queued before this snapshot existed does. Never throws: a failed read must
-   * not cost the calendar write.
-   */
-  private async invitationSnapshot(action: CalendarAction, uid: string): Promise<boolean | null> {
-    try {
-      const ctx = await loadBookingForCalendarWrite(this.db, uid);
-      if (!ctx) return null;
-      return await this.providerInvites(ctx, CHANGE_FOR_ACTION[action]);
-    } catch {
-      return null;
-    }
+    void enqueueOutbox(this.db, {
+      kind: 'calendar',
+      action,
+      bookingUid: uid,
+      // A short head start for the invitee's email, which the same request
+      // queues right after: the write reads it to decide whether the provider
+      // may stay quiet (`providerInvites`). Well inside the grace a conferencing
+      // email waits for this write's link, so the link still comes first.
+      nextAttemptAt: Date.now() + INVITEE_EMAIL_GRACE_MS,
+    }).catch((err) => {
+      this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
+    });
   }
 
   /**
@@ -209,11 +200,8 @@ export class CalendarEffects {
    * vendor write via the port and THROWS on failure so the worker retries
    * (idempotent via the DH1 claim). No-op when the provider is disabled.
    */
-  async runCalendarJob(action: CalendarAction, uid: string, payload: string | null = null): Promise<void> {
+  async runCalendarJob(action: CalendarAction, uid: string, queuedAt?: number): Promise<void> {
     if (!this.calendar.enabled) return;
-    // The provider-invitation decision taken when the row was queued.
-    const decided = parseJsonColumn<{ sendInvitations?: unknown }>(payload, {}).sendInvitations;
-    const snapshot = typeof decided === 'boolean' ? decided : undefined;
     if (action !== 'delete') {
       // A write or a move is for a booking that is ON. One that was cancelled
       // or declined while this row waited (a retry can wait hours) must not
@@ -227,11 +215,11 @@ export class CalendarEffects {
       }
     }
     if (action === 'delete') {
-      await this.removeEvent(uid, snapshot);
+      await this.removeEvent(uid, queuedAt);
     } else if (action === 'reschedule') {
-      await this.moveEvent(uid, snapshot);
+      await this.moveEvent(uid, queuedAt);
     } else {
-      await this.writeEvent(uid, snapshot);
+      await this.writeEvent(uid, queuedAt);
     }
     // The hosts' calendars now hold (or no longer hold) the event, so a read
     // cached before this write is out of date on this process.
@@ -246,13 +234,13 @@ export class CalendarEffects {
    * events to move. If nothing was written yet (e.g. accepted then rescheduled
    * before the create drained), fall back to a fresh create.
    */
-  private async moveEvent(uid: string, snapshot?: boolean): Promise<void> {
+  private async moveEvent(uid: string, queuedAt?: number): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
     const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
     const movable = refs.filter((r) => r.externalEventId);
     if (movable.length === 0) {
-      await this.writeEvent(uid, snapshot);
+      await this.writeEvent(uid, queuedAt);
       return;
     }
     // Organizer's destination first, mirroring write-out: only that event may
@@ -267,7 +255,7 @@ export class CalendarEffects {
     // from churning a fresh room on every attempt against a backend that
     // reissues rather than echoes.
     const storedUrl = refs.find((r) => r.meetingUrl)?.meetingUrl ?? null;
-    const sendInvitations = snapshot ?? (await this.providerInvites(ctx, 'reschedule'));
+    const sendInvitations = await this.providerInvites(ctx, 'reschedule', queuedAt);
     let meetingUrl: string | null = null;
     for (const ref of ordered) {
       // Identity, not position: if NO movable ref belongs to the organizer, none
@@ -322,11 +310,11 @@ export class CalendarEffects {
    * throws and the outbox retries it, with the DH1 claim keeping destinations
    * that already succeeded from being written twice.
    */
-  private async writeEvent(uid: string, snapshot?: boolean): Promise<void> {
+  private async writeEvent(uid: string, queuedAt?: number): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx || ctx.destinationRefs.length === 0) return;
     const wantsLink = wantsConferencingLink(ctx.locationKind, ctx.location);
-    const sendInvitations = snapshot ?? (await this.providerInvites(ctx, 'confirmation'));
+    const sendInvitations = await this.providerInvites(ctx, 'confirmation', queuedAt);
     // The room, once the organizer's destination has minted it. Every later
     // destination is told about it instead of asking for one of its own.
     let meetingUrl: string | null = null;
@@ -392,26 +380,44 @@ export class CalendarEffects {
    * F4 (2026-10-30 production E2E): whether the calendar provider should email
    * the attendees itself for this change. The invitee used to get two
    * invitations per booking, and two cancellations: this service's email with
-   * its .ics, and the provider's own. So the provider stays quiet whenever the
-   * invitee gets this service's email for the change (the account's attendee
-   * toggle), and invites only when that email is switched off, or when the
-   * booking has guests this service does not email at all (extra attendees,
-   * guests added later), for whom the provider's invitation is the only one.
+   * its .ics, and the provider's own.
+   *
+   * The provider stays quiet only on evidence that our email replaces its own:
+   * the invitee's email for THIS change sits in the outbox (queued no earlier
+   * than shortly before this calendar row, so an earlier change's email never
+   * counts), and the mail transport actually delivers. Anything else keeps the
+   * provider inviting, so the guest is never left with no invitation at all:
+   *  - the account switched that email off, or the invitee has no address
+   *    (neither queues an email row);
+   *  - the email failed to queue;
+   *  - the transport is log-only or noop (`delivers === false`);
+   *  - the booking has guests this service never emails (extra attendees,
+   *    guests added later), for whom the provider's invitation is the only one;
+   *  - a calendar change no invitee email goes with (guests added, a seat
+   *    taken on a shared event).
    */
   private async providerInvites(
     ctx: CalendarWriteContext,
     kind: 'confirmation' | 'reschedule' | 'cancellation',
+    queuedAt?: number,
   ): Promise<boolean> {
     if ((ctx.otherGuestCount ?? 0) > 0) return true;
-    if (!ctx.accountId) return true;
-    return !(await attendeeEmailedFor(this.db, ctx.accountId, kind));
+    if (this.email?.delivers === false) return true;
+    const since = (queuedAt ?? Date.now()) - INVITEE_EMAIL_WINDOW_MS;
+    const queued = await this.db.get<{ ok: number }>(
+      sql`SELECT 1 AS ok FROM outbox
+          WHERE kind = 'email' AND booking_uid = ${ctx.uid} AND action = ${kind}
+            AND order_key = ${`${ctx.uid}|attendee`} AND created_at >= ${since}
+          LIMIT 1`,
+    );
+    return !queued;
   }
 
-  private async removeEvent(uid: string, snapshot?: boolean): Promise<void> {
+  private async removeEvent(uid: string, queuedAt?: number): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
     const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
-    const sendInvitations = snapshot ?? (await this.providerInvites(ctx, 'cancellation'));
+    const sendInvitations = await this.providerInvites(ctx, 'cancellation', queuedAt);
     for (const ref of refs) {
       if (!ref.externalEventId) continue;
       await this.calendar.deleteEvent({

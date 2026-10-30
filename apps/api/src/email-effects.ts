@@ -158,23 +158,6 @@ export function wantsConferencingLink(
   return (kind === null || kind === '') && !location?.trim();
 }
 
-/**
- * Whether the invitee gets this service's own email, with its .ics, for a
- * change to the booking: the account's attendee toggle for the kind, with the
- * default the enqueue side applies. The calendar write reads it to decide
- * whether the provider should invite the guest itself, so the guest is invited
- * exactly once: never by both, never by neither.
- */
-export async function attendeeEmailedFor(
-  db: Db,
-  accountId: string,
-  kind: 'confirmation' | 'reschedule' | 'cancellation',
-): Promise<boolean> {
-  const key = emailKeyFor(kind, 'attendee');
-  const stored = (await getNotificationSettings(db, accountId)).get(key);
-  return stored ? stored.enabled : defaultEnabledFor(key);
-}
-
 /** The booking emails the outbox can carry. */
 export type EmailKind =
   | 'confirmation'

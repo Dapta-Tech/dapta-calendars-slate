@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { createDb, migrate, seed, sql, createBooking, getAvailability, listOutbox, type Db } from '@slate/db';
+import { createDb, migrate, seed, sql, createBooking, getAvailability, enqueueOutbox, listOutbox, type Db } from '@slate/db';
 import type {
   CalendarProvider,
   CalendarSummary,
@@ -12,7 +12,7 @@ import type {
 } from '@slate/calendar';
 import { LEGACY_CONFERENCING_VALUE } from '@slate/engine';
 import { getMessages } from '@slate/shared';
-import { CalendarEffects, eventBody } from './calendar-effects';
+import { CalendarEffects, INVITEE_EMAIL_GRACE_MS, eventBody } from './calendar-effects';
 
 /** A fake provider that records writes, moves AND deletes (the port's effects). */
 class RecordingCalendarProvider implements CalendarProvider {
@@ -104,10 +104,15 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
   // two cancellations. The provider now stays quiet whenever the invitee gets
   // this service's email for the change.
   describe('one invitation per booking (sendInvitations)', () => {
-    it('create, move and delete ask the provider not to invite while the invitee gets our email', async () => {
+    // The invitee's email for a change, as EmailEffects queues it.
+    const queueInviteeEmail = (uid: string, action: string, now?: number) =>
+      enqueueOutbox(db, { kind: 'email', action, bookingUid: uid, orderKey: `${uid}|attendee`, now });
+
+    it('create, move and delete keep the provider quiet when the invitee email for that change is queued', async () => {
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);
       const uid = await bookFirstSlot();
+      for (const action of ['confirmation', 'reschedule', 'cancellation']) await queueInviteeEmail(uid, action);
       await (effects as unknown as Awaitable).writeEvent(uid);
       await (effects as unknown as Awaitable).moveEvent(uid);
       await (effects as unknown as Awaitable).removeEvent(uid);
@@ -116,36 +121,44 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.deleted[0]!.sendInvitations).toBe(false);
     });
 
-    it('each change follows its own attendee toggle: switched off, the provider invites', async () => {
-      for (const [key, op] of [
-        ['attendee_confirmation', 'create'],
-        ['attendee_reschedule', 'move'],
-        ['attendee_cancellation', 'delete'],
-      ] as const) {
-        await db.run(sql`DELETE FROM notification_setting WHERE account_id = ${accountId}`);
-        await db.run(
-          sql`INSERT INTO notification_setting (id, account_id, email_key, enabled, created_at, updated_at)
-              VALUES (${randomUUID()}, ${accountId}, ${key}, ${0}, ${Date.now()}, ${Date.now()})`,
-        );
-        const provider = new RecordingCalendarProvider();
-        const effects = new CalendarEffects(provider, db);
-        const uid = await bookFirstSlot();
-        await (effects as unknown as Awaitable).writeEvent(uid);
-        await (effects as unknown as Awaitable).moveEvent(uid);
-        await (effects as unknown as Awaitable).removeEvent(uid);
-        const seen = {
-          create: provider.created[0]!.sendInvitations,
-          move: provider.updated[0]!.sendInvitations,
-          delete: provider.deleted[0]!.sendInvitations,
-        };
-        expect(seen, key).toEqual({ create: op === 'create', move: op === 'move', delete: op === 'delete' });
-      }
+    it('a change with no invitee email queued for it (switched off, no address, failed) keeps the provider inviting', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      // Only the confirmation went out: the move and the cancel have no email.
+      await queueInviteeEmail(uid, 'confirmation');
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      await (effects as unknown as Awaitable).removeEvent(uid);
+      expect(provider.created[0]!.sendInvitations).toBe(false);
+      expect(provider.updated[0]!.sendInvitations).toBe(true);
+      expect(provider.deleted[0]!.sendInvitations).toBe(true);
+    });
+
+    it("an earlier change's email does not count for a later change", async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const queuedAt = Date.now();
+      await queueInviteeEmail(uid, 'reschedule', queuedAt - 60 * 60_000); // an hour earlier
+      await effects.runCalendarJob('reschedule', uid, queuedAt);
+      expect((provider.updated[0] ?? provider.created[0])!.sendInvitations).toBe(true);
+    });
+
+    it('a mail transport that never delivers (log-only, noop) keeps the provider inviting', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db, undefined, { delivers: false });
+      const uid = await bookFirstSlot();
+      await queueInviteeEmail(uid, 'confirmation');
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      expect(provider.created[0]!.sendInvitations).toBe(true);
     });
 
     it('a guest we never email (an extra attendee) keeps the provider inviting', async () => {
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);
       const uid = await bookFirstSlot();
+      await queueInviteeEmail(uid, 'confirmation');
       const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
       await db.run(
         sql`INSERT INTO booking_guest (id, booking_id, email, email_normalized, name, created_at)
@@ -155,35 +168,11 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.created[0]!.sendInvitations).toBe(true);
     });
 
-    it('the decision is taken when the change is queued and kept on the row', async () => {
-      const provider = new RecordingCalendarProvider();
-      const effects = new CalendarEffects(provider, db);
-      const uid = await bookFirstSlot();
-      effects.onBookingAccepted(uid);
-      let row;
-      for (let i = 0; i < 50 && !row; i++) {
-        await new Promise((r) => setTimeout(r, 5));
-        row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid }))[0];
-      }
-      expect(row!.payload).toBe(JSON.stringify({ sendInvitations: false }));
-      // The toggle flips while the row waits: the row keeps the decision the
-      // invitee's email was queued with.
-      await db.run(
-        sql`INSERT INTO notification_setting (id, account_id, email_key, enabled, created_at, updated_at)
-            VALUES (${randomUUID()}, ${accountId}, ${'attendee_confirmation'}, ${0}, ${Date.now()}, ${Date.now()})`,
-      );
-      await effects.runCalendarJob('create', uid, row!.payload);
-      expect(provider.created[0]!.sendInvitations).toBe(false);
-      // A row queued before the snapshot existed decides when it runs.
-      await db.run(sql`DELETE FROM booking_reference WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`);
-      await effects.runCalendarJob('create', uid, null);
-      expect(provider.created[1]!.sendInvitations).toBe(true);
-    });
-
     it("the organizer's own address among the attendees is not a guest to invite", async () => {
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);
       const uid = await bookFirstSlot();
+      await queueInviteeEmail(uid, 'confirmation');
       const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
       await db.run(
         sql`INSERT INTO booking_guest (id, booking_id, email, email_normalized, name, created_at)
@@ -197,6 +186,8 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);
       const uid = await bookFirstSlot();
+      await queueInviteeEmail(uid, 'confirmation');
+      await queueInviteeEmail(uid, 'reschedule');
       const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
       await db.run(sql`UPDATE booking_attendee SET email = ${'alex@example.com'} WHERE booking_id = ${bookingId}`);
       await (effects as unknown as Awaitable).writeEvent(uid);
@@ -208,6 +199,20 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       );
       await (effects as unknown as Awaitable).moveEvent(uid);
       expect(provider.updated[0]!.sendInvitations).toBe(true);
+    });
+
+    it('the calendar row waits a moment for the invitee email the same request queues', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const before = Date.now();
+      effects.onBookingAccepted(uid);
+      let row;
+      for (let i = 0; i < 50 && !row; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+        row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid }))[0];
+      }
+      expect(row!.nextAttemptAt).toBeGreaterThanOrEqual(before + INVITEE_EMAIL_GRACE_MS);
     });
 
     it('a booking with an address but no kind (written before kinds) is not an online meeting', async () => {

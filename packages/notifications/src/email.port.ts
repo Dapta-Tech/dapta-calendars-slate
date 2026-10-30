@@ -72,4 +72,11 @@ export interface EmailProvider {
    * support footer, not two. Absent = false: SMTP and the rest keep the line.
    */
   readonly addsSupportFooter?: boolean;
+  /**
+   * False for a transport that never delivers anything (log-only, noop): a
+   * caller that would rely on this service's email reaching someone (the
+   * calendar write muting the provider's own invitation) must not. Absent =
+   * a real transport.
+   */
+  readonly delivers?: boolean;
 }
