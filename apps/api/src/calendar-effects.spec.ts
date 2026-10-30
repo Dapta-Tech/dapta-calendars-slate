@@ -142,6 +142,18 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.created[0]!.sendInvitations).toBe(true);
     });
 
+    it('a marked email the transport gave up on, or that was dropped, keeps the provider inviting', async () => {
+      for (const status of ['failed', 'skipped']) {
+        const provider = new RecordingCalendarProvider();
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        const emailId = await queueInviteeEmail(uid, 'confirmation');
+        await db.run(sql`UPDATE outbox SET status = ${status} WHERE id = ${emailId}`);
+        await (effects as unknown as Awaitable).writeEvent(uid, emailId);
+        expect(provider.created[0]!.sendInvitations, status).toBe(true);
+      }
+    });
+
     it('a mark naming no queued email keeps the provider inviting', async () => {
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);

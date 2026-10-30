@@ -400,9 +400,12 @@ export class CalendarEffects {
     if ((ctx.otherGuestCount ?? 0) > 0) return true;
     if (this.email?.delivers === false) return true;
     if (!inviteeEmailId) return true;
+    // Still on its way (pending) or sent (done): an email the transport gave up
+    // on (failed) or that was dropped (skipped) replaces nothing.
     const queued = await this.db.get<{ ok: number }>(
       sql`SELECT 1 AS ok FROM outbox
           WHERE id = ${inviteeEmailId} AND kind = 'email' AND booking_uid = ${ctx.uid}
+            AND status IN ('pending', 'done')
           LIMIT 1`,
     );
     return !queued;
