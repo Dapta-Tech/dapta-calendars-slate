@@ -171,6 +171,11 @@ export function loadGtm(w: TrackingWindow, id: string): void {
  * Google Analytics 4: the `gtag` queue Google's snippet defines, on GA4's own
  * layer ({@link GA4_LAYER}), its library, and the measurement id's config,
  * which sends the one page view.
+ *
+ * Its cookies (`_ga`, `_ga_<id>`) stay on the page's own host. gtag's
+ * default writes them on the widest domain it can (`.example.com` from
+ * `book.example.com`), so every request to the dashboard's host and the API
+ * would carry the host's analytics ids.
  */
 export function loadGa4(w: TrackingWindow, id: string): void {
   if (started.has(`ga4:${id}`)) return;
@@ -187,7 +192,8 @@ export function loadGa4(w: TrackingWindow, id: string): void {
     gtag('js', new Date());
     addScript(w, ga4Src(id));
   }
-  gtag('config', id);
+  // `none`: no Domain attribute, so the cookies belong to this host alone.
+  gtag('config', id, { cookie_domain: 'none' });
 }
 
 /**

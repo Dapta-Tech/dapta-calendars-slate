@@ -83,7 +83,7 @@ describe('startTracking', () => {
     startTracking(w(), t);
     expect(scripts()).toEqual([{ src: `https://www.googletagmanager.com/gtag/js?id=G-ABC123XYZ9&l=${GA4_LAYER}`, id: '' }]);
     const commands = (w()[GA4_LAYER] as IArguments[]).map((args) => [...args]);
-    expect(commands).toEqual([['js', expect.any(Date)], ['config', 'G-ABC123XYZ9']]);
+    expect(commands).toEqual([['js', expect.any(Date)], ['config', 'G-ABC123XYZ9', { cookie_domain: 'none' }]]);
     // Never the page-wide names a container (or another snippet) uses.
     expect(w().dataLayer).toBeUndefined();
     expect((w() as unknown as { gtag?: unknown }).gtag).toBeUndefined();
