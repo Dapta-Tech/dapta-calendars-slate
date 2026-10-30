@@ -937,6 +937,13 @@ export interface BookingMessages {
       /** A booking's own page: the campaign it came from (its UTMs), shown only when it has one. */
       campaignTitle: string;
       campaignHint: string;
+      /** A booking's own page: who booked and what they answered, as the host's email lists them. */
+      guestTitle: string;
+      guestName: string;
+      guestEmail: string;
+      guestPhone: string;
+      guestOthers: string;
+      guestAnswersTitle: string;
       newSubtitle: string;
       createEventFirst: string;
       slotTaken: string;
@@ -2639,6 +2646,12 @@ export const en: BookingMessages = {
       notFoundBody: 'There is no booking at this link in this workspace.',
       campaignTitle: 'Campaign',
       campaignHint: 'From the UTM parameters on the link the invitee booked from.',
+      guestTitle: 'Guest details',
+      guestName: 'Name',
+      guestEmail: 'Email',
+      guestPhone: 'Phone',
+      guestOthers: 'Other guests',
+      guestAnswersTitle: 'Their answers',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
@@ -4390,6 +4403,12 @@ export const es: BookingMessages = {
       notFoundBody: 'No hay ninguna reserva en este enlace dentro de este espacio.',
       campaignTitle: 'Campaña',
       campaignHint: 'De los parámetros UTM del enlace desde el que reservó el invitado.',
+      guestTitle: 'Datos del invitado',
+      guestName: 'Nombre',
+      guestEmail: 'Correo',
+      guestPhone: 'Teléfono',
+      guestOthers: 'Otros invitados',
+      guestAnswersTitle: 'Sus respuestas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
