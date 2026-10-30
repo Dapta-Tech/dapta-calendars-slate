@@ -12,7 +12,7 @@ import { TOOLS } from './tools';
 
 /**
  * What create_booking says about `guests` matches what happens to them: dCal's
- * own emails go to the invitee only (and the hosts), never to an extra guest;
+ * own emails go to the invitee and the host, never to an extra guest;
  * the host's connected calendar is what invites the guests. The tool used to
  * say each guest is emailed, which no code path does.
  */
@@ -40,12 +40,13 @@ describe('create_booking and its guests', () => {
   const tool = TOOLS.find((t) => t.name === 'create_booking')!;
   const guestsText = JSON.stringify(z.toJSONSchema(tool.input.shape['guests'] as z.ZodType, { unrepresentable: 'any' }));
 
-  it('says dCal emails the invitee only, and never that a guest is emailed', () => {
+  it('says dCal emails the invitee and the host, and never that a guest is emailed', () => {
     for (const text of [tool.description, guestsText]) {
-      expect(text).not.toMatch(/each is emailed|\(and guests\)/i);
+      expect(text).not.toMatch(/each is emailed|\(and guests\)|invitee only/i);
       expect(text).toMatch(/connected calendar/);
+      expect(text).toMatch(/emails the invitee and the host/);
     }
-    expect(guestsText).toContain('dCal emails the invitee only');
+    expect(guestsText).toContain('never the guests');
     expect(tool.description).toContain('not emailed by dCal');
   });
 

@@ -1604,7 +1604,7 @@ const createBookingInput = z.object({
     .max(10)
     .optional()
     .describe(
-      "Extra attendees' emails, added to the booking. dCal emails the invitee only; the host's connected calendar, when there is one, invites the guests.",
+      "Extra attendees' emails, added to the booking. dCal emails the invitee and the host, never the guests; the host's connected calendar, when there is one, invites the guests.",
     ),
   answers,
   language: z.enum(['en', 'es']).optional(),
@@ -1615,7 +1615,7 @@ const createBooking: ToolDef = {
   name: 'create_booking',
   title: 'Create a booking',
   description:
-    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee (guests are invited by the host\'s connected calendar, not emailed by dCal), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held.',
+    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee and the host (guests are invited by the host\'s connected calendar, not emailed by dCal), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held.',
   scope: 'bookings:write',
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },

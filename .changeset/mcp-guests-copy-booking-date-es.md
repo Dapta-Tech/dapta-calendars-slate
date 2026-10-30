@@ -6,8 +6,8 @@
 Two corrections found while documenting dCal.
 
 - MCP `create_booking` no longer says each extra guest is emailed. dCal's own
-  emails go to the invitee (and the hosts) only; the host's connected calendar,
-  when there is one, is what invites the guests. The tool description and the
+  emails go to the invitee and the host, never to a guest; the host's connected
+  calendar, when there is one, is what invites the guests. The tool description and the
   `guests` argument now say so. New `mcp.create-booking-guests.spec.ts` checks
   the text and, with the real notifier, that no copy of a booking email goes to
   a guest.
