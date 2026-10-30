@@ -67,6 +67,62 @@ class RecordingCalendarProvider implements CalendarProvider {
   }
 }
 
+/**
+ * A calendar that notifies guests the way Google does (checked 2026-10-30):
+ * with notifications on, a guest gets an email when the event is created with
+ * them, when they are added to it, when its time changes, and when it is
+ * deleted; saving it with nothing changed sends nothing. `notices` lists every
+ * email the provider sent to a guest. `fail` makes one call throw.
+ */
+class NotifyingCalendarProvider implements CalendarProvider {
+  readonly enabled = true;
+  readonly notices: Array<{ to: string; kind: 'invite' | 'update' | 'cancel'; ref: string }> = [];
+  readonly updated: UpdateEventInput[] = [];
+  readonly created: CreateEventInput[] = [];
+  private readonly events = new Map<string, { start: string; end: string; attendees: string[]; ref: string }>();
+  private seq = 0;
+  fail: ((op: 'create' | 'update', ref: string) => boolean) | null = null;
+  constructor(private readonly guests: string[]) {}
+  private tell(to: string[], kind: 'invite' | 'update' | 'cancel', ref: string): void {
+    for (const a of to) if (this.guests.includes(a)) this.notices.push({ to: a, kind, ref });
+  }
+  listBusy(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  createEvent(input: CreateEventInput): Promise<CreatedEvent> {
+    if (this.fail?.('create', input.connectionRef)) return Promise.reject(new Error('vendor 503'));
+    this.created.push(input);
+    const id = `evt-${++this.seq}`;
+    this.events.set(id, { start: input.startUtc, end: input.endUtc, attendees: [...input.attendeeEmails], ref: input.connectionRef });
+    if (input.sendInvitations !== false) this.tell(input.attendeeEmails, 'invite', input.connectionRef);
+    return Promise.resolve({ externalEventId: id, meetingUrl: 'https://meet/x' });
+  }
+  updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
+    if (this.fail?.('update', input.connectionRef)) return Promise.reject(new Error('vendor 503'));
+    this.updated.push(input);
+    const before = this.events.get(input.externalEventId)!;
+    const moved = before.start !== input.startUtc || before.end !== input.endUtc;
+    if (input.sendInvitations !== false) {
+      this.tell(input.attendeeEmails.filter((a) => !before.attendees.includes(a)), 'invite', input.connectionRef);
+      if (moved) this.tell(input.attendeeEmails.filter((a) => before.attendees.includes(a)), 'update', input.connectionRef);
+    }
+    this.events.set(input.externalEventId, { ...before, start: input.startUtc, end: input.endUtc, attendees: [...input.attendeeEmails] });
+    return Promise.resolve({ externalEventId: input.externalEventId });
+  }
+  deleteEvent(input: DeleteEventInput): Promise<void> {
+    const before = this.events.get(input.externalEventId);
+    if (before && input.sendInvitations !== false) this.tell(before.attendees, 'cancel', input.connectionRef);
+    this.events.delete(input.externalEventId);
+    return Promise.resolve();
+  }
+  listCalendars(): Promise<CalendarSummary[]> {
+    return Promise.resolve([]);
+  }
+  checkConnection(): Promise<ConnectionHealth> {
+    return Promise.resolve({ ok: true, detail: 'Connected' });
+  }
+}
+
 // Awaitable views of the fire-and-forget effect methods (production callers do
 // not await them; tests exercise the same private core deterministically).
 type Job = { id: string; attempts: number };
@@ -330,7 +386,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
         expect(provider.updated.filter((u) => u.sendInvitations === true)).toHaveLength(1);
       });
 
-      it('a create retried after its email was refused invites from the event, and leaves no reinvite to do', async () => {
+      it('a create retried after its email was refused stays quiet, and the reinvite invites once', async () => {
         const provider = new RecordingCalendarProvider();
         const effects = new CalendarEffects(provider, db);
         const uid = await bookFirstSlot();
@@ -345,11 +401,13 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
         provider.createEvent = create;
         await db.run(sql`UPDATE outbox SET status = 'skipped' WHERE id = ${emailId}`);
         await effects.runCalendarJob('create', uid, await payload(), { id: rowId, attempts: 1 });
-        expect(provider.created[0]!.sendInvitations).toBe(true);
-        expect(readCalendarChangeMark(await payload())!.providerMuted).toBeUndefined();
+        // A retry of a change written quietly stays quiet: whether the earlier
+        // attempt reached the event is not something it can know.
+        expect(provider.created[0]!.sendInvitations).toBe(false);
+        expect(readCalendarChangeMark(await payload())!.providerMuted).toBe(true);
         await markOutboxDone(db, rowId);
         await effects.runCalendarJob('reinvite', uid, JSON.stringify({ inviteeEmailId: emailId }), { id: 'r', attempts: 0 });
-        expect(provider.updated).toHaveLength(0);
+        expect(provider.updated.map((u) => u.sendInvitations)).toEqual([false, true]);
       });
 
       it('nothing to do when the change invited with the provider itself', async () => {
@@ -573,6 +631,203 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     );
     expect(refs).toHaveLength(1);
     expect(refs[0]!.external_event_id).toBe('evt-1');
+  });
+
+  // Release #322 review: a retried change must not let the guest hear from the
+  // provider twice (once from the retry, once from the reinvite), and a refused
+  // email must still leave them hearing once.
+  describe('one provider notice per change, across retries', () => {
+    const GUEST = 'sam@example.com';
+    const queueInviteeEmail = (uid: string, action: string) =>
+      enqueueOutbox(db, { kind: 'email', action, bookingUid: uid, orderKey: `${uid}|attendee` });
+
+    /** A collective booking: the organizer plus Jordan, each with a destination calendar. */
+    async function teamBooking(): Promise<string> {
+      const uid = await bookFirstSlot();
+      const jordan = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'jordan-lee'`))!.id;
+      const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
+      for (const m of [memberId, jordan]) {
+        await db.run(sql`INSERT INTO booking_host (id, booking_id, member_id, created_at) VALUES (${randomUUID()}, ${bookingId}, ${m}, ${Date.now()})`);
+      }
+      if (!(await db.get(sql`SELECT 1 AS ok FROM connected_calendar WHERE member_id = ${jordan}`))) {
+        await db.run(
+          sql`INSERT INTO connected_calendar
+                (id, account_id, member_id, provider, external_id, primary_email, is_destination, check_conflicts, created_at)
+              VALUES (${randomUUID()}, ${accountId}, ${jordan}, ${'google'}, ${'cal-dest-2'}, ${null}, ${1}, ${1}, ${Date.now()})`,
+        );
+      }
+      return uid;
+    }
+
+    /** A calendar change row marked with a fresh invitee email, run the way the worker runs it. */
+    async function change(effects: CalendarEffects, uid: string, action: 'create' | 'reschedule') {
+      const emailId = await queueInviteeEmail(uid, action === 'create' ? 'confirmation' : 'reschedule');
+      const rowId = await enqueueOutbox(db, { kind: 'calendar', action, bookingUid: uid });
+      await tagCalendarChangeWithInviteeEmail(db, { bookingUid: uid, action, emailOutboxId: emailId });
+      let attempts = 0;
+      const payload = async () => (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === rowId)!.payload;
+      return {
+        emailId,
+        run: async () => effects.runCalendarJob(action, uid, await payload(), { id: rowId, attempts: attempts++ }),
+        refuse: () => db.run(sql`UPDATE outbox SET status = 'skipped' WHERE id = ${emailId}`),
+        finish: async () => {
+          await markOutboxDone(db, rowId);
+          await effects.runCalendarJob('reinvite', uid, JSON.stringify({ inviteeEmailId: emailId }), { id: 'reinvite', attempts: 0 });
+        },
+      };
+    }
+
+    const failOnce = (provider: NotifyingCalendarProvider, op: 'create' | 'update', ref: string) => {
+      let failed = false;
+      provider.fail = (o, r) => {
+        if (failed || o !== op || r !== ref) return false;
+        failed = true;
+        return true;
+      };
+    };
+
+    const moveBooking = (uid: string) =>
+      db.run(sql`UPDATE booking SET start_ms = start_ms + 3600000, end_ms = end_ms + 3600000 WHERE uid = ${uid}`);
+
+    it("only the organizer's event notifies the guest; a co-host's copy never does", async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      const write = effects as unknown as Awaitable;
+      await write.writeEvent(uid);
+      await moveBooking(uid);
+      await write.moveEvent(uid);
+      await write.removeEvent(uid);
+      expect(provider.notices.map((n) => `${n.kind}:${n.ref}`)).toEqual([
+        `invite:${CAL_REF}`,
+        `update:${CAL_REF}`,
+        `cancel:${CAL_REF}`,
+      ]);
+      expect(provider.created.find((c) => c.connectionRef === 'cal-dest-2')!.sendInvitations).toBe(false);
+    });
+
+    it('create: the organizer written quietly, a co-host failing, the email refused: one notice, from the reinvite', async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      const c = await change(effects, uid, 'create');
+      failOnce(provider, 'create', 'cal-dest-2');
+      await expect(c.run()).rejects.toThrow('vendor 503');
+      await c.refuse();
+      await c.run();
+      expect(provider.notices).toHaveLength(0);
+      await c.finish();
+      expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
+    });
+
+    it("create: the organizer's create failing, the email refused: the retry stays quiet, one notice from the reinvite", async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      const c = await change(effects, uid, 'create');
+      failOnce(provider, 'create', CAL_REF);
+      await expect(c.run()).rejects.toThrow('vendor 503');
+      await c.refuse();
+      await c.run();
+      expect(provider.notices).toHaveLength(0);
+      await c.finish();
+      expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
+    });
+
+    it('move: the organizer moved quietly, a co-host failing, the email refused: one notice, from the reinvite', async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      const created = await change(effects, uid, 'create');
+      await created.run();
+      await moveBooking(uid);
+      const c = await change(effects, uid, 'reschedule');
+      failOnce(provider, 'update', 'cal-dest-2');
+      await expect(c.run()).rejects.toThrow('vendor 503');
+      await c.refuse();
+      // The retry invites, but saving the organizer's event at the time it
+      // already has tells nobody: the reinvite still has to.
+      await c.run();
+      expect(provider.notices).toHaveLength(0);
+      await c.finish();
+      expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
+    });
+
+    it("move: the organizer's move failing, the email refused: the retry stays quiet, one notice from the reinvite", async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      const created = await change(effects, uid, 'create');
+      await created.run();
+      await moveBooking(uid);
+      const c = await change(effects, uid, 'reschedule');
+      failOnce(provider, 'update', CAL_REF);
+      await expect(c.run()).rejects.toThrow('vendor 503');
+      await c.refuse();
+      await c.run();
+      expect(provider.notices).toHaveLength(0);
+      await c.finish();
+      // Put back on the moved event: the provider's invitation at the new time.
+      expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
+    });
+
+    it('a quiet move that landed before the job failed: the retry stays quiet, one notice from the reinvite', async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      await (await change(effects, uid, 'create')).run();
+      await moveBooking(uid);
+      const c = await change(effects, uid, 'reschedule');
+      // Everything moved, then the job died before it could finish.
+      const move = provider.updateEvent.bind(provider);
+      let die = true;
+      provider.updateEvent = async (input) => {
+        const out = await move(input);
+        if (die && input.connectionRef === 'cal-dest-2') {
+          die = false;
+          throw new Error('worker lost');
+        }
+        return out;
+      };
+      await expect(c.run()).rejects.toThrow('worker lost');
+      await c.refuse();
+      await c.run();
+      await c.finish();
+      expect(provider.notices).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
+    });
+
+    it('a refused email on a change that went through in one go: one notice, from the reinvite', async () => {
+      for (const action of ['create', 'reschedule'] as const) {
+        const provider = new NotifyingCalendarProvider([GUEST]);
+        const effects = new CalendarEffects(provider, db);
+        const uid = await teamBooking();
+        if (action === 'reschedule') {
+          await (await change(effects, uid, 'create')).run();
+          await moveBooking(uid);
+        }
+        const c = await change(effects, uid, action);
+        await c.run();
+        await c.refuse();
+        await c.finish();
+        expect(provider.notices, action).toEqual([{ to: GUEST, kind: 'invite', ref: CAL_REF }]);
+      }
+    });
+
+    it('an email that went out leaves the provider silent on every change', async () => {
+      const provider = new NotifyingCalendarProvider([GUEST]);
+      const effects = new CalendarEffects(provider, db);
+      const uid = await teamBooking();
+      const created = await change(effects, uid, 'create');
+      await created.run();
+      await markOutboxDone(db, created.emailId);
+      await created.finish();
+      await moveBooking(uid);
+      const moved = await change(effects, uid, 'reschedule');
+      await moved.run();
+      await markOutboxDone(db, moved.emailId);
+      await moved.finish();
+      expect(provider.notices).toHaveLength(0);
+    });
   });
 
   describe('the organizer is in the guest list, first and once', () => {

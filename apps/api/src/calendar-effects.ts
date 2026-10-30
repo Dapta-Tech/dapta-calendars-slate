@@ -64,6 +64,27 @@ export function eventBody(
 }
 
 /**
+ * The one event whose calendar provider may notify the guest: the organizer's
+ * own (the first of `destinations` on a calendar the organizer owns), else the
+ * one written to the first destination, which mints the room. Every other
+ * host's copy is written, moved and deleted with the provider quiet, so the
+ * guest hears from one event, never one per host. `destinations` are the
+ * events' destination refs (null: the first destination).
+ */
+export function invitingDestination(
+  ctx: Pick<CalendarWriteContext, 'organizerDestinationRefs' | 'destinationRefs'>,
+  destinations: ReadonlyArray<string | null | undefined>,
+): string | null {
+  const refs = destinations.map((d) => d ?? ctx.destinationRefs[0] ?? null).filter((d): d is string => !!d);
+  return (
+    refs.find((d) => ctx.organizerDestinationRefs.includes(d)) ??
+    refs.find((d) => d === ctx.destinationRefs[0]) ??
+    refs[0] ??
+    null
+  );
+}
+
+/**
  * How long a calendar change waits before its first attempt, so the invitee's
  * email that the same request queues has marked it by then
  * (`tagCalendarChangeWithInviteeEmail`). Far below the conferencing grace on
@@ -318,12 +339,14 @@ export class CalendarEffects {
     // reissues rather than echoes.
     const storedUrl = refs.find((r) => r.meetingUrl)?.meetingUrl ?? null;
     const sendInvitations = await this.providerInvites(ctx, inviteeEmailId, { job });
+    const inviting = invitingDestination(ctx, ordered.map((r) => r.destination));
     let meetingUrl: string | null = null;
     for (const ref of ordered) {
       // Identity, not position: if NO movable ref belongs to the organizer, none
       // is the organizer, and nobody re-mints — rather than promoting an
       // arbitrary co-host and minting a second room behind the invitee's back.
       const isOrganizer = ref.destination === organizerRef;
+      const notifies = (ref.destination ?? ctx.destinationRefs[0] ?? null) === inviting;
       const updated = await this.calendar.updateEvent({
         connectionRef: ref.destination ?? ctx.destinationRefs[0] ?? '',
         calendarId:
@@ -344,7 +367,7 @@ export class CalendarEffects {
         organizerEmail: ctx.organizerEmail,
         requestConferenceLink: wantsLink && isOrganizer && !storedUrl,
         timeZone: ctx.attendeeTimeZone,
-        sendInvitations,
+        sendInvitations: notifies && sendInvitations,
       });
       if (isOrganizer) meetingUrl = updated.meetingUrl ?? null;
     }
@@ -377,11 +400,13 @@ export class CalendarEffects {
     if (!ctx || ctx.destinationRefs.length === 0) return;
     const wantsLink = wantsConferencingLink(ctx.locationKind, ctx.location);
     const sendInvitations = await this.providerInvites(ctx, inviteeEmailId, { job });
+    const inviting = invitingDestination(ctx, ctx.destinationRefs);
     // The room, once the organizer's destination has minted it. Every later
     // destination is told about it instead of asking for one of its own.
     let meetingUrl: string | null = null;
     for (const [index, connectionRef] of ctx.destinationRefs.entries()) {
       const isOrganizer = index === 0;
+      const notifies = connectionRef === inviting;
       // DH1: claim (booking_id, destination) FIRST. A retry / concurrent confirm
       // loses the claim → skips createEvent → no duplicate external event.
       const claimId = await claimBookingDestination(this.db, ctx.bookingId, connectionRef);
@@ -415,17 +440,12 @@ export class CalendarEffects {
           // vendor literal on the public path (R15, ADR 0008).
           requestConferenceLink: wantsLink && isOrganizer,
           timeZone: ctx.attendeeTimeZone,
-          sendInvitations,
+          sendInvitations: notifies && sendInvitations,
         });
       } catch (err) {
         // createEvent failed → drop the claim so a later retry can re-create.
         await releaseBookingReference(this.db, claimId);
         throw err;
-      }
-      if (isOrganizer && sendInvitations && job?.mark?.providerMuted) {
-        // An earlier attempt wrote quietly but never reached this event; this
-        // one invited from it, so nothing is left for a reinvite to do.
-        await writeCalendarChangeMark(this.db, job.id, { inviteeEmailId: job.mark.inviteeEmailId });
       }
       if (isOrganizer && wantsLink) meetingUrl = created.meetingUrl ?? null;
       await fillBookingReference(this.db, claimId, {
@@ -469,8 +489,13 @@ export class CalendarEffects {
    * An email still on its way can yet be refused. A create or a move written
    * quietly on one is recorded on its own row (`providerMuted`), and if that
    * email then ends unsent, a `reinvite` job has the provider invite the guest
-   * after all (`reinviteGuest`); a retry that invites from the organizer's
-   * event clears that record. A deleted event cannot be cancelled again, so a
+   * after all (`reinviteGuest`). Once recorded, every retry of that change
+   * stays quiet too, so the reinvite is the one way the guest hears from the
+   * provider about it: a retry cannot tell whether an earlier attempt already
+   * wrote the organizer's event (saving it again unchanged notifies nobody),
+   * and inviting from both would tell the guest twice. Only one event ever
+   * notifies the guest, the organizer's (`invitingDestination`); the other
+   * hosts' copies are always written quietly. A deleted event cannot be cancelled again, so a
    * delete (`waitForEmail`) first looks at its email a few times, stays quiet
    * only once the mail service has accepted it, and otherwise takes the email
    * back (unless it is being sent right now) and lets the provider cancel.
@@ -480,6 +505,10 @@ export class CalendarEffects {
     inviteeEmailId: string | undefined,
     opts: { job?: CalendarJobRow; waitForEmail?: boolean } = {},
   ): Promise<boolean> {
+    // A create or a move an earlier attempt wrote quietly: stay quiet, and
+    // leave the guest to the reinvite if the email never goes out. (A delete
+    // has no reinvite; it decides on its email's outcome every time.)
+    if (!opts.waitForEmail && opts.job?.mark?.providerMuted) return false;
     if ((ctx.otherGuestCount ?? 0) > 0) return true;
     if (this.email?.delivers === false) return true;
     if (!inviteeEmailId) return true;
@@ -519,7 +548,7 @@ export class CalendarEffects {
     if (opts.job) {
       // Recorded before the write: a quiet write that lands and then fails to
       // record would leave nobody to invite the guest if the email is refused.
-      await writeCalendarChangeMark(this.db, opts.job.id, { inviteeEmailId, providerMuted: true });
+      await writeCalendarChangeMark(this.db, opts.job.id, { ...opts.job.mark, inviteeEmailId, providerMuted: true });
     }
     return false;
   }
@@ -529,12 +558,14 @@ export class CalendarEffects {
     if (!ctx) return;
     const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
     const sendInvitations = await this.providerInvites(ctx, inviteeEmailId, { job, waitForEmail: true });
-    for (const ref of refs) {
-      if (!ref.externalEventId) continue;
+    const written = refs.filter((r) => r.externalEventId);
+    const inviting = invitingDestination(ctx, written.map((r) => r.destination));
+    for (const ref of written) {
+      const connectionRef = ref.destination ?? ctx.destinationRefs[0] ?? '';
       await this.calendar.deleteEvent({
-        connectionRef: ref.destination ?? ctx.destinationRefs[0] ?? '',
-        externalEventId: ref.externalEventId,
-        sendInvitations,
+        connectionRef,
+        externalEventId: ref.externalEventId!,
+        sendInvitations: connectionRef === inviting && sendInvitations,
       });
     }
     // Only the calendar's rows: the CRM's reference points at a meeting that
@@ -569,14 +600,22 @@ export class CalendarEffects {
       throw new InviteeEmailPendingError(`the calendar ${change.action} of ${uid} has not run yet`);
     }
     if (!change.mark.providerMuted || change.mark.reinvited) return;
+    // Only for an email that really ended unsent. The worker queues this job
+    // just before it records that end, so a moment's `pending` is waited out.
+    const email = await this.db.get<{ status: string }>(
+      sql`SELECT status FROM outbox WHERE id = ${inviteeEmailId} AND kind = 'email' LIMIT 1`,
+    );
+    if (email?.status === 'done') return;
+    if (email?.status === 'pending') {
+      throw new InviteeEmailPendingError(`the invitee's email for ${uid} has not ended yet`);
+    }
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
     const inviteeKey = ctx.inviteeKey ?? null;
     if (!inviteeKey || inviteeKey === normalizeAttendeeEmail(ctx.organizerEmail)) return;
     const refs = (await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event')).filter((r) => r.externalEventId);
-    const target =
-      refs.find((r) => r.destination && ctx.organizerDestinationRefs.includes(r.destination)) ??
-      refs.find((r) => r.destination === ctx.destinationRefs[0]);
+    const inviting = invitingDestination(ctx, refs.map((r) => r.destination));
+    const target = refs.find((r) => (r.destination ?? ctx.destinationRefs[0] ?? null) === inviting);
     if (!target) {
       this.log.warn(`no organizer event to invite the guest of ${uid} from`);
       return;
