@@ -4,7 +4,7 @@ import { createDb, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
-import { claimIcsSequence, loadBookingNotificationContext, rescheduleChainRoot } from './parity';
+import { bookingCalendarUid, claimIcsSequence, loadBookingNotificationContext, rescheduleChainRoot } from './parity';
 
 /**
  * The uid the invitee's calendar knows a meeting by. A move through the v2 API
@@ -61,6 +61,8 @@ describe('rescheduleChainRoot', () => {
     const latest = await bookOne();
     await pointBack(latest, first);
     expect(await rescheduleChainRoot(db, latest, first)).toBe(first);
+    expect(await bookingCalendarUid(db, latest)).toBe(first);
+    expect(await bookingCalendarUid(db, first)).toBe(first);
     expect((await loadBookingNotificationContext(db, latest))!.calendarUid).toBe(first);
     // A predecessor that no longer exists still names the uid the invitee holds.
     expect(await rescheduleChainRoot(db, latest, fakeUid(7))).toBe(fakeUid(7));

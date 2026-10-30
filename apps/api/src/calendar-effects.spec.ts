@@ -193,6 +193,23 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.created[0]!.sendInvitations).toBe(false);
     });
 
+    it('a host who booked themselves plus another guest: that guest still gets the provider invite', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
+      await db.run(sql`UPDATE booking_attendee SET email = ${'alex@example.com'} WHERE booking_id = ${bookingId}`);
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      // Only the host: nobody to invite.
+      expect(provider.created[0]!.sendInvitations).toBe(false);
+      await db.run(
+        sql`INSERT INTO booking_guest (id, booking_id, email, email_normalized, name, created_at)
+            VALUES (${randomUUID()}, ${bookingId}, ${'extra@example.com'}, ${'extra@example.com'}, ${null}, ${Date.now()})`,
+      );
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      expect(provider.updated[0]!.sendInvitations).toBe(true);
+    });
+
     it('a booking with an address but no kind (written before kinds) is not an online meeting', async () => {
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);

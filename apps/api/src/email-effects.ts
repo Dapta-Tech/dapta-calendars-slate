@@ -13,6 +13,7 @@ import {
   loadBookingMeetingUrl,
   loadBookingNotificationContext,
   claimIcsSequence,
+  bookingCalendarUid,
   defaultNotificationSetting,
   type BookingNotificationContext,
   type EventReminder,
@@ -594,6 +595,15 @@ export class EmailEffects {
     await this.enqueueFollowUps(uid, opts);
   }
 
+  /** The .ics SEQUENCE change number for this email, or null when it carries the fixed one. */
+  private async claimSequenceFor(kind: Exclude<EmailKind, 'reminder'>, uid: string): Promise<number | null> {
+    if (kind !== 'reschedule' && kind !== 'cancellation' && kind !== 'confirmation') return null;
+    const calendarUid = await bookingCalendarUid(this.db, uid);
+    // A first confirmation keeps 0; one inside a chain of moves must outrank it.
+    if (kind === 'confirmation' && calendarUid === uid) return null;
+    return claimIcsSequence(this.db, calendarUid);
+  }
+
   /**
    * Build the notification snapshots from the DB + caller overrides and enqueue
    * one durable email row per ENABLED side. Never throws — a failure to enqueue
@@ -606,20 +616,21 @@ export class EmailEffects {
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
   ): Promise<void> {
     try {
+      // The .ics SEQUENCE of this change, claimed ONCE so both sides' copies
+      // carry the same number: a move, a cancellation, and a confirmation of a
+      // booking that took over a moved meeting. It starts above the fixed 1 / 2
+      // the .ics carried before, so a meeting already moved once still updates.
+      // Claimed BEFORE the booking is read: the change that claims the highest
+      // number then reads a booking at least as new as every change before it,
+      // so the .ics a calendar keeps (the highest) always holds the latest time,
+      // even when two moves are queued at once.
+      const claimed = await this.claimSequenceFor(kind, uid);
       const ctx = await loadBookingNotificationContext(this.db, uid);
       if (!ctx) {
         this.log.warn(`skip ${kind} email — no notification context for booking ${uid}`);
         return;
       }
       const settings = await getNotificationSettings(this.db, ctx.accountId);
-      // The .ics SEQUENCE of this change, claimed ONCE so both sides' copies
-      // carry the same number: a move, a cancellation, and a confirmation of a
-      // booking that took over a moved meeting. It starts above the fixed 1 / 2
-      // the .ics carried before, so a meeting already moved once still updates.
-      const calendarUid = ctx.calendarUid ?? ctx.uid;
-      const isChange =
-        kind === 'reschedule' || kind === 'cancellation' || (kind === 'confirmation' && calendarUid !== ctx.uid);
-      const claimed = isChange ? await claimIcsSequence(this.db, calendarUid) : null;
       const sideExtra = claimed === null ? extra : { ...extra, icsSequence: LEGACY_ICS_SEQUENCE_CEILING + claimed };
       // ADR 0007: a conferencing booking's mail is made due slightly LATE, so
       // the calendar row that mints the link gets a head start. Every other

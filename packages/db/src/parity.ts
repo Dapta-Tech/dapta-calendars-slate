@@ -68,7 +68,7 @@ import {
   oneOffGuardApplies,
   type OneOffLinkRecord,
 } from './one-off-link';
-import { loadExternalBusy } from './calendar-refs';
+import { loadExternalBusy, primaryAttendeeKey } from './calendar-refs';
 import { applyCalendarTemplates } from './calendar-text';
 import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 import { getAccountBranding } from './account-branding';
@@ -2174,6 +2174,14 @@ export async function rescheduleChainRoot(db: Db, uid: string, from: string | nu
  * numbers. Null when that booking row is gone: the caller falls back to the
  * fixed numbers.
  */
+/** The uid the invitee's calendar knows a booking's meeting by (`rescheduleChainRoot` from its row). */
+export async function bookingCalendarUid(db: Db, uid: string): Promise<string> {
+  const row = await db.get<{ rescheduled_from_uid: string | null }>(
+    sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${uid} LIMIT 1`,
+  );
+  return rescheduleChainRoot(db, uid, row?.rescheduled_from_uid ?? null);
+}
+
 export async function claimIcsSequence(db: Db, calendarUid: string): Promise<number | null> {
   const row = await db.get<{ ics_sequence: number | string }>(
     sql`UPDATE booking SET ics_sequence = ics_sequence + 1 WHERE uid = ${calendarUid} RETURNING ics_sequence`,
@@ -2250,11 +2258,10 @@ export async function loadBookingNotificationContext(
     sql`SELECT id, name, email, time_zone, phone, notes FROM booking_attendee
         WHERE booking_id = ${row.id} ORDER BY created_at ASC, ${insertionOrder}`,
   );
-  const named = parseJsonColumn<{ _primaryAttendee?: { email?: unknown } }>(row.booking_metadata, {})
-    ._primaryAttendee?.email;
-  const namedKey = typeof named === 'string' ? normalizeAttendeeEmail(named) : null;
+  // The same rule the calendar write uses to tell the invitee from other guests.
+  const inviteeKey = primaryAttendeeKey(attendeeRows, row.booking_metadata);
   const invitee =
-    (namedKey && attendeeRows.find((a) => normalizeAttendeeEmail(a.email) === namedKey)) || attendeeRows[0];
+    (inviteeKey && attendeeRows.find((a) => normalizeAttendeeEmail(a.email) === inviteeKey)) || attendeeRows[0];
   if (!invitee?.email) return null;
   // Multi-host bookings: every assigned co-host (excluding the organizer) is
   // notified too. Round-robin bookings have no booking_host rows → empty.

@@ -216,6 +216,19 @@ export interface CalendarWriteContext {
   destinationCalendarIds: Record<string, string>;
 }
 
+/**
+ * The booking's invitee, as a normalized address: the attendee the booking
+ * named as primary (`metadata._primaryAttendee`), else the first attendee row
+ * (rows ordered by creation, then insertion). The one person this service
+ * emails about the booking; `loadBookingNotificationContext` picks the same one.
+ */
+export function primaryAttendeeKey(rows: Array<{ email: string | null }>, metadata: unknown): string | null {
+  const named = parseJsonColumn<{ _primaryAttendee?: { email?: unknown } }>(metadata, {})._primaryAttendee?.email;
+  const namedKey = typeof named === 'string' ? normalizeAttendeeEmail(named) : null;
+  const match = namedKey ? rows.find((r) => normalizeAttendeeEmail(r.email) === namedKey) : undefined;
+  return normalizeAttendeeEmail((match ?? rows[0])?.email) || null;
+}
+
 /** Each address once, in first-seen order, compared as the duplicate guard does. */
 function uniqueEmails(emails: Array<string | null | undefined>): string[] {
   const out: string[] = [];
@@ -361,16 +374,24 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   const copyAttendeeEmails = uniqueEmails([...guestEmails, ...coHostEmails]).filter(
     (e) => normalizeAttendeeEmail(e) !== organizerKey,
   );
+  // Everyone on the booking this service does not email: not the invitee (who
+  // gets our email), and not the organizer (whose own calendar holds the event,
+  // so no provider invites them), whichever of the two a host who booked
+  // themselves happens to be.
+  const insertionOrder = db.dialect === 'postgres' ? sql`ctid ASC` : sql`rowid ASC`;
+  const attendeeOrder = await db.all<{ email: string | null }>(
+    sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id} ORDER BY created_at ASC, ${insertionOrder}`,
+  );
+  const inviteeKey = primaryAttendeeKey(attendeeOrder, b.metadata);
+  const otherGuestCount = uniqueEmails(guestEmails).filter((e) => {
+    const key = normalizeAttendeeEmail(e);
+    return key !== inviteeKey && key !== organizerKey;
+  }).length;
 
   return {
     bookingId: b.id,
     accountId: b.account_id,
-    // The organizer's own address among the attendees (a host who booked
-    // themselves) is not a guest anyone has to invite.
-    otherGuestCount: Math.max(
-      0,
-      uniqueEmails(guestEmails).filter((e) => normalizeAttendeeEmail(e) !== organizerKey).length - 1,
-    ),
+    otherGuestCount,
     uid: b.uid,
     title: b.title,
     description: b.calendar_description,
