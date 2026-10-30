@@ -129,6 +129,11 @@ describe('the calendar change mark', () => {
     expect(
       readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', emailWaits: 2, guestRemoved: true })),
     ).toEqual({ inviteeEmailId: 'em-7', emailWaits: 2, guestRemoved: true });
+    expect(readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', providerMuted: true, organizerMoved: true }))).toEqual({
+      inviteeEmailId: 'em-7',
+      providerMuted: true,
+      organizerMoved: true,
+    });
     expect(readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', emailWaits: -1 }))).toEqual({
       inviteeEmailId: 'em-7',
     });

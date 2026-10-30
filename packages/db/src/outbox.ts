@@ -291,6 +291,12 @@ export async function tagCalendarChangeWithInviteeEmail(
 export interface CalendarChangeMark {
   inviteeEmailId: string;
   providerMuted?: boolean;
+  /**
+   * A move written quietly has moved the organizer's event. A retry that then
+   * invites saves that event at the time it already has, which sends nothing,
+   * so the record above must stay for the reinvite.
+   */
+  organizerMoved?: boolean;
   /** A delete's looks at its cancellation email so far (its own count, apart from failures). */
   emailWaits?: number;
   /** The reinvite has taken the guest off the event; a retry only puts them back. */
@@ -331,6 +337,7 @@ export function readCalendarChangeMark(payload: string | null): CalendarChangeMa
     return {
       inviteeEmailId: parsed.inviteeEmailId,
       ...(parsed.providerMuted === true ? { providerMuted: true } : {}),
+      ...(parsed.organizerMoved === true ? { organizerMoved: true } : {}),
       ...(typeof waits === 'number' && Number.isInteger(waits) && waits > 0 ? { emailWaits: waits } : {}),
       ...(parsed.guestRemoved === true ? { guestRemoved: true } : {}),
       ...(parsed.reinvited === true ? { reinvited: true } : {}),
