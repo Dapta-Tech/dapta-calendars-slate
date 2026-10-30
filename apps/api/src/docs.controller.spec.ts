@@ -188,6 +188,28 @@ describe('DocsController: the introduction', () => {
     expect(apiIntroduction()).not.toMatch(/https?:\/\//);
   });
 
+  it('keeps the keys link and icon when the dashboard address carries a query or fragment', () => {
+    const docs = new DocsController({
+      API_PUBLIC_URL: undefined,
+      PUBLIC_APP_URL: 'https://app.calendar.example.com/?utm_source=x#top',
+    });
+    expect(docs.spec().info.description).toContain('[API keys](https://app.calendar.example.com/admin/developers/keys)');
+    expect(docs.docs()).toContain('href="https://app.calendar.example.com/icon.svg"');
+  });
+
+  it('publishes the MCP address exactly, but never with credentials, a query or a fragment', () => {
+    const intro = (MCP_PUBLIC_URL: string) =>
+      new DocsController({ API_PUBLIC_URL: undefined, MCP_ENABLED: true, MCP_PUBLIC_URL }).spec().info.description;
+    expect(intro('https://mcp.calendar.example.com/mcp/')).toContain('`https://mcp.calendar.example.com/mcp/`');
+    for (const bad of [
+      'https://mcp.calendar.example.com/mcp?token=abc',
+      'https://mcp.calendar.example.com/mcp#frag',
+      withUserinfo('https://mcp.calendar.example.com/mcp', 'user', 'secret'),
+    ]) {
+      expect(intro(bad)).not.toContain('MCP server');
+    }
+  });
+
   it('keeps a configured address from breaking out of its markdown link', () => {
     expect(apiIntroduction({ docsUrl: 'https://docs.example.com/a(b) c' })).toContain(
       '[developer docs](https://docs.example.com/a%28b%29%20c)',
