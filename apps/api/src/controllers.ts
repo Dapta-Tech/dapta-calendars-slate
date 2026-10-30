@@ -68,6 +68,22 @@ export class HealthController {
 }
 
 /**
+ * The dashboard's base address as the reference links it: origin plus path, no
+ * trailing slash. A query, fragment or credentials on the configured value are
+ * dropped rather than discarding the address, so a tracking parameter never
+ * costs the page its API keys link and icon.
+ */
+function appBase(value: string | undefined): string | undefined {
+  try {
+    const u = new URL(value ?? '');
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return undefined;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, '');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Public API documentation: OpenAPI JSON plus the interactive Scalar reference.
  * Both name this deployment's addresses from its configuration (API_PUBLIC_URL,
  * PUBLIC_APP_URL, MCP_PUBLIC_URL, DEVELOPER_DOCS_URL); one that is unset stays
@@ -92,8 +108,10 @@ export class DocsController {
   ) {
     this.apiPublicUrl = env.API_PUBLIC_URL;
     this.productName = env.PRODUCT_NAME?.trim() || env.MAIL_FROM_NAME?.trim() || 'Calendars';
-    this.appUrl = cleanPublicUrl(env.PUBLIC_APP_URL);
-    const mcpUrl = env.MCP_ENABLED !== false && env.MCP_PUBLIC_URL ? new URL(env.MCP_PUBLIC_URL).href : undefined;
+    this.appUrl = appBase(env.PUBLIC_APP_URL);
+    // The same normalization the dashboard shows it with (apps/web/lib/mcp-config.ts):
+    // no trailing slash, and never published with credentials, a query or a fragment.
+    const mcpUrl = env.MCP_ENABLED !== false ? cleanPublicUrl(env.MCP_PUBLIC_URL) : undefined;
     this.document = openapiFor(this.apiPublicUrl, this.productName, {
       keysUrl: this.appUrl && `${this.appUrl}/admin/developers/keys`,
       mcpUrl,
