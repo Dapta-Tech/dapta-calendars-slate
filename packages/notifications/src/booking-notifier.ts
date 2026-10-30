@@ -1,6 +1,7 @@
+import { buildSignupUrl } from '@slate/shared';
 import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
-import { renderBrandedHtml, type Audience, type EmailGrowth, type EmailKind } from './email-layout';
+import { madeWithText, renderBrandedHtml, type Audience, type EmailGrowth, type EmailKind } from './email-layout';
 import { renderMemberInvite, type MemberInviteNotification } from './member-invite';
 import {
   bookingDetails,
@@ -134,6 +135,13 @@ export interface BookingNotification {
    * Only `false` hides the line; absent (old rows, forks) keeps it.
    */
   showBranding?: boolean;
+  /**
+   * The account's public code (its vanity slug, else its code): the one in its
+   * booking page's address, and the `utm_content` of the page's badge. Tags the
+   * invitee's "Made with" link the same way. Absent (rows queued before it):
+   * the link goes untagged, as it always did.
+   */
+  accountCode?: string | null;
   /** Public book-again URL for this event type (drives {{booking_link}}). */
   bookingLink?: string | null;
   /**
@@ -193,6 +201,27 @@ export class BookingNotifier {
     private readonly growth: EmailGrowth = {},
   ) {}
 
+  /**
+   * The footer settings for one message: the signup link tagged with this
+   * booking's account code (none when the account hid the branding), and
+   * whether the transport adds the platform's support footer itself.
+   */
+  private growthFor(n: BookingNotification): EmailGrowth {
+    const base = this.growth.signupBaseUrl;
+    const signupUrl =
+      n.showBranding === false
+        ? null
+        : base
+          ? buildSignupUrl({ baseUrl: base, medium: 'email', accountCode: n.accountCode })
+          : (this.growth.signupUrl ?? null);
+    return { ...this.growth, signupUrl, platformFooter: this.email.addsSupportFooter === true };
+  }
+
+  /** The language the message is written in, for whatever the transport adds to it. */
+  private lang(n: BookingNotification): 'en' | 'es' {
+    return n.templateLocale === 'es' ? 'es' : 'en';
+  }
+
   /** Recipient set for the notification's audience, deduped, empties dropped. */
   private recipients(n: BookingNotification): string[] {
     const set = new Set<string>();
@@ -223,7 +252,7 @@ export class BookingNotifier {
     const locale: TemplateLocale = n.templateLocale === 'es' ? 'es' : 'en';
     const audience: Audience = n.audience === 'host' ? 'host' : 'attendee';
     const vars = templateVars(n, locale);
-    const growth = n.showBranding === false ? { ...this.growth, signupUrl: null } : this.growth;
+    const growth = this.growthFor(n);
     // Who the booking is from and what they answered: on the host's copy of
     // the request, the confirmed booking and the move, whatever its template
     // says, so a host who edited the template still sees it.
@@ -232,11 +261,19 @@ export class BookingNotifier {
     const actionUrl = kind === 'pending' ? hostDashboardUrl(n) : '';
     const html = renderBrandedHtml(kind, vars, locale, audience, growth, { details, actionUrl });
     // The body cap holds for the whole text part, the host's details included.
+    // The "Made with" line comes after it, so no body can push it out, and no
+    // template can drop it: the same as the HTML footer.
+    const madeWith = madeWithText(locale, audience, growth);
     const withDetails = (text: string) =>
-      capTemplateText(
-        details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text,
-        MAX_RENDERED_BODY,
-      );
+      [
+        capTemplateText(
+          details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text,
+          MAX_RENDERED_BODY,
+        ),
+        madeWith,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
     if (n.template) {
       const base = renderTemplate(n.template, vars, locale);
       return { subject: base.subject, text: withDetails(base.text), html };
@@ -267,6 +304,7 @@ export class BookingNotifier {
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: this.lang(n),
       headers: { 'X-Booking-Uid': n.uid },
       idempotencyKey: this.idem(n, `calendar:${n.uid}:confirmation`),
       attachments: [this.ics(n, 'REQUEST', 0)],
@@ -301,6 +339,7 @@ export class BookingNotifier {
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: this.lang(n),
       headers: { 'X-Booking-Uid': n.uid },
       // Distinct per lead so two reminders (24h, 1h) aren't de-duped as one.
       idempotencyKey: this.idem(n, `calendar:${n.uid}:reminder:${lead ?? 'x'}`),
@@ -330,6 +369,7 @@ export class BookingNotifier {
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: this.lang(n),
       headers: { 'X-Booking-Uid': n.uid },
       // Keyed per lead, mirroring reminders — a re-pointed follow-up at the
       // same lead after reschedule replaces, not duplicates.
@@ -365,6 +405,7 @@ export class BookingNotifier {
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: this.lang(n),
       headers: { 'X-Booking-Uid': n.uid },
       idempotencyKey: this.idem(n, `calendar:${n.uid}:pending`),
       // No .ics on purpose — nothing is confirmed yet.
@@ -390,6 +431,7 @@ export class BookingNotifier {
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: this.lang(n),
       headers: { 'X-Booking-Uid': n.uid },
       idempotencyKey: this.idem(n, `calendar:${n.uid}:declined`),
       // No .ics — the pending request never produced a confirmed event.
@@ -418,6 +460,7 @@ export class BookingNotifier {
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: this.lang(n),
       headers: { 'X-Booking-Uid': n.uid },
       // Keyed by the TARGET start: a retry of the same reschedule is de-duped,
       // but a second reschedule to a different time is a distinct message.
@@ -443,6 +486,7 @@ export class BookingNotifier {
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: this.lang(n),
       headers: { 'X-Booking-Uid': n.uid },
       idempotencyKey: this.idem(n, `calendar:${n.uid}:cancellation`),
       attachments: [this.ics(n, 'CANCEL', 2)],
@@ -455,13 +499,17 @@ export class BookingNotifier {
    * their own `sendKey`, so a retry of one is de-duplicated and a resend is not.
    */
   sendMemberInvite(n: MemberInviteNotification): Promise<EmailResult> {
-    const rendered = renderMemberInvite(n, { supportEmail: this.growth.supportEmail });
+    const rendered = renderMemberInvite(n, {
+      supportEmail: this.growth.supportEmail,
+      platformFooter: this.email.addsSupportFooter === true,
+    });
     return this.email.send({
       accountId: n.accountId,
       to: n.email,
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      locale: n.locale,
       idempotencyKey: `calendar:member-invite:${n.memberId}:${n.sendKey}`,
     });
   }

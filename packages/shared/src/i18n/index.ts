@@ -809,6 +809,8 @@ export interface BookingMessages {
         groupQuestions: string;
         groupAttendee: string;
         groupEvent: string;
+        /** The booking's campaign: the `utm_*` of the link the invitee booked from. */
+        groupCampaign: string;
         /** Attendee + event metadata source names. */
         attendeePhone: string;
         attendeeNotes: string;
@@ -819,6 +821,12 @@ export interface BookingMessages {
         eventLength: string;
         eventHostName: string;
         eventHostEmail: string;
+        /** Campaign source names; each carries its `utm_*` key, which is never translated. */
+        utmSource: string;
+        utmMedium: string;
+        utmCampaign: string;
+        utmTerm: string;
+        utmContent: string;
         /** Enumeration reconciliation, shown at configure time. */
         optionsMatch: string;
         /** {matched}, {total} and {values} interpolate the diff. */
@@ -926,6 +934,9 @@ export interface BookingMessages {
       /** A booking's own page, for a uid this workspace does not have (the same for one that does not exist). */
       notFoundTitle: string;
       notFoundBody: string;
+      /** A booking's own page: the campaign it came from (its UTMs), shown only when it has one. */
+      campaignTitle: string;
+      campaignHint: string;
       newSubtitle: string;
       createEventFirst: string;
       slotTaken: string;
@@ -2515,6 +2526,7 @@ export const en: BookingMessages = {
         groupQuestions: 'Intake questions',
         groupAttendee: 'Attendee details',
         groupEvent: 'Event details',
+        groupCampaign: 'Campaign (UTM)',
         attendeePhone: 'Phone',
         attendeeNotes: 'Notes',
         attendeeTimeZone: 'Time zone',
@@ -2524,6 +2536,11 @@ export const en: BookingMessages = {
         eventLength: 'Length in minutes',
         eventHostName: 'Assigned host',
         eventHostEmail: 'Assigned host email',
+        utmSource: 'Source (utm_source)',
+        utmMedium: 'Medium (utm_medium)',
+        utmCampaign: 'Campaign (utm_campaign)',
+        utmTerm: 'Term (utm_term)',
+        utmContent: 'Content (utm_content)',
         optionsMatch: 'All options match this property.',
         optionsPartial: '{matched} of {total} options match. These will not be sent: {values}',
         optionsNone:
@@ -2620,6 +2637,8 @@ export const en: BookingMessages = {
       backToBookings: 'Back to bookings',
       notFoundTitle: 'Booking not found',
       notFoundBody: 'There is no booking at this link in this workspace.',
+      campaignTitle: 'Campaign',
+      campaignHint: 'From the UTM parameters on the link the invitee booked from.',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
@@ -4257,6 +4276,7 @@ export const es: BookingMessages = {
         groupQuestions: 'Preguntas del formulario',
         groupAttendee: 'Datos del invitado',
         groupEvent: 'Datos del evento',
+        groupCampaign: 'Campaña (UTM)',
         attendeePhone: 'Teléfono',
         attendeeNotes: 'Notas',
         attendeeTimeZone: 'Zona horaria',
@@ -4266,6 +4286,11 @@ export const es: BookingMessages = {
         eventLength: 'Duración en minutos',
         eventHostName: 'Anfitrión asignado',
         eventHostEmail: 'Correo del anfitrión asignado',
+        utmSource: 'Fuente (utm_source)',
+        utmMedium: 'Medio (utm_medium)',
+        utmCampaign: 'Campaña (utm_campaign)',
+        utmTerm: 'Término (utm_term)',
+        utmContent: 'Contenido (utm_content)',
         optionsMatch: 'Todas las opciones coinciden con esta propiedad.',
         optionsPartial:
           '{matched} de {total} opciones coinciden. Estas no se enviarán: {values}',
@@ -4363,6 +4388,8 @@ export const es: BookingMessages = {
       backToBookings: 'Volver a reservas',
       notFoundTitle: 'Reserva no encontrada',
       notFoundBody: 'No hay ninguna reserva en este enlace dentro de este espacio.',
+      campaignTitle: 'Campaña',
+      campaignHint: 'De los parámetros UTM del enlace desde el que reservó el invitado.',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',

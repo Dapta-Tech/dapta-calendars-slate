@@ -75,7 +75,7 @@ describe('one booking for the dashboard page the request email opens', () => {
     host = new HostController(admin, {} as never, auth as unknown as AuthService, {} as never);
   });
 
-  it('opens a pending request the list never reaches, in the shape the list uses', async () => {
+  it('opens a pending request the list never reaches, in the shape the list uses plus its campaign', async () => {
     // The request is the OLDEST booking, so 205 later ones push it past the 200
     // the bookings page asks for.
     const base = Date.now() + 2 * 86_400_000;
@@ -95,6 +95,8 @@ describe('one booking for the dashboard page the request email opens', () => {
       startUtc: new Date(base).toISOString(),
       endUtc: new Date(base + HOUR / 2).toISOString(),
       hostMemberId: alex.memberId,
+      // No campaign on this booking (booking-utm-visible.spec.ts reads one).
+      utm: null,
     });
   });
 

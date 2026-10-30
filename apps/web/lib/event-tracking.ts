@@ -171,6 +171,22 @@ export function loadGtm(w: TrackingWindow, id: string): void {
  * Google Analytics 4: the `gtag` queue Google's snippet defines, on GA4's own
  * layer ({@link GA4_LAYER}), its library, and the measurement id's config,
  * which sends the one page view.
+ *
+ * Its cookies (`_ga`, `_ga_<id>`) stay on the page's own host. gtag's
+ * default writes them on the widest domain it can (`.example.com` from
+ * `book.example.com`), so every request to the dashboard's host and the API
+ * would carry the host's analytics ids.
+ *
+ * They are also `SameSite=None; Secure; Partitioned`, so GA4 counts an
+ * embedded page: inside a frame on another site the browser refuses a
+ * cookie with no SameSite (gtag sets none, which browsers treat as Lax),
+ * and gtag then sends nothing at all, neither the page view nor
+ * `booking_scheduled`. Partitioned keeps one `_ga` per embedding site, so
+ * the booking host never links a visitor across the sites that embed it,
+ * and it is what browsers still accept with third-party cookies blocked.
+ * Those flags need https: on a plain-http deployment (a self-host without
+ * TLS) the browser would refuse every cookie and gtag would send nothing,
+ * so there the config keeps gtag's defaults ({@link ga4CookieSettings}).
  */
 export function loadGa4(w: TrackingWindow, id: string): void {
   if (started.has(`ga4:${id}`)) return;
@@ -187,7 +203,18 @@ export function loadGa4(w: TrackingWindow, id: string): void {
     gtag('js', new Date());
     addScript(w, ga4Src(id));
   }
-  gtag('config', id);
+  gtag('config', id, ga4CookieSettings(w.location.protocol));
+}
+
+/**
+ * GA4's cookie settings for a page served over `protocol` (see {@link loadGa4}).
+ * `cookie_domain: 'none'` writes no Domain attribute, so the cookies belong
+ * to this host alone; the flags only where the browser accepts them.
+ */
+export function ga4CookieSettings(protocol: string): { cookie_domain: 'none'; cookie_flags?: string } {
+  return protocol === 'https:'
+    ? { cookie_domain: 'none', cookie_flags: 'SameSite=None;Secure;Partitioned' }
+    : { cookie_domain: 'none' };
 }
 
 /**

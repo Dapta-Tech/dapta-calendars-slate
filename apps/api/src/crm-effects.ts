@@ -443,6 +443,7 @@ export class CrmEffects {
         hostName: ctx.hostName,
         hostEmail: ctx.hostEmail,
       },
+      utm: ctx.utm,
     });
   }
 
@@ -523,6 +524,7 @@ export class CrmEffects {
       hostName: ctx.hostName,
       bookingUid: ctx.uid,
       answers: ctx.answers,
+      utm: ctx.utm,
       labels: {
         host: m.crm.hostLabel,
         bookingReference: m.crm.bookingReferenceLabel,

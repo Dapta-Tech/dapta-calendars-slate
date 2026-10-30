@@ -13,6 +13,7 @@ import {
   sql,
 } from "@slate/db";
 import { isValidTimeZone, zoneOffsetMinutes, zonedDayKey } from "@slate/shared";
+import { normalizeBookingUtm } from "@slate/types";
 import { z } from "zod";
 import { BookingService } from "./booking.service";
 import { isServiceError } from "./http";
@@ -495,6 +496,7 @@ export class CalV2Service {
       location: string | null;
       responses: unknown;
       metadata: unknown;
+      utm: unknown;
       created_at: number;
       updated_at: number;
       event_type_id: string;
@@ -511,7 +513,7 @@ export class CalV2Service {
       rescheduled_by_email: string | null;
     }>(
       sql`SELECT b.id, b.uid, b.title, b.status, b.start_ms, b.end_ms, b.location,
-                 b.responses, b.metadata, b.created_at, b.updated_at, b.event_type_id,
+                 b.responses, b.metadata, b.utm, b.created_at, b.updated_at, b.event_type_id,
                  et.slug AS event_slug, et.description AS event_description,
                  et.length_minutes, et.destination_calendar_id, b.cancellation_reason,
                  b.cancelled_by, b.rescheduled_from_uid, b.rescheduled_to_uid,
@@ -631,6 +633,9 @@ export class CalV2Service {
       reschedulingReason: booking.rescheduling_reason,
       rescheduledByEmail: booking.rescheduled_by_email,
       icsUid: booking.uid,
+      // The campaign the booking came from (the `utm_*` keys it kept), or null.
+      // Not a Cal.com field: an addition a Cal.com client ignores.
+      utm: normalizeBookingUtm(parseJsonColumn<unknown>(booking.utm, null)),
     };
   }
 

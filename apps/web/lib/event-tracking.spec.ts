@@ -10,6 +10,7 @@ import {
   GA4_LAYER,
   META_PIXEL_SRC,
   OWNER_POSTHOG_SETTINGS,
+  ga4CookieSettings,
   hasAnyTracking,
   resetTrackingForTests,
   resolveTracking,
@@ -83,10 +84,16 @@ describe('startTracking', () => {
     startTracking(w(), t);
     expect(scripts()).toEqual([{ src: `https://www.googletagmanager.com/gtag/js?id=G-ABC123XYZ9&l=${GA4_LAYER}`, id: '' }]);
     const commands = (w()[GA4_LAYER] as IArguments[]).map((args) => [...args]);
-    expect(commands).toEqual([['js', expect.any(Date)], ['config', 'G-ABC123XYZ9']]);
+    expect(commands).toEqual([['js', expect.any(Date)], ['config', 'G-ABC123XYZ9', ga4CookieSettings(window.location.protocol)]]);
     // Never the page-wide names a container (or another snippet) uses.
     expect(w().dataLayer).toBeUndefined();
     expect((w() as unknown as { gtag?: unknown }).gtag).toBeUndefined();
+  });
+
+  it('GA4 cookies: host-only everywhere, SameSite=None; Secure; Partitioned only over https', () => {
+    expect(ga4CookieSettings('https:')).toEqual({ cookie_domain: 'none', cookie_flags: 'SameSite=None;Secure;Partitioned' });
+    // A plain-http self-host would refuse Secure cookies, and gtag would then send nothing.
+    expect(ga4CookieSettings('http:')).toEqual({ cookie_domain: 'none' });
   });
 
   it('GA4 beside a GTM container: two layers, so the container never hears GA4’s commands', () => {

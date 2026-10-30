@@ -377,6 +377,35 @@ describe('contact property mapping (H2, #108)', () => {
     expect(body).not.toHaveProperty('lastname');
   });
 
+  it('clears a property with an empty value on a FOUND contact, and writes none on a new one', async () => {
+    const clearing = { utm_source: 'newsletter', utm_term: '' };
+    const found = stub([
+      { status: 200, body: { results: [{ id: '77' }] } },
+      { status: 200, body: {} },
+    ]);
+    await new HubSpotCrmProvider(undefined, 5000, found.fetchImpl).resolveContact({
+      token: 't',
+      email: 'lead@example.com',
+      firstName: null,
+      lastName: null,
+      properties: clearing,
+    });
+    expect(found.calls[1]!.body).toEqual({ properties: clearing });
+
+    const absent = stub([
+      { status: 200, body: { results: [] } },
+      { status: 201, body: { id: '99' } },
+    ]);
+    await new HubSpotCrmProvider(undefined, 5000, absent.fetchImpl).resolveContact({
+      token: 't',
+      email: 'new@example.com',
+      firstName: null,
+      lastName: null,
+      properties: clearing,
+    });
+    expect(absent.calls[1]!.body).toEqual({ properties: { utm_source: 'newsletter', email: 'new@example.com' } });
+  });
+
   it('makes NO second call for a found contact with nothing mapped (H1a unchanged)', async () => {
     const { fetchImpl, calls } = stub([{ status: 200, body: { results: [{ id: '77' }] } }]);
     const crm = new HubSpotCrmProvider(undefined, 5000, fetchImpl);

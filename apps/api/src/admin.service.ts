@@ -28,9 +28,9 @@ import {
   deleteConnection,
   deleteWebhook,
   ensureDefaultSchedule,
-  enqueueWebhookDeliveries,
   getAvailability,
   getHostBooking,
+  getBookingUtm,
   getMe,
   getSchedule,
   listApiKeys,
@@ -100,6 +100,7 @@ import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
+import { enqueueBookingWebhook } from './booking-webhook';
 import { assertTemplates, templateFieldLabel } from './template-validation';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
@@ -284,8 +285,11 @@ export class AdminService {
    * answers 404 either way, so another tenant's booking is never told apart
    * from one that does not exist.
    */
-  getBooking(p: HostPrincipal, uid: string) {
-    return getHostBooking(this.db, { accountId: p.accountId, uid });
+  async getBooking(p: HostPrincipal, uid: string) {
+    const booking = await getHostBooking(this.db, { accountId: p.accountId, uid });
+    // The campaign it came from (`booking.utm`), for the page's Campaign block;
+    // null when none. Read only for a booking the account owns.
+    return booking ? { ...booking, utm: await getBookingUtm(this.db, booking.uid) } : null;
   }
 
   async hostCreate(
@@ -349,7 +353,7 @@ export class AdminService {
         this.calendar.onBookingChanged(b.uid);
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
-      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.created', {
+      void enqueueBookingWebhook(this.db, p.accountId, 'booking.created', {
         uid: b.uid,
         status: b.status,
         startUtc: new Date(b.startMs).toISOString(),
@@ -374,7 +378,7 @@ export class AdminService {
       // (The public cancel path already did this; the host path missed it.)
       void this.email.cancelReminders(uid);
       void this.email.cancelFollowUps(uid);
-      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
+      void enqueueBookingWebhook(this.db, p.accountId, 'booking.cancelled', {
         uid,
         reason: reason ?? null,
       }).catch(() => undefined);
@@ -402,7 +406,7 @@ export class AdminService {
       // Now that it's confirmed, schedule its pre-meeting reminders.
       void this.email.enqueueReminders(uid);
       void this.email.enqueueFollowUps(uid);
-      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.confirmed', { uid }).catch(
+      void enqueueBookingWebhook(this.db, p.accountId, 'booking.confirmed', { uid }).catch(
         () => undefined,
       );
     }
@@ -420,7 +424,7 @@ export class AdminService {
       // Safety: drop any reminders (a declined pending booking usually has none).
       void this.email.cancelReminders(uid);
       void this.email.cancelFollowUps(uid);
-      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
+      void enqueueBookingWebhook(this.db, p.accountId, 'booking.cancelled', {
         uid,
         reason: reason ?? null,
       }).catch(() => undefined);

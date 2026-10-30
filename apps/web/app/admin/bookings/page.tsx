@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getMessages, t, safeTimeZone } from '@slate/shared';
+import { adminBookingPath, getMessages, t, safeTimeZone } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
@@ -89,14 +89,16 @@ function Section({
           {rows.map((b) => (
             <li
               key={b.uid}
-              className={`flex items-center justify-between rounded-md border border-border bg-card p-card ${
+              className={`flex items-center justify-between gap-field rounded-md border border-border bg-card p-card ${
                 muted ? 'opacity-70' : ''
               }`}
             >
-              <span className="flex flex-col">
-                <span className="font-medium">{b.title}</span>
+              {/* The booking's own page: its details, the campaign it came
+                  from and the same action this row offers. */}
+              <Link href={adminBookingPath(b.uid)} className="group flex min-w-0 flex-col">
+                <span className="font-medium group-hover:underline">{b.title}</span>
                 <span className="text-sm text-muted-foreground">{formatBookingStart(b.startUtc, timeZone)}</span>
-              </span>
+              </Link>
               <div className="flex items-center gap-field">
                 {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
                 {action === 'cancel' ? <CancelAction uid={b.uid} m={m} /> : null}

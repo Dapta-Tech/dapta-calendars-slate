@@ -62,12 +62,16 @@ const MEETING_TO_CONTACT_ASSOCIATION_TYPE_ID = 200;
  */
 const IDENTITY_PROPERTIES = new Set(['email', 'firstname', 'lastname']);
 
-/** Drop identity from a mapped-property bag. See `IDENTITY_PROPERTIES`. */
+/**
+ * Drop identity from a mapped-property bag. See `IDENTITY_PROPERTIES`. An
+ * empty string stays: it is how the mapping clears a property (a campaign key
+ * the booking lacks), and HubSpot reads it as "no value".
+ */
 function withoutIdentity(properties: Record<string, string> | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(properties ?? {})) {
     if (IDENTITY_PROPERTIES.has(k.toLowerCase())) continue;
-    if (v == null || v === '') continue;
+    if (v == null) continue;
     out[k] = v;
   }
   return out;
@@ -174,7 +178,8 @@ export class HubSpotCrmProvider implements CrmProvider {
       '/crm/v3/objects/contacts',
       {
         properties: {
-          ...mapped,
+          // A new contact has nothing to clear.
+          ...pruneEmpty(mapped),
           // Identity LAST so a mapped property can never shadow it even if the
           // bag somehow carried one; `withoutIdentity` already removed them.
           ...pruneEmpty({
