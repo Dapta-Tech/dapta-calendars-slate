@@ -342,15 +342,16 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     if (err instanceof OutboxSkipError) {
       // A decision, not a failure: record the reason ONCE and stop: waiting
       // and retrying cannot change the outcome.
-      await markOutboxSkipped(this.db, row.id, { reason: err.message, now, leaseToken: row.leaseToken });
+      const skipped = await markOutboxSkipped(this.db, row.id, { reason: err.message, now, leaseToken: row.leaseToken });
       this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${err.message}`);
+      if (skipped) await this.afterGaveUp(row);
       return;
     }
     const attempts = row.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);
     const horizonMs = NO_RETRY_HORIZON.has(row.kind) ? 0 : this.horizonMs;
     if (outboxRetriesExhausted(row, attempts, now, horizonMs)) {
-      await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
+      const failed = await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
       const tried = row.firstFailedAt == null ? '' : ` over ${span(now - row.firstFailedAt)}`;
       this.log.error(
         `outbox ${row.kind}:${row.action} (${row.id}) failed for good after ${attempts} attempts${tried}: ${message}`,
@@ -360,6 +361,7 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
           () => undefined,
         );
       }
+      if (failed) await this.afterGaveUp(row);
       return;
     }
     // A failure that names its own wait (a calendar backend's Retry-After,
@@ -376,11 +378,30 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     this.wake(now + delayMs);
   }
 
+  /**
+   * A row that ended unsent. An invitee email that never went out may leave a
+   * calendar change that counted on it without the provider's invitation, so
+   * the email side gets to queue the provider's invitation after all. Never
+   * throws.
+   */
+  private async afterGaveUp(row: OutboxRow): Promise<void> {
+    if (row.kind !== 'email') return;
+    try {
+      // Optional: a worker built in a spec with a bare email stub has none.
+      await this.email.afterGaveUp?.(row);
+    } catch {
+      // Logged by the email side; the row's own outcome is already written.
+    }
+  }
+
   /** Perform the row's side-effect. Throws on failure so `process` can retry. */
   private async execute(row: OutboxRow): Promise<void> {
     if (row.kind === 'calendar') {
       if (!row.bookingUid) throw new Error('calendar outbox row missing booking_uid');
-      await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid, row.payload);
+      await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid, row.payload, {
+        id: row.id,
+        attempts: row.attempts,
+      });
       return;
     }
     // H1a (#63): ONE row does both halves of the CRM write-out — resolve the

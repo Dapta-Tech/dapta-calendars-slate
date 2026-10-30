@@ -8,7 +8,10 @@ import {
   createBooking,
   getAvailability,
   enqueueOutbox,
+  DEFAULT_MAX_ATTEMPTS,
   listOutbox,
+  markOutboxDone,
+  readCalendarChangeMark,
   tagCalendarChangeWithInviteeEmail,
   type Db,
 } from '@slate/db';
@@ -23,7 +26,15 @@ import type {
 } from '@slate/calendar';
 import { LEGACY_CONFERENCING_VALUE } from '@slate/engine';
 import { getMessages } from '@slate/shared';
-import { CalendarEffects, INVITEE_EMAIL_GRACE_MS, eventBody } from './calendar-effects';
+import {
+  CalendarEffects,
+  INVITEE_EMAIL_GRACE_MS,
+  INVITEE_EMAIL_RETRY_MS,
+  INVITEE_EMAIL_WAIT_ATTEMPTS,
+  InviteeEmailPendingError,
+  eventBody,
+} from './calendar-effects';
+import { OutboxSkipError } from './email-effects';
 
 /** A fake provider that records writes, moves AND deletes (the port's effects). */
 class RecordingCalendarProvider implements CalendarProvider {
@@ -57,10 +68,11 @@ class RecordingCalendarProvider implements CalendarProvider {
 
 // Awaitable views of the fire-and-forget effect methods (production callers do
 // not await them; tests exercise the same private core deterministically).
+type Job = { id: string; attempts: number };
 type Awaitable = {
-  writeEvent(uid: string, inviteeEmailId?: string): Promise<void>;
-  removeEvent(uid: string, inviteeEmailId?: string): Promise<void>;
-  moveEvent(uid: string, inviteeEmailId?: string): Promise<void>;
+  writeEvent(uid: string, inviteeEmailId?: string, job?: Job): Promise<void>;
+  removeEvent(uid: string, inviteeEmailId?: string, job?: Job): Promise<void>;
+  moveEvent(uid: string, inviteeEmailId?: string, job?: Job): Promise<void>;
 };
 
 describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9/C14)', () => {
@@ -126,10 +138,162 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       const write = effects as unknown as Awaitable;
       await write.writeEvent(uid, await queueInviteeEmail(uid, 'confirmation'));
       await write.moveEvent(uid, await queueInviteeEmail(uid, 'reschedule'));
-      await write.removeEvent(uid, await queueInviteeEmail(uid, 'cancellation'));
+      // A delete stays quiet once the mail service has taken the cancellation.
+      const cancellation = await queueInviteeEmail(uid, 'cancellation');
+      await markOutboxDone(db, cancellation);
+      await write.removeEvent(uid, cancellation);
       expect(provider.created[0]!.sendInvitations).toBe(false);
       expect(provider.updated[0]!.sendInvitations).toBe(false);
       expect(provider.deleted[0]!.sendInvitations).toBe(false);
+    });
+
+    it('a delete waits a few attempts for its cancellation email, then lets the provider cancel', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const write = effects as unknown as Awaitable;
+      await write.writeEvent(uid);
+      const cancellation = await queueInviteeEmail(uid, 'cancellation');
+      for (let attempts = 0; attempts < INVITEE_EMAIL_WAIT_ATTEMPTS; attempts++) {
+        const wait = write.removeEvent(uid, cancellation, { id: 'row-1', attempts });
+        await expect(wait).rejects.toBeInstanceOf(InviteeEmailPendingError);
+        await expect(wait).rejects.toMatchObject({ retryAfterMs: INVITEE_EMAIL_RETRY_MS });
+      }
+      expect(provider.deleted).toHaveLength(0);
+      // Still on its way after the wait: the provider's own cancellation, as before.
+      await write.removeEvent(uid, cancellation, { id: 'row-1', attempts: INVITEE_EMAIL_WAIT_ATTEMPTS });
+      expect(provider.deleted[0]!.sendInvitations).toBe(true);
+    });
+
+    it('a cancellation the mail service refused, or that was given up on, never mutes the delete', async () => {
+      for (const status of ['skipped', 'failed']) {
+        const provider = new RecordingCalendarProvider();
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        await (effects as unknown as Awaitable).writeEvent(uid);
+        const cancellation = await queueInviteeEmail(uid, 'cancellation');
+        await db.run(sql`UPDATE outbox SET status = ${status} WHERE id = ${cancellation}`);
+        await (effects as unknown as Awaitable).removeEvent(uid, cancellation, { id: 'row-2', attempts: 0 });
+        expect(provider.deleted[0]!.sendInvitations, status).toBe(true);
+      }
+    });
+
+    it('a delete row has room for the wait on top of its own attempts', async () => {
+      const effects = new CalendarEffects(new RecordingCalendarProvider(), db);
+      const uid = await bookFirstSlot();
+      effects.onBookingCancelled(uid);
+      let row;
+      for (let i = 0; i < 50 && !row; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+        row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.action === 'delete');
+      }
+      expect(row!.maxAttempts).toBe(DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_WAIT_ATTEMPTS);
+    });
+
+    it('a quiet create records it on its own row; one that invites does not', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const emailId = await queueInviteeEmail(uid, 'confirmation');
+      const rowId = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid });
+      await effects.runCalendarJob('create', uid, JSON.stringify({ inviteeEmailId: emailId }), { id: rowId, attempts: 0 });
+      expect(provider.created[0]!.sendInvitations).toBe(false);
+      const row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === rowId)!;
+      expect(readCalendarChangeMark(row.payload)).toEqual({ inviteeEmailId: emailId, providerMuted: true });
+
+      const other = await bookFirstSlot();
+      const otherRow = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: other });
+      await effects.runCalendarJob('create', other, null, { id: otherRow, attempts: 0 });
+      expect((await listOutbox(db, { kind: 'calendar', bookingUid: other }))[0]!.payload).toBeNull();
+    });
+
+    describe('reinvite: the email a quiet change counted on never went out', () => {
+      /** A booking whose create ran quietly on its confirmation email, which then ended `status`. */
+      async function quietCreate(provider: RecordingCalendarProvider, status: 'skipped' | 'failed' = 'skipped') {
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        const emailId = await queueInviteeEmail(uid, 'confirmation');
+        const rowId = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid });
+        const mark = JSON.stringify({ inviteeEmailId: emailId });
+        await tagCalendarChangeWithInviteeEmail(db, { bookingUid: uid, action: 'create', emailOutboxId: emailId });
+        await effects.runCalendarJob('create', uid, mark, { id: rowId, attempts: 0 });
+        await markOutboxDone(db, rowId);
+        await db.run(sql`UPDATE outbox SET status = ${status} WHERE id = ${emailId}`);
+        return { effects, uid, emailId, rowId, reinvite: JSON.stringify({ inviteeEmailId: emailId }) };
+      }
+
+      it("takes the guest off the organizer's event quietly, then puts them back with the provider inviting", async () => {
+        for (const status of ['skipped', 'failed'] as const) {
+          const provider = new RecordingCalendarProvider();
+          const { effects, uid, rowId, reinvite } = await quietCreate(provider, status);
+          expect(provider.created[0]!.sendInvitations).toBe(false);
+          await effects.runCalendarJob('reinvite', uid, reinvite, { id: 'reinvite-1', attempts: 0 });
+          expect(provider.updated, status).toHaveLength(2);
+          const [off, back] = provider.updated;
+          // The event the create wrote (the fake numbers them from evt-1).
+          expect(off!.externalEventId).toBe('evt-1');
+          expect(back!.externalEventId).toBe('evt-1');
+          expect(off!.attendeeEmails).toEqual(['alex@example.com']);
+          expect(off!.sendInvitations).toBe(false);
+          expect(back!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com']);
+          expect(back!.sendInvitations).toBe(true);
+          // Same event and room, body untouched.
+          for (const call of [off!, back!]) {
+            expect(call.requestConferenceLink).toBeUndefined();
+            expect(call).not.toHaveProperty('description');
+            expect(call.startUtc).toBe(provider.created[0]!.startUtc);
+          }
+          const row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === rowId)!;
+          expect(readCalendarChangeMark(row.payload)!.reinvited).toBe(true);
+          // Once is enough: a second run of the same job sends nothing more.
+          await effects.runCalendarJob('reinvite', uid, reinvite, { id: 'reinvite-1', attempts: 1 });
+          expect(provider.updated).toHaveLength(2);
+        }
+      });
+
+      it('nothing to do when the change invited with the provider itself', async () => {
+        const provider = new RecordingCalendarProvider();
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        const emailId = await queueInviteeEmail(uid, 'confirmation');
+        await db.run(sql`UPDATE outbox SET status = 'skipped' WHERE id = ${emailId}`);
+        const rowId = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid });
+        await tagCalendarChangeWithInviteeEmail(db, { bookingUid: uid, action: 'create', emailOutboxId: emailId });
+        await effects.runCalendarJob('create', uid, JSON.stringify({ inviteeEmailId: emailId }), { id: rowId, attempts: 0 });
+        await markOutboxDone(db, rowId);
+        expect(provider.created[0]!.sendInvitations).toBe(true);
+        await effects.runCalendarJob('reinvite', uid, JSON.stringify({ inviteeEmailId: emailId }), { id: 'r', attempts: 0 });
+        expect(provider.updated).toHaveLength(0);
+      });
+
+      it('waits while the change has not run yet, and is skipped once the booking is off', async () => {
+        const provider = new RecordingCalendarProvider();
+        const effects = new CalendarEffects(provider, db);
+        const uid = await bookFirstSlot();
+        const emailId = await queueInviteeEmail(uid, 'confirmation');
+        await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid });
+        await tagCalendarChangeWithInviteeEmail(db, { bookingUid: uid, action: 'create', emailOutboxId: emailId });
+        const reinvite = JSON.stringify({ inviteeEmailId: emailId });
+        await expect(effects.runCalendarJob('reinvite', uid, reinvite)).rejects.toBeInstanceOf(InviteeEmailPendingError);
+
+        const cancelled = await quietCreate(provider);
+        await db.run(sql`UPDATE booking SET status = 'cancelled' WHERE uid = ${cancelled.uid}`);
+        await expect(effects.runCalendarJob('reinvite', cancelled.uid, cancelled.reinvite)).rejects.toBeInstanceOf(
+          OutboxSkipError,
+        );
+        expect(provider.updated).toHaveLength(0);
+      });
+
+      it('a host who booked themselves has nobody to re-invite', async () => {
+        const provider = new RecordingCalendarProvider();
+        const { effects, uid, reinvite } = await quietCreate(provider);
+        await db.run(
+          sql`UPDATE booking_attendee SET email = ${'alex@example.com'}
+              WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+        );
+        await effects.runCalendarJob('reinvite', uid, reinvite, { id: 'r', attempts: 0 });
+        expect(provider.updated).toHaveLength(0);
+      });
     });
 
     it('a change no invitee email marked (switched off, no address, failed) keeps the provider inviting', async () => {

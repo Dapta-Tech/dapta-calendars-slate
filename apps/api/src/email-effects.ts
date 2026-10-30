@@ -14,7 +14,11 @@ import {
   loadBookingNotificationContext,
   claimIcsSequence,
   tagCalendarChangeWithInviteeEmail,
+  findCalendarChangeForInviteeEmail,
   bookingCalendarUid,
+  oldestLiveChainUid,
+  parseJsonColumn,
+  type OutboxRow,
   defaultNotificationSetting,
   type BookingNotificationContext,
   type EventReminder,
@@ -29,6 +33,7 @@ import {
   collectBookingAnswers,
   defaultEnabledFor,
   deliversEmail,
+  EmailRefusedError,
   extractTokens,
   resolveTemplate,
   type BookingNotification,
@@ -51,6 +56,21 @@ import { publicBookingBase } from './booking-origin';
  * row `skipped` ONCE with this reason — it never burns the retry schedule.
  */
 export class OutboxSkipError extends Error {}
+
+/**
+ * A refusal from the mail service (`EmailRefusedError`: a suppressed recipient,
+ * a policy block) is final, so the row is recorded once as `skipped` with the
+ * service's reason instead of being retried for a day. Any other error is
+ * passed on and retried as before.
+ */
+async function refusalIsFinal<T>(send: Promise<T>): Promise<T> {
+  try {
+    return await send;
+  } catch (err) {
+    if (err instanceof EmailRefusedError) throw new OutboxSkipError(err.message);
+    throw err;
+  }
+}
 
 /**
  * Thrown by `deliver` while a conferencing booking's link has not been minted
@@ -602,13 +622,50 @@ export class EmailEffects {
     }
   }
 
+  /**
+   * An email row ended without being sent (`skipped` or `failed`). When it was
+   * the invitee's confirmation or reschedule email and it marked the calendar
+   * change it went with, that change may have been written without the
+   * provider's own invitation, counting on this email: queue a `reinvite`
+   * calendar job, which has the provider invite the guest after all if so
+   * (`CalendarEffects`). Behind the change in the booking's calendar queue, so
+   * it runs once the change has. Never throws: a failure here is logged.
+   */
+  async afterGaveUp(row: Pick<OutboxRow, 'id' | 'action' | 'bookingUid' | 'payload'>): Promise<void> {
+    if (!this.calendar?.enabled || !row.bookingUid) return;
+    if (row.action !== 'confirmation' && row.action !== 'reschedule') return;
+    if (parseJsonColumn<{ audience?: unknown }>(row.payload, {}).audience !== 'attendee') return;
+    try {
+      const change = await findCalendarChangeForInviteeEmail(this.db, row.bookingUid, row.id);
+      if (!change || change.action === 'delete') return;
+      const live = await this.db.get<{ status: string }>(
+        sql`SELECT status FROM booking WHERE uid = ${row.bookingUid} LIMIT 1`,
+      );
+      if (live?.status !== 'accepted') return;
+      await enqueueOutbox(this.db, {
+        kind: 'calendar',
+        action: 'reinvite',
+        bookingUid: row.bookingUid,
+        payload: JSON.stringify({ inviteeEmailId: row.id }),
+      });
+    } catch (err) {
+      this.log.error(`could not queue the provider invitation for ${row.bookingUid}: ${String(err)}`);
+    }
+  }
+
   /** The .ics SEQUENCE change number for this email, or null when it carries the fixed one. */
   private async claimSequenceFor(kind: Exclude<EmailKind, 'reminder'>, uid: string): Promise<number | null> {
     if (kind !== 'reschedule' && kind !== 'cancellation' && kind !== 'confirmation') return null;
     const calendarUid = await bookingCalendarUid(this.db, uid);
     // A first confirmation keeps 0; one inside a chain of moves must outrank it.
     if (kind === 'confirmation' && calendarUid === uid) return null;
-    return claimIcsSequence(this.db, calendarUid);
+    const claimed = await claimIcsSequence(this.db, calendarUid);
+    if (claimed !== null || calendarUid === uid) return claimed;
+    // The first booking's row is gone (nothing in the app deletes one): count
+    // on the oldest row left in the chain, so the number still grows past the
+    // fixed 1 / 2 instead of falling back to them.
+    const live = await oldestLiveChainUid(this.db, uid);
+    return live ? claimIcsSequence(this.db, live) : null;
   }
 
   /**
@@ -879,7 +936,7 @@ export class EmailEffects {
   ): Promise<void> {
     // Not a booking email: none of what follows (booking state, reminders,
     // conferencing links, branding) applies to it.
-    if (kind === MEMBER_INVITE_ACTION) return this.deliverMemberInvite(payloadJson);
+    if (kind === MEMBER_INVITE_ACTION) return refusalIsFinal(this.deliverMemberInvite(payloadJson));
     const n = JSON.parse(payloadJson) as BookingNotification & {
       reminderLeadMinutes?: number;
       /** The event-type reminder that scheduled this row; absent on rows queued
@@ -1021,6 +1078,11 @@ export class EmailEffects {
     // the same way it brings the badge back. Cache only, never a wait on the
     // upstream (`EntitlementGate.showBranding`).
     n.showBranding = await this.gate.showBranding(n.accountId);
+    await refusalIsFinal(this.send(kind, n));
+  }
+
+  /** Hand one booking email to the notifier, by kind. */
+  private async send(kind: string, n: BookingNotification): Promise<void> {
     switch (kind) {
       case 'confirmation':
         await this.notifier.sendConfirmation(n);
