@@ -8,6 +8,9 @@ import { normalizeRecipients } from '../util';
  * (avoids dumping PII into logs).
  */
 export class LogOnlyEmailProvider implements EmailProvider {
+  /** Nothing ever leaves: no caller may count on this email reaching anyone. */
+  readonly delivers = false;
+
   constructor(private readonly logger: Pick<Console, 'log'> = console) {}
 
   send(message: EmailMessage): Promise<EmailResult> {

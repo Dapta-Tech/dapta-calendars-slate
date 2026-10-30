@@ -380,7 +380,7 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
   private async execute(row: OutboxRow): Promise<void> {
     if (row.kind === 'calendar') {
       if (!row.bookingUid) throw new Error('calendar outbox row missing booking_uid');
-      await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid);
+      await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid, row.payload);
       return;
     }
     // H1a (#63): ONE row does both halves of the CRM write-out — resolve the

@@ -112,6 +112,19 @@ export interface BookingNotification {
   /** DTSTAMP for the .ics (injected for determinism). Defaults to startUtc. */
   stamp?: string;
   /**
+   * The UID the invitee's calendar knows this meeting by, when it is not `uid`:
+   * the first booking of a chain of moves that each minted a new uid (v2 API,
+   * MCP). The .ics uses it, so a move updates the entry the invitee already
+   * has instead of adding a second. Headers and de-duplication keys keep `uid`.
+   */
+  calendarUid?: string | null;
+  /**
+   * The .ics SEQUENCE of this change, claimed when it was queued (one atomic
+   * counter per meeting, see `claimIcsSequence`). Absent: the fixed 0 / 1 / 2
+   * of a confirmation, a move and a cancellation, as before.
+   */
+  icsSequence?: number | null;
+  /**
    * Which side this message is for: `attendee` → attendee only; `host` → host +
    * co-hosts (deduped, `:host`-suffixed idempotency key). ABSENT = legacy: one
    * message to everyone with the attendee copy — pre-toggle callers and forks
@@ -514,13 +527,25 @@ export class BookingNotifier {
     });
   }
 
-  private ics(n: BookingNotification, method: 'REQUEST' | 'CANCEL', sequence: number) {
+  /**
+   * The .ics SEQUENCE. A calendar applies an update only when its SEQUENCE is
+   * higher than the one it holds (Outlook strictly; others fall back to
+   * DTSTAMP), and with the provider's own invitation muted (F4) this .ics is
+   * the only thing that moves or cancels the invitee's entry. So a change
+   * carries the number claimed for it when it was queued, which always grows;
+   * without one, the fixed numbers stand.
+   */
+  private sequence(n: BookingNotification, fixed: number): number {
+    return typeof n.icsSequence === 'number' && n.icsSequence >= 0 ? n.icsSequence : fixed;
+  }
+
+  private ics(n: BookingNotification, method: 'REQUEST' | 'CANCEL', fixedSequence: number) {
     return {
       filename: 'invite.ics',
       content: buildIcs({
-        uid: n.uid,
+        uid: n.calendarUid || n.uid,
         method,
-        sequence,
+        sequence: this.sequence(n, fixedSequence),
         startUtc: n.startUtc,
         endUtc: n.endUtc,
         title: n.title,
