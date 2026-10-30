@@ -85,6 +85,12 @@ export interface ToolDef {
     openWorldHint: boolean;
   };
   input: z.ZodObject<z.ZodRawShape>;
+  /**
+   * Built from `z.looseObject` at every level, never `z.object`: a client checks
+   * each result against the schema it listed when its session began, and a
+   * closed object there (`additionalProperties: false`) fails every call once a
+   * later deploy adds a field. `mcp.output-schema.spec.ts` holds the rule.
+   */
   output: z.ZodObject<z.ZodRawShape>;
   run(args: never, call: McpCall, deps: McpToolDeps): Promise<ToolResult>;
 }
@@ -144,7 +150,7 @@ const pageAddress = {
   event_slug: z.string().max(64).optional().describe('With account_code: the event slug.'),
 };
 
-const bookingSummary = z.object({
+const bookingSummary = z.looseObject({
   uid: z.string(),
   status: z.string(),
   start: z.string().describe('ISO-8601 with the offset of the requested time zone.'),
@@ -163,7 +169,7 @@ const bookingSummary = z.object({
 type Booking = Awaited<ReturnType<CalV2Service['bookingResponse']>>;
 
 /** The campaign on a booking (`BOOKING_UTM_KEYS` in @slate/types), as get_booking returns it. */
-const bookingCampaign = z.object({
+const bookingCampaign = z.looseObject({
   utm_source: z.string().optional(),
   utm_medium: z.string().optional(),
   utm_campaign: z.string().optional(),
@@ -319,7 +325,7 @@ async function teamFacts(deps: McpToolDeps, resolved: Resolved) {
   };
 }
 
-const teamShape = z.object({
+const teamShape = z.looseObject({
   slug: z.string(),
   name: z.string(),
   scheduling_type: z
@@ -517,7 +523,7 @@ const findSlotsInput = z.object({
   ...slotRange,
 });
 
-const questionShape = z.object({
+const questionShape = z.looseObject({
   name: z.string(),
   label: z.string(),
   type: z.string(),
@@ -525,8 +531,8 @@ const questionShape = z.object({
   options: z.array(z.string()).optional(),
 });
 
-const slotsOutput = z.object({
-  event_type: z.object({
+const slotsOutput = z.looseObject({
+  event_type: z.looseObject({
     id: z.string(),
     title: z.string(),
     slug: z.string(),
@@ -535,12 +541,12 @@ const slotsOutput = z.object({
     questions: z.array(questionShape),
   }),
   time_zone: z.string(),
-  range: z.object({ start: z.string(), end: z.string() }),
+  range: z.looseObject({ start: z.string(), end: z.string() }),
   range_clamped: z.boolean().describe('True when the requested range was longer than 31 days and was cut.'),
   days: z.array(
-    z.object({
+    z.looseObject({
       date: z.string(),
-      slots: z.array(z.object({ start: z.string(), end: z.string(), start_utc: z.string(), end_utc: z.string() })),
+      slots: z.array(z.looseObject({ start: z.string(), end: z.string(), start_utc: z.string(), end_utc: z.string() })),
     }),
   ),
   slot_count: z.number(),
@@ -741,8 +747,8 @@ const bookMeeting: ToolDef = {
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   input: bookMeetingInput,
-  output: z.object({
-    booking: z.object({
+  output: z.looseObject({
+    booking: z.looseObject({
       uid: z.string(),
       status: z.string(),
       start: z.string(),
@@ -987,8 +993,8 @@ const holdSlot: ToolDef = {
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: holdInput,
-  output: z.object({
-    hold: z.object({
+  output: z.looseObject({
+    hold: z.looseObject({
       hold_id: z
         .string()
         .describe('Goes to book_meeting or create_booking. Opaque. Made signed in or with a key, only that person or key can use it; made anonymously, whoever has it can.'),
@@ -1000,7 +1006,7 @@ const holdSlot: ToolDef = {
       end_utc: z.string(),
       time_zone: z.string(),
     }),
-    event_type: z.object({ id: z.string(), title: z.string(), duration_minutes: z.number() }),
+    event_type: z.looseObject({ id: z.string(), title: z.string(), duration_minutes: z.number() }),
     replayed: z.boolean().describe('True when this idempotency_key had already placed this exact hold.'),
     next_step: z.string(),
   }),
@@ -1136,8 +1142,8 @@ const bookTeamMeeting: ToolDef = {
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   input: bookTeamInput,
-  output: z.object({
-    booking: z.object({
+  output: z.looseObject({
+    booking: z.looseObject({
       uid: z.string(),
       status: z.string(),
       start: z.string(),
@@ -1260,10 +1266,10 @@ const whoami: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: whoamiInput,
-  output: z.object({
-    account: z.object({ code: z.string(), name: z.string() }),
-    host: z.object({ display_name: z.string().nullable(), time_zone: z.string().nullable() }),
-    key: z.object({
+  output: z.looseObject({
+    account: z.looseObject({ code: z.string(), name: z.string() }),
+    host: z.looseObject({ display_name: z.string().nullable(), time_zone: z.string().nullable() }),
+    key: z.looseObject({
       prefix: z.string(),
       scopes: z.array(z.string()),
       event_type_allowlist: z.array(z.string()).nullable().describe('Null: every event type. Otherwise only these ids.'),
@@ -1313,7 +1319,7 @@ const listMyAccounts: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: listMyAccountsInput,
-  output: z.object({ accounts: z.array(z.object({ id: z.string(), name: z.string() })), count: z.number() }),
+  output: z.looseObject({ accounts: z.array(z.looseObject({ id: z.string(), name: z.string() })), count: z.number() }),
   async run(_args: z.infer<typeof listMyAccountsInput>, call, deps) {
     let accounts: { id: string; name: string }[];
     if (call.login) {
@@ -1341,9 +1347,9 @@ const listEventTypes: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: listEventTypesInput,
-  output: z.object({
+  output: z.looseObject({
     event_types: z.array(
-      z.object({
+      z.looseObject({
         id: z.string(),
         title: z.string(),
         slug: z.string(),
@@ -1355,7 +1361,7 @@ const listEventTypes: ToolDef = {
         scheduling_type: z.string().nullable(),
         booking_page_url: z.string(),
         questions: z.array(
-          z.object({ name: z.string(), label: z.string(), type: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }),
+          z.looseObject({ name: z.string(), label: z.string(), type: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }),
         ),
       }),
     ),
@@ -1391,7 +1397,7 @@ const getLink: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: linkInput,
-  output: z.object({ event_type_id: z.string(), title: z.string(), booking_page_url: z.string() }),
+  output: z.looseObject({ event_type_id: z.string(), title: z.string(), booking_page_url: z.string() }),
   async run(args: z.infer<typeof linkInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
     const code = await canonicalCode(deps.db, p.accountId);
@@ -1421,9 +1427,9 @@ const listBookingsInput = z.object({
   time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
 });
 
-const bookingRows = z.object({
+const bookingRows = z.looseObject({
   bookings: z.array(
-    z.object({
+    z.looseObject({
       uid: z.string(),
       status: z.string(),
       start: z.string(),
@@ -1530,13 +1536,13 @@ const getBooking: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: getBookingInput,
-  output: z.object({
+  output: z.looseObject({
     booking: bookingSummary,
     rescheduled_from_uid: z.string().nullable(),
     rescheduled_to_uid: z.string().nullable(),
-    invitee_supplied: z.object({
+    invitee_supplied: z.looseObject({
       attendees: z.array(
-        z.object({ name: z.string(), email: z.string(), time_zone: z.string().nullable(), phone: z.string().nullable(), notes: z.string().nullable() }),
+        z.looseObject({ name: z.string(), email: z.string(), time_zone: z.string().nullable(), phone: z.string().nullable(), notes: z.string().nullable() }),
       ),
       guests: z.array(z.string()),
       answers: z.record(z.string(), z.string()),
@@ -1608,7 +1614,7 @@ const createBooking: ToolDef = {
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   input: createBookingInput,
-  output: z.object({ booking: bookingSummary }),
+  output: z.looseObject({ booking: bookingSummary }),
   async run(args: z.infer<typeof createBookingInput>, call, deps) {
     const p = requireScope(call, 'bookings:write');
     const start = instantFrom(args.start, args.attendee.time_zone).toISOString();
@@ -1660,7 +1666,7 @@ const rescheduleBooking: ToolDef = {
   // Destructive: the original booking is replaced (cancelled and linked to a new uid), not added to.
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   input: rescheduleInput,
-  output: z.object({ booking: bookingSummary, previous_uid: z.string() }),
+  output: z.looseObject({ booking: bookingSummary, previous_uid: z.string() }),
   async run(args: z.infer<typeof rescheduleInput>, call, deps) {
     const p = requireScope(call, 'bookings:write');
     const zone = args.time_zone ?? (await hostZone(deps.db, p.accountId, args.booking_uid));
@@ -1694,7 +1700,7 @@ const cancelBooking: ToolDef = {
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   input: cancelInput,
-  output: z.object({ booking: bookingSummary }),
+  output: z.looseObject({ booking: bookingSummary }),
   async run(args: z.infer<typeof cancelInput>, call, deps) {
     const p = requireScope(call, 'bookings:cancel');
     const b = await deps.pilot.cancel(
@@ -1833,7 +1839,7 @@ const decideInput = z.object({
 const declineInput = decideInput.extend({
   reason: z.string().max(500).optional().describe('Shown to the invitee in the email that tells them the request was declined.'),
 });
-const decisionOutput = z.object({
+const decisionOutput = z.looseObject({
   booking: bookingSummary,
   already_applied: z
     .boolean()
