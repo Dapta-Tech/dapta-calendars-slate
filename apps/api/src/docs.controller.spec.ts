@@ -197,10 +197,10 @@ describe('DocsController: the introduction', () => {
     expect(docs.docs()).toContain('href="https://app.calendar.example.com/icon.svg"');
   });
 
-  it('publishes the MCP address exactly, but never with credentials, a query or a fragment', () => {
+  it('publishes the MCP address as the dashboard shows it, never with credentials, a query or a fragment', () => {
     const intro = (MCP_PUBLIC_URL: string) =>
       new DocsController({ API_PUBLIC_URL: undefined, MCP_ENABLED: true, MCP_PUBLIC_URL }).spec().info.description;
-    expect(intro('https://mcp.calendar.example.com/mcp/')).toContain('`https://mcp.calendar.example.com/mcp/`');
+    expect(intro('https://mcp.calendar.example.com/mcp/')).toContain('`https://mcp.calendar.example.com/mcp`');
     for (const bad of [
       'https://mcp.calendar.example.com/mcp?token=abc',
       'https://mcp.calendar.example.com/mcp#frag',
