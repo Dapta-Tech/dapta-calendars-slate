@@ -184,6 +184,9 @@ export function loadGtm(w: TrackingWindow, id: string): void {
  * `booking_scheduled`. Partitioned keeps one `_ga` per embedding site, so
  * the booking host never links a visitor across the sites that embed it,
  * and it is what browsers still accept with third-party cookies blocked.
+ * Those flags need https: on a plain-http deployment (a self-host without
+ * TLS) the browser would refuse every cookie and gtag would send nothing,
+ * so there the config keeps gtag's defaults ({@link ga4CookieSettings}).
  */
 export function loadGa4(w: TrackingWindow, id: string): void {
   if (started.has(`ga4:${id}`)) return;
@@ -200,8 +203,18 @@ export function loadGa4(w: TrackingWindow, id: string): void {
     gtag('js', new Date());
     addScript(w, ga4Src(id));
   }
-  // `none`: no Domain attribute, so the cookies belong to this host alone.
-  gtag('config', id, { cookie_domain: 'none', cookie_flags: 'SameSite=None;Secure;Partitioned' });
+  gtag('config', id, ga4CookieSettings(w.location.protocol));
+}
+
+/**
+ * GA4's cookie settings for a page served over `protocol` (see {@link loadGa4}).
+ * `cookie_domain: 'none'` writes no Domain attribute, so the cookies belong
+ * to this host alone; the flags only where the browser accepts them.
+ */
+export function ga4CookieSettings(protocol: string): { cookie_domain: 'none'; cookie_flags?: string } {
+  return protocol === 'https:'
+    ? { cookie_domain: 'none', cookie_flags: 'SameSite=None;Secure;Partitioned' }
+    : { cookie_domain: 'none' };
 }
 
 /**
