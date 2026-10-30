@@ -48,7 +48,9 @@ export function MadeWithBadge({
             mark, too heavy for a 12px footer line. A fork's badge is its words. */}
         {IS_DAPTA_BRAND ? <BrandMark className="h-3.5 w-auto shrink-0" /> : null}
         <span>{IS_DAPTA_BRAND ? m.madeWithDapta : t(m.madeWith, { product: PRODUCT_NAME })}</span>
-        <span className="sr-only">(opens in a new tab)</span>
+        {/* In the page's language, like the words beside it: a Spanish page
+            whose badge ends in English reads as two products to a screen reader. */}
+        <span className="sr-only">{m.ctaOpensNewTab}</span>
       </a>
     </footer>
   );
