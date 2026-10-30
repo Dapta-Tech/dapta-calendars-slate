@@ -51,6 +51,11 @@ responses are compatibility aliases; `daptaId` from discovery is the native ID.
 Booking lifecycle identity is always `uid`. Canonical timestamps are `start` and `end`; the REST API
 does not add `startTime`/`endTime` aliases.
 
+Every booking response also carries `utm`, which Cal.com does not have: the campaign the booking
+came from (the `utm_source`, `utm_medium`, `utm_campaign`, `utm_term` and `utm_content` of the
+booking page address that it kept), or `null` when it had none. The same `utm` rides on every
+booking webhook (`booking.created`, `booking.confirmed`, `booking.rescheduled`, `booking.cancelled`).
+
 `destinationCalendarId` is supported for personal create after calendar discovery. A read-only
 calendar returns `403 CALENDAR_READ_ONLY`. Team assignment is dynamic, so a team destination
 override returns an explicit `422 FEATURE_NOT_SUPPORTED` rather than writing to the wrong calendar.

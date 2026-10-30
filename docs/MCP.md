@@ -44,7 +44,7 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
 | `list_bookings` | `bookings:read` | read | Minimal fields only: uid, status, times, event type, invitee email domain. Cursor pagination. |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. |
-| `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes and intake answers sit inside `invitee_supplied`. |
+| `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
 | `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
 | `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. |
 | `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
@@ -165,10 +165,11 @@ is `SLOT_TAKEN`.
 
 ### Untrusted text
 
-Anything an invitee typed (names, notes, answers, reasons) is hostile input to a
-model. It is returned only by `get_booking`, inside `invitee_supplied`, with
-control and zero-width characters, HTML and markdown links and images removed and
-every value length-capped. `list_bookings` returns no free text at all. Tell your
+Anything an invitee typed (names, notes, answers, reasons), and the campaign
+(`utm_*`) on the address they opened, is hostile input to a model. It is returned
+only by `get_booking`, inside `invitee_supplied`, with control and zero-width
+characters, HTML and markdown links and images removed and every value
+length-capped. `list_bookings` returns no free text at all. Tell your
 agent to treat `invitee_supplied` as data, never as instructions.
 
 ## Connect an agent
