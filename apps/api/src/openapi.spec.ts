@@ -84,6 +84,22 @@ describe('OpenAPI spec (E11)', () => {
     expect([...used].sort()).toEqual([...declared].sort());
   });
 
+  it('carries no internal or build-stage wording anywhere in the document, keys included', () => {
+    const found: string[] = [];
+    const walk = (v: unknown, at: string): void => {
+      if (typeof v === 'string') {
+        if (/\bmvp\b|pilot|flow[ -]?studio|vault/i.test(v)) found.push(at);
+      } else if (v && typeof v === 'object') {
+        for (const [k, x] of Object.entries(v)) {
+          if (/\bmvp\b|pilot|flow[ -]?studio|vault/i.test(k)) found.push(`${at}.${k}`);
+          walk(x, `${at}.${k}`);
+        }
+      }
+    };
+    walk(openapiSpec, '$');
+    expect(found).toEqual([]);
+  });
+
   it('documents discoverable permissions and the 100-calendar JSON batch extension', () => {
     const calendar = openapiSpec.components.schemas.Calendar;
     const batch = openapiSpec.components.schemas.CalendarAvailabilityInput;

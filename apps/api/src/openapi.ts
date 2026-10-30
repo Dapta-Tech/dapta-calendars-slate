@@ -86,7 +86,6 @@ const idempotencyExtension = {
   extension: true,
   reuse: 'same request returns original response without repeated side effects',
   mismatch: '409 IDEMPOTENCY_KEY_REUSED',
-  flowStudio: 'required',
 } as const;
 
 const eventTypeId = {
@@ -340,7 +339,7 @@ export const openapiSpec = {
           language: {
             type: 'string',
             enum: ['en', 'es'],
-            description: 'The pilot supports en and es. Other Cal locales return FEATURE_NOT_SUPPORTED.',
+            description: 'Only en and es are supported. Other Cal.com locales return FEATURE_NOT_SUPPORTED.',
           },
           phoneNumber: { type: 'string', maxLength: 32 },
         },
@@ -729,7 +728,7 @@ export const openapiSpec = {
             lengthInMinutes: {
               type: 'integer',
               minimum: 1,
-              description: 'Accepted only when equal to the event type duration in the MVP.',
+              description: 'Accepted only when equal to the event type duration.',
             },
             destinationCalendarId: {
               type: 'string',
@@ -748,7 +747,7 @@ export const openapiSpec = {
               phoneNumber: '+573000000000',
             },
             guests: ['guest@example.com'],
-            metadata: { source: 'flow-studio' },
+            metadata: { source: 'crm' },
             bookingFieldsResponses: { notes: 'Created from an automation' },
           },
         }),
