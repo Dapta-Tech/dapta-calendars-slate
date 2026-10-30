@@ -35,6 +35,12 @@ export interface EmailMessage {
    * it; the `transactional-v1` profile forwards it as `idempotencyKey`.
    */
   idempotencyKey?: string;
+  /**
+   * The recipient's language (`en`, `es`), for whatever the transport adds to
+   * the message itself: a managed service's support footer. The content is
+   * already written in it. The generic wire ignores it.
+   */
+  locale?: string;
 }
 
 export interface EmailResult {
@@ -59,4 +65,11 @@ export interface EmailProvider {
    * (smtp/log-only/noop: yes) or must be skipped. Absent = false.
    */
   readonly requiresAccountContext?: boolean;
+  /**
+   * True when the transport appends its own support footer to every message,
+   * one the caller cannot remove (the managed transactional wire). The booking
+   * layout then leaves its own "Need help?" line out, so a reader gets one
+   * support footer, not two. Absent = false: SMTP and the rest keep the line.
+   */
+  readonly addsSupportFooter?: boolean;
 }

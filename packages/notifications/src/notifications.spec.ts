@@ -233,3 +233,111 @@ describe('BookingNotifier: the footer line and the invite', () => {
     expect(String(sent[0]!.attachments?.[0]?.content)).toContain('UID:bk_footer_1');
   });
 });
+
+// F3 of the 2026-10-30 production E2E: the invitee's footer, as the page's
+// badge has it, and one support footer, not two.
+describe('BookingNotifier: the invitee footer matches the page badge', () => {
+  const booking = {
+    accountId: 'acc_1',
+    uid: 'bk_footer_2',
+    title: 'Intro call',
+    startUtc: '2026-08-01T14:00:00.000Z',
+    endUtc: '2026-08-01T14:30:00.000Z',
+    host: { name: 'Riley Chen', email: 'riley@example.com' },
+    attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'UTC' },
+    manageUrl: 'https://calendar.example.test/manage/bk_footer_2?token=t',
+    audience: 'attendee' as const,
+    accountCode: 'northwind',
+  };
+  const TAGGED =
+    'https://dcal.example.test/?utm_source=dapta-calendars&amp;utm_medium=email&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind';
+  const capture = (extra: { addsSupportFooter?: boolean } = {}) => {
+    const sent: Array<{ html?: string; text?: string; locale?: string }> = [];
+    const provider = {
+      ...extra,
+      send: (m: (typeof sent)[number]) => {
+        sent.push(m);
+        return Promise.resolve({ delivered: false, driver: 'log-only' as const });
+      },
+    };
+    return { sent, provider };
+  };
+  const growth = { signupBaseUrl: 'https://dcal.example.test/', daptaBrand: true, supportEmail: 'help@example.test' };
+
+  it('links the attribution itself, tagged with the account code, as well as the call to action', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never, growth).sendConfirmation(booking);
+    const html = sent[0]!.html!;
+    expect(html).toContain(`<a href="${TAGGED}" style="color:#67676f;text-decoration:none;">Made with dCal.ai by Dapta</a>`);
+    expect(html).toContain(`<a href="${TAGGED}" style="color:#1a1a1c;text-decoration:underline;">Create your free calendar</a>`);
+    expect(html.split(`href="${TAGGED}"`)).toHaveLength(3);
+  });
+
+  it('puts the same line, with the address, at the end of the plain text', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never, growth).sendConfirmation(booking);
+    const text = sent[0]!.text!;
+    expect(text.trimEnd().split('\n').at(-1)).toBe(
+      `Made with dCal.ai by Dapta · Create your free calendar: ${TAGGED.replace(/&amp;/g, '&')}`,
+    );
+    const es = capture();
+    await new BookingNotifier(es.provider as never, growth).sendConfirmation({ ...booking, templateLocale: 'es' });
+    expect(es.sent[0]!.text).toContain('Hecho con dCal.ai de Dapta · Crea tu calendario gratis: https://dcal.example.test/?');
+  });
+
+  it('leaves the line off the host copy and off an account that hid the branding, in both parts', async () => {
+    const host = capture();
+    await new BookingNotifier(host.provider as never, growth).sendConfirmation({ ...booking, audience: 'host' });
+    const hidden = capture();
+    await new BookingNotifier(hidden.provider as never, growth).sendConfirmation({ ...booking, showBranding: false });
+    for (const m of [host.sent[0]!, hidden.sent[0]!]) {
+      expect(m.html).not.toContain('dcal.example.test');
+      expect(m.text).not.toContain('dcal.example.test');
+      expect(m.text).not.toContain('Made with');
+    }
+  });
+
+  it('a row queued before the account code: the link goes untagged, as it always did', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never, growth).sendConfirmation({ ...booking, accountCode: undefined });
+    expect(sent[0]!.html).toContain('utm_campaign=made-with-dapta"');
+    expect(sent[0]!.html).not.toContain('utm_content');
+  });
+
+  it('a transport that adds the platform footer: no second support line, and the language goes with the message', async () => {
+    const managed = capture({ addsSupportFooter: true });
+    await new BookingNotifier(managed.provider as never, growth).sendConfirmation({ ...booking, templateLocale: 'es' });
+    expect(managed.sent[0]!.html).not.toContain('mensaje automático');
+    expect(managed.sent[0]!.html).not.toContain('help@example.test');
+    // The attribution stays: only the support line was the duplicate.
+    expect(managed.sent[0]!.html).toContain('Hecho con dCal.ai de Dapta');
+    expect(managed.sent[0]!.locale).toBe('es');
+    // Any other transport keeps the layout's own line.
+    const smtp = capture();
+    await new BookingNotifier(smtp.provider as never, growth).sendConfirmation(booking);
+    expect(smtp.sent[0]!.html).toContain('This is an automated message.');
+    expect(smtp.sent[0]!.html).toContain('help@example.test');
+    expect(smtp.sent[0]!.locale).toBe('en');
+  });
+
+  it('the workspace invitation follows the same footer switch', async () => {
+    const managed = capture({ addsSupportFooter: true });
+    const invite = {
+      accountId: 'acc_1',
+      memberId: 'mem_1',
+      sendKey: 'k1',
+      email: 'new@example.com',
+      workspaceName: 'Northwind',
+      inviterName: 'Riley',
+      role: 'member' as const,
+      acceptUrl: 'https://calendar.example.test/invite/abc',
+      locale: 'es' as const,
+    };
+    await new BookingNotifier(managed.provider as never, growth).sendMemberInvite(invite as never);
+    expect(managed.sent[0]!.html).not.toContain('mensaje automático');
+    expect(managed.sent[0]!.locale).toBe('es');
+    const smtp = capture();
+    await new BookingNotifier(smtp.provider as never, growth).sendMemberInvite(invite as never);
+    expect(smtp.sent[0]!.html).toContain('Este es un mensaje automático.');
+  });
+});

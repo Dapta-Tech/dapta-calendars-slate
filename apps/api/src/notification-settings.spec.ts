@@ -118,6 +118,18 @@ describe('notification settings — toggles + templates through the outbox', () 
     for (const p of payloads) expect(p.template?.subject).toBeTruthy();
   });
 
+  // F3 (2026-10-30 production E2E): the invitee's "Made with" link is tagged
+  // with the account's public code, as the booking page's badge is.
+  it("every queued copy carries the account's public code for the footer link", async () => {
+    const uid = await book();
+    await settle();
+    const rows = await emailRows(uid, 'confirmation');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect((JSON.parse(row.payload!) as { accountCode?: string }).accountCode).toBe('acme');
+    }
+  });
+
   it('a disabled side is NOT enqueued (no misleading delivery-log rows)', async () => {
     await upsertNotificationSetting(db, accountId, 'host_booked', { enabled: false });
     const uid = await book();

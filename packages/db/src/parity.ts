@@ -2076,6 +2076,13 @@ export interface BookingNotificationContext {
    * type or the event asks nothing.
    */
   bookingFields: Array<{ name: string; label: string; type: string }>;
+  /**
+   * The account's public code (vanity slug, else code): the one its booking
+   * pages carry, which tags the invitee's "Made with" link. Set for team
+   * bookings too, which have no `bookAgain`. Optional so a context built
+   * elsewhere (a fork's fixture) still compiles; this loader always sets it.
+   */
+  accountCode?: string | null;
   /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
   bookAgain: { accountCode: string; handle: string; slug: string } | null;
   /**
@@ -2258,6 +2265,7 @@ export async function loadBookingNotificationContext(
     bookingFields: asQuestionList(parseJsonColumn<unknown>(row.event_fields, null)),
     reminders: effectiveReminders(parseEventReminders(row.event_reminders)),
     formAnswers: asAnswerRecord(parseJsonColumn<unknown>(row.responses, null)),
+    accountCode: row.account_code ?? null,
     bookAgain:
       row.account_code && row.host_handle && row.event_slug
         ? {

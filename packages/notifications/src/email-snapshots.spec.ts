@@ -106,6 +106,36 @@ describe.each(['en', 'es'] as const)('lifecycle emails (%s)', (locale) => {
   });
 });
 
+/**
+ * Dapta's own build on the managed wire, the way production sends it: the
+ * invitee's "Made with" line tagged with the account code, as a link in the
+ * HTML and a line in the text, and no support line of the layout's own, because
+ * the managed service adds the platform's (F3, 2026-10-30 production E2E).
+ */
+class ManagedRecorder extends Recorder {
+  readonly addsSupportFooter = true;
+}
+
+describe.each(['en', 'es'] as const)("Dapta's build on the managed wire (%s)", (locale) => {
+  it('confirmation to the attendee', async () => {
+    const rec = new ManagedRecorder();
+    const notifier = new BookingNotifier(rec, {
+      signupBaseUrl: 'https://dcal.example.com/',
+      daptaBrand: true,
+      supportEmail: SUPPORT,
+    });
+    await notifier.sendConfirmation({
+      ...base,
+      templateLocale: locale,
+      audience: 'attendee',
+      template: resolveTemplate('attendee_confirmation', null, locale),
+      accountCode: 'northwind',
+    });
+    const m = rec.sent[0]!;
+    expect({ locale: m.locale, text: m.text, html: m.html }).toMatchSnapshot();
+  });
+});
+
 describe('what the lifecycle emails promise', () => {
   it('an online meeting carries its join link in every email that has one to give', async () => {
     for (const kind of ['confirmation', 'reschedule', 'reminder'] as const) {
