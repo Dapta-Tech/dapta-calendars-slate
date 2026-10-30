@@ -60,12 +60,18 @@ export interface HttpEmailOptions {
 export class HttpEmailProvider implements EmailProvider {
   /** The signed wire scopes messages by tenant — deliveries need an accountId. */
   readonly requiresAccountContext: boolean;
+  /**
+   * The managed service appends the platform's support footer to every message
+   * and no caller can turn it off, so the booking layout drops its own line.
+   */
+  readonly addsSupportFooter: boolean;
 
   constructor(
     private readonly opts: HttpEmailOptions,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {
     this.requiresAccountContext = opts.profile === 'transactional-v1';
+    this.addsSupportFooter = opts.profile === 'transactional-v1';
     if (opts.profile === 'transactional-v1') {
       // A surprising endpoint path is a config smell worth a WARN — but config
       // detail must never crash-loop the API (the deployment may front the
@@ -138,6 +144,9 @@ export class HttpEmailProvider implements EmailProvider {
     };
     if (hasHtml) payload.html = message.html;
     if (typeof message.text === 'string' && message.text.length > 0) payload.text = message.text;
+    // Selects the language of the footer the service adds. Only a bare tag goes
+    // out: the service refuses anything else with a 400, which would fail the send.
+    if (message.locale && /^[a-z]{2,3}$/i.test(message.locale)) payload.locale = message.locale;
 
     const requestBody = JSON.stringify(payload);
     let authHeaders: Record<string, string>;

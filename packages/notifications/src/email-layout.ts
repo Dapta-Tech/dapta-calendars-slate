@@ -42,6 +42,12 @@ export interface EmailGrowth {
   /** The signup destination, UTM-tagged. Null or absent: no "Made with" line. */
   signupUrl?: string | null;
   /**
+   * The signup destination BEFORE its tags (`SIGNUP_URL`). Given to the
+   * notifier, which tags it per message with the booking's account code
+   * (`utm_content`), the way the page's badge is tagged. Wins over `signupUrl`.
+   */
+  signupBaseUrl?: string | null;
+  /**
    * The deployment's support address (`MAIL_SUPPORT_EMAIL`), for the "Need
    * help?" line. Null, absent or not an address: no line, so a fork never
    * sends its readers to someone else's support desk.
@@ -58,6 +64,12 @@ export interface EmailGrowth {
    * web badge. A fork is never forced to carry Dapta branding.
    */
   daptaBrand?: boolean;
+  /**
+   * The transport appends the platform's own support footer to every message
+   * (`EmailProvider.addsSupportFooter`). The layout then leaves out its own
+   * "This is an automated message. Need help?" line, so the reader gets one.
+   */
+  platformFooter?: boolean;
 }
 
 /**
@@ -353,10 +365,12 @@ export function renderBrandedHtml(
 
   // The product is named once, and only where the deployment points somewhere
   // (the same switch as the page's badge). The host's own copy never carries it.
+  // Both halves are links to the same place, the way the page's badge is one:
+  // the attribution itself is what a reader taps first.
   const signup = audience === 'attendee' ? growth.signupUrl : null;
   const madeWith = signup
-    ? `<div style="margin:0 0 6px;">${esc(madeWithLine(es, growth))} · ` +
-      `<a href="${safeHref(signup)}" style="color:${C.ink};text-decoration:underline;">${esc(es ? 'Crea tu calendario gratis' : 'Create your free calendar')}</a></div>`
+    ? `<div style="margin:0 0 6px;"><a href="${safeHref(signup)}" style="color:${C.faint};text-decoration:none;">${esc(madeWithLine(es, growth))}</a> · ` +
+      `<a href="${safeHref(signup)}" style="color:${C.ink};text-decoration:underline;">${esc(ctaLine(es))}</a></div>`
     : '';
   return frame(
     `${status(c.status, c.color)}
@@ -383,7 +397,26 @@ function madeWithLine(es: boolean, growth: EmailGrowth): string {
   return es ? `Hecho con ${product}` : `Made with ${product}`;
 }
 
+function ctaLine(es: boolean): string {
+  return es ? 'Crea tu calendario gratis' : 'Create your free calendar';
+}
+
+/**
+ * The same attribution for the plain-text part, as one line with the address
+ * spelled out, or '' where the HTML carries none: a host's copy, or no signup
+ * destination. Appended by the notifier after the body cap, so neither a long
+ * body nor a custom template can cut it.
+ */
+export function madeWithText(locale: string, audience: Audience, growth: EmailGrowth): string {
+  const signup = audience === 'attendee' ? growth.signupUrl : null;
+  if (!signup) return '';
+  const es = ES(locale);
+  return `${madeWithLine(es, growth)} · ${ctaLine(es)}: ${signup}`;
+}
+
 function automatedLine(es: boolean, growth: EmailGrowth): string {
+  // The transport adds the platform's footer, which says the same thing.
+  if (growth.platformFooter) return '';
   const auto = es ? 'Este es un mensaje automático.' : 'This is an automated message.';
   const help = es ? '¿Necesitas ayuda?' : 'Need help?';
   const support = mailSupportAddress(growth.supportEmail);

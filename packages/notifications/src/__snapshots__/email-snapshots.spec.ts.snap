@@ -1,5 +1,71 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`Dapta's build on the managed wire (en) > confirmation to the attendee 1`] = `
+{
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Confirmed</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Alex Rivera is confirmed. The calendar invite is attached.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">With</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Manage your booking</a></td></tr></table>
+      <div style="color:#67676f;font-size:13px;line-height:20px;margin-top:16px;">From your booking you can reschedule or cancel it.</div>
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div style="margin:0 0 6px;"><a href="https://dcal.example.com/?utm_source=dapta-calendars&amp;utm_medium=email&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" style="color:#67676f;text-decoration:none;">Made with dCal.ai by Dapta</a> · <a href="https://dcal.example.com/?utm_source=dapta-calendars&amp;utm_medium=email&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" style="color:#1a1a1c;text-decoration:underline;">Create your free calendar</a></div>
+    </td></tr>
+  </table>
+</div>",
+  "locale": "en",
+  "text": "Hi Sam Guest,
+
+Your booking "Intro Call" is confirmed.
+When: Mon, Aug 3, 11:00 AM EDT
+Host: Alex Rivera
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1
+Manage your booking: https://app.example.com/manage/bk-snapshot?token=tok
+
+Made with dCal.ai by Dapta · Create your free calendar: https://dcal.example.com/?utm_source=dapta-calendars&utm_medium=email&utm_campaign=made-with-dapta&utm_content=northwind",
+}
+`;
+
+exports[`Dapta's build on the managed wire (es) > confirmation to the attendee 1`] = `
+{
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Confirmada</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Alex Rivera quedó confirmada. La invitación de calendario va adjunta.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Con</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Gestionar tu reserva</a></td></tr></table>
+      <div style="color:#67676f;font-size:13px;line-height:20px;margin-top:16px;">Desde tu reserva puedes reagendarla o cancelarla.</div>
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div style="margin:0 0 6px;"><a href="https://dcal.example.com/?utm_source=dapta-calendars&amp;utm_medium=email&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" style="color:#67676f;text-decoration:none;">Hecho con dCal.ai de Dapta</a> · <a href="https://dcal.example.com/?utm_source=dapta-calendars&amp;utm_medium=email&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" style="color:#1a1a1c;text-decoration:underline;">Crea tu calendario gratis</a></div>
+    </td></tr>
+  </table>
+</div>",
+  "locale": "es",
+  "text": "Hola Sam Guest,
+
+Tu reserva "Intro Call" está confirmada.
+Cuándo: lun, 3 ago, 11:00 GMT-4
+Anfitrión: Alex Rivera
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1
+Gestiona tu reserva: https://app.example.com/manage/bk-snapshot?token=tok
+
+Hecho con dCal.ai de Dapta · Crea tu calendario gratis: https://dcal.example.com/?utm_source=dapta-calendars&utm_medium=email&utm_campaign=made-with-dapta&utm_content=northwind",
+}
+`;
+
 exports[`lifecycle emails (en) > to the attendee > cancellation 1`] = `
 {
   "attachment": {

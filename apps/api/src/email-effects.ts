@@ -765,6 +765,7 @@ export class EmailEffects {
       manageUrl: extra.manageUrl ?? null,
       cancellationReason: extra.cancellationReason ?? null,
       previousStartUtc: extra.previousStartUtc ?? null,
+      accountCode: ctx.accountCode,
       bookingLink:
         ctx.bookAgain && this.env
           ? `${publicBookingBase(this.env)}/${ctx.bookAgain.accountCode}/${ctx.bookAgain.handle}/${ctx.bookAgain.slug}`

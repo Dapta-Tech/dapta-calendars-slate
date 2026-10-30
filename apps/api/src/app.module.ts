@@ -7,7 +7,7 @@ import {
   mailSupportAddress,
   type EmailProvider,
 } from '@slate/notifications';
-import { ANALYTICS_GROUP_TYPE, analyticsErrorsSettingUnknown, badgeHidden, buildSignupUrl, isDaptaProductName } from '@slate/shared';
+import { ANALYTICS_GROUP_TYPE, analyticsErrorsSettingUnknown, badgeHidden, isDaptaProductName } from '@slate/shared';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import {
   ANALYTICS,
@@ -130,9 +130,11 @@ import { ExternalOAuthService } from './oauth/external.service';
         // as the web badge, same recogniser).
         const productName = env.PRODUCT_NAME?.trim() || env.MAIL_FROM_NAME?.trim() || null;
         return new BookingNotifier(email, {
-          signupUrl: badgeHidden(env.HIDE_BADGE ?? env.NEXT_PUBLIC_HIDE_BADGE)
+          // Tagged per message with the booking's account code, like the page's
+          // badge; a base that is not an http(s) address still sends no line.
+          signupBaseUrl: badgeHidden(env.HIDE_BADGE ?? env.NEXT_PUBLIC_HIDE_BADGE)
             ? null
-            : buildSignupUrl({ baseUrl: env.SIGNUP_URL ?? env.NEXT_PUBLIC_SIGNUP_URL, medium: 'email' }),
+            : (env.SIGNUP_URL ?? env.NEXT_PUBLIC_SIGNUP_URL ?? null),
           supportEmail,
           productName,
           daptaBrand: isDaptaProductName(productName),

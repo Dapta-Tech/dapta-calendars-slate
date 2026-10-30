@@ -126,6 +126,28 @@ describe('transactional-v1 wire — request contract', () => {
     expect(g.requiresAccountContext).toBe(false);
   });
 
+  it('says the managed wire adds the support footer itself, and only that wire', () => {
+    expect(new HttpEmailProvider(transactionalOptions, stubFetch(202, {}).impl).addsSupportFooter).toBe(true);
+    const g = new HttpEmailProvider(
+      { endpoint: 'https://mail.example.test/send', fromEmail: 'x@example.com' },
+      stubFetch(202, {}).impl,
+    );
+    expect(g.addsSupportFooter).toBe(false);
+  });
+
+  it('forwards the language for the service footer, as a bare tag only', async () => {
+    const { impl, calls } = stubFetch(202, { status: 'accepted' });
+    const provider = new HttpEmailProvider(transactionalOptions, impl);
+    await provider.send({ ...message, locale: 'es' });
+    expect(readBody(calls).locale).toBe('es');
+    // No locale, or one the service would refuse with a 400: the field stays off.
+    for (const locale of [undefined, '', 'es-CO,es;q=0.9', 'es_CO.UTF-8']) {
+      const run = stubFetch(202, { status: 'accepted' });
+      await new HttpEmailProvider(transactionalOptions, run.impl).send({ ...message, locale });
+      expect(readBody(run.calls)).not.toHaveProperty('locale');
+    }
+  });
+
   it('POSTs the managed contract: mode, to[], replyTo, subject, html/text, category, idempotencyKey', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted', messageId: 'm1' });
     const provider = new HttpEmailProvider(
