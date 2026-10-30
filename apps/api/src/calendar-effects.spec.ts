@@ -29,6 +29,7 @@ import { getMessages } from '@slate/shared';
 import {
   CalendarEffects,
   INVITEE_EMAIL_GRACE_MS,
+  INVITEE_EMAIL_MAX_LOOKS,
   INVITEE_EMAIL_RETRY_MS,
   INVITEE_EMAIL_WAIT_ATTEMPTS,
   InviteeEmailPendingError,
@@ -197,10 +198,29 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       await expect(effects.runCalendarJob('delete', uid, spent, { id: rowId, attempts: 8 })).rejects.toBeInstanceOf(
         InviteeEmailPendingError,
       );
+      // That look is counted too, and the flags already on the mark are kept.
+      const counted = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.id === rowId)!;
+      expect(readCalendarChangeMark(counted.payload)).toEqual({
+        inviteeEmailId: cancellation,
+        emailWaits: INVITEE_EMAIL_WAIT_ATTEMPTS + 1,
+      });
       // It went out: the delete stays quiet.
       await markOutboxDone(db, cancellation);
       await effects.runCalendarJob('delete', uid, spent, { id: rowId, attempts: 9 });
       expect(provider.deleted[0]!.sendInvitations).toBe(false);
+    });
+
+    it('an email being sent for too long does not hold the delete: past the last look the provider cancels', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      const cancellation = await queueInviteeEmail(uid, 'cancellation');
+      await db.run(sql`UPDATE outbox SET lease_until = ${Date.now() + 60_000}, lease_token = ${'w1'} WHERE id = ${cancellation}`);
+      const rowId = await enqueueOutbox(db, { kind: 'calendar', action: 'delete', bookingUid: uid });
+      const last = JSON.stringify({ inviteeEmailId: cancellation, emailWaits: INVITEE_EMAIL_MAX_LOOKS, providerMuted: true });
+      await effects.runCalendarJob('delete', uid, last, { id: rowId, attempts: 0 });
+      expect(provider.deleted[0]!.sendInvitations).toBe(true);
     });
 
     it('a cancellation the mail service refused, or that was given up on, never mutes the delete', async () => {
@@ -225,7 +245,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
         await new Promise((r) => setTimeout(r, 5));
         row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid })).find((r) => r.action === 'delete');
       }
-      expect(row!.maxAttempts).toBe(DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_WAIT_ATTEMPTS);
+      expect(row!.maxAttempts).toBe(DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_MAX_LOOKS);
     });
 
     it('a quiet create records it on its own row; one that invites does not', async () => {

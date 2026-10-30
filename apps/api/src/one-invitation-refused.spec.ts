@@ -186,7 +186,9 @@ describe('a refused invitee email still leaves the guest one invitation', () => 
     await worker.drainOnce(t0 + CONFERENCING_LINK_GRACE_MS + 5_000);
     const kept = await inviteeEmail(uid, 'confirmation');
     expect(kept.status).toBe('pending');
-    expect(kept.attempts).toBe(1);
+    // Held back, not failed: the email's own attempts are untouched.
+    expect(kept.attempts).toBe(0);
+    expect(kept.lastError).toMatch(/kept queued: its follow-up could not be queued/);
     expect(calendar.updated).toHaveLength(0);
     down = false;
     await worker.drainOnce(t0 + 120_000);

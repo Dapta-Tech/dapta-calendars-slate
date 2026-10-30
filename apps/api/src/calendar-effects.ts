@@ -79,11 +79,19 @@ export const INVITEE_EMAIL_GRACE_MS = 3_000;
  * know first. The looks are counted on the row's own mark (`emailWaits`),
  * apart from the write's failures, and have their own room in its attempt
  * budget (the delete row is queued with `DEFAULT_MAX_ATTEMPTS +
- * INVITEE_EMAIL_WAIT_ATTEMPTS`). Once they are spent, the email is taken back
- * if it has not started going out, and the provider sends its own
- * cancellation, as it did before; one already being sent is waited for.
+ * INVITEE_EMAIL_MAX_LOOKS`). Once they are spent, the email is taken back if
+ * it has not started going out, and the provider sends its own cancellation,
+ * as it did before; one already being sent is waited for, up to
+ * `INVITEE_EMAIL_MAX_LOOKS` looks in all.
  */
 export const INVITEE_EMAIL_WAIT_ATTEMPTS = 3;
+
+/**
+ * The most looks a delete takes in all, the ones at an email being sent right
+ * now included. Past it the provider cancels whatever the email does: a
+ * delete must never be left undone.
+ */
+export const INVITEE_EMAIL_MAX_LOOKS = 2 * INVITEE_EMAIL_WAIT_ATTEMPTS;
 
 /** The least wait between two looks at the cancellation email. */
 export const INVITEE_EMAIL_RETRY_MS = 3_000;
@@ -231,7 +239,7 @@ export class CalendarEffects {
       // the link still comes first.
       nextAttemptAt: Date.now() + INVITEE_EMAIL_GRACE_MS,
       // A delete may wait for its cancellation email; the wait has its own budget.
-      ...(action === 'delete' ? { maxAttempts: DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_WAIT_ATTEMPTS } : {}),
+      ...(action === 'delete' ? { maxAttempts: DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_MAX_LOOKS } : {}),
     }).catch((err) => {
       this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
     });
@@ -485,9 +493,13 @@ export class CalendarEffects {
     if (email.status === 'pending' && opts.waitForEmail) {
       const job = opts.job;
       const waits = job?.mark?.emailWaits ?? 0;
+      // Each look is counted on the row's own mark, never in its failures.
+      const look = async (why: string): Promise<never> => {
+        await writeCalendarChangeMark(this.db, job!.id, { ...job!.mark, inviteeEmailId, emailWaits: waits + 1 });
+        throw new InviteeEmailPendingError(why);
+      };
       if (job && waits < INVITEE_EMAIL_WAIT_ATTEMPTS) {
-        await writeCalendarChangeMark(this.db, job.id, { inviteeEmailId, emailWaits: waits + 1 });
-        throw new InviteeEmailPendingError(
+        await look(
           `waiting for the invitee's email before deleting the event of ${ctx.uid} (look ${waits + 1}/${INVITEE_EMAIL_WAIT_ATTEMPTS}); the calendar's own cancellation goes out after that`,
         );
       }
@@ -498,9 +510,9 @@ export class CalendarEffects {
       const now = await this.db.get<{ status: string }>(
         sql`SELECT status FROM outbox WHERE id = ${inviteeEmailId} LIMIT 1`,
       );
-      if (now?.status === 'pending') {
-        // Being sent right now: its outcome decides.
-        throw new InviteeEmailPendingError(`the invitee's email for ${ctx.uid} is being sent; deciding after it`);
+      if (now?.status === 'pending' && job && waits < INVITEE_EMAIL_MAX_LOOKS) {
+        // Being sent right now: its outcome decides, within the looks left.
+        await look(`the invitee's email for ${ctx.uid} is being sent; deciding after it`);
       }
       if (now?.status !== 'done') return true;
     }

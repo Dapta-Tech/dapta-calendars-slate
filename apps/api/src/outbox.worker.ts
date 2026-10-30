@@ -57,6 +57,12 @@ export const OUTBOX_LANES: ReadonlyArray<{ name: string; kinds: readonly OutboxK
 const NO_RETRY_HORIZON = new Set<string>(['analytics']);
 const NAMED_KINDS = OUTBOX_LANES.flatMap((l) => l.kinds ?? []);
 
+/**
+ * How soon a row whose end was held back (its follow-up could not be queued:
+ * `OutboxWorker.compensate`) is looked at again.
+ */
+const COMPENSATION_RETRY_MS = 30_000;
+
 /** A duration for a log line: "45s", "12m", "3h". */
 function span(ms: number): string {
   if (ms < 120_000) return `${Math.round(ms / 1000)}s`;
@@ -339,23 +345,34 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
 
   private async recordFailure(row: OutboxRow, err: unknown, clock: () => number): Promise<void> {
     const now = clock();
-    // An unsent email's follow-up is queued BEFORE its end is recorded; when it
-    // cannot be, the row is retried instead of ending (`compensate`).
-    if (err instanceof OutboxSkipError && (await this.compensate(row))) {
-      // A decision, not a failure: record the reason ONCE and stop: waiting
-      // and retrying cannot change the outcome.
-      await markOutboxSkipped(this.db, row.id, { reason: err.message, now, leaseToken: row.leaseToken });
-      this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${err.message}`);
-      return;
-    }
     const attempts = row.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);
     const horizonMs = NO_RETRY_HORIZON.has(row.kind) ? 0 : this.horizonMs;
-    if (
-      !(err instanceof OutboxSkipError) &&
-      outboxRetriesExhausted(row, attempts, now, horizonMs) &&
-      (await this.compensate(row))
-    ) {
+    const skip = err instanceof OutboxSkipError;
+    const exhausted = !skip && outboxRetriesExhausted(row, attempts, now, horizonMs);
+    // An unsent email's follow-up is queued BEFORE its end is recorded. When it
+    // cannot be, the row does not end: it is looked at again shortly, and that
+    // costs it none of its own attempts, since the email itself did nothing new.
+    if ((skip || exhausted) && !(await this.compensate(row))) {
+      const delayMs = COMPENSATION_RETRY_MS;
+      await markOutboxRetry(this.db, row.id, {
+        attempts: row.attempts,
+        error: `${message} (kept queued: its follow-up could not be queued)`,
+        now,
+        delayMs,
+        leaseToken: row.leaseToken,
+      });
+      this.wake(now + delayMs);
+      return;
+    }
+    if (skip) {
+      // A decision, not a failure: record the reason ONCE and stop: waiting
+      // and retrying cannot change the outcome.
+      await markOutboxSkipped(this.db, row.id, { reason: message, now, leaseToken: row.leaseToken });
+      this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${message}`);
+      return;
+    }
+    if (exhausted) {
       await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
       const tried = row.firstFailedAt == null ? '' : ` over ${span(now - row.firstFailedAt)}`;
       this.log.error(
