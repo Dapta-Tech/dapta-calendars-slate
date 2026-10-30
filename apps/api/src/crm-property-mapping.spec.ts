@@ -8,6 +8,7 @@ import {
   loadEncryptionKey,
   migrate,
   seed,
+  setBookingUtm,
   sql,
   upsertAccountIntegration,
   type Db,
@@ -376,6 +377,36 @@ describe('CRM property mapping (H2, #108)', () => {
     expect(write.properties).toEqual({ jobtitle: 'Looking forward to it', phone: 'es' });
   });
 
+  it("maps the booking's campaign onto the host's chosen properties, and lists it in the meeting body", async () => {
+    const slug = await eventTypeWith({
+      hubspot: [
+        // Any text property the host picks.
+        { source: { kind: 'utm', field: 'utm_source' }, properties: ['jobtitle'] },
+        // A single-choice enumeration matches the value to an option.
+        { source: { kind: 'utm', field: 'utm_medium' }, properties: ['tier'] },
+        // A key this booking does not carry sends nothing.
+        { source: { kind: 'utm', field: 'utm_term' }, properties: ['phone'] },
+      ],
+    });
+    const uid = await book(slug, { role: 'CTO' });
+    await setBookingUtm(db, uid, { utm_source: 'newsletter', utm_medium: 'SMB', utm_campaign: 'q4 launch' });
+    const write = await deliver(uid);
+
+    expect(write.properties).toEqual({ jobtitle: 'newsletter', tier: 'smb' });
+    const body = crm.meetings.at(-1)!.body!;
+    expect(body).toContain('utm_source: newsletter\nutm_medium: SMB\nutm_campaign: q4 launch');
+    expect(body).not.toContain('utm_term');
+  });
+
+  it('a booking without a campaign sends no campaign property and adds no body line', async () => {
+    const slug = await eventTypeWith({
+      hubspot: [{ source: { kind: 'utm', field: 'utm_source' }, properties: ['jobtitle'] }],
+    });
+    const write = await deliver(await book(slug, { role: 'CTO' }));
+    expect(write.properties ?? {}).toEqual({});
+    expect(crm.meetings.at(-1)!.body).not.toContain('utm_');
+  });
+
   // --- The cached catalog --------------------------------------------------
 
   describe('CrmPropertyCatalogService', () => {
@@ -539,6 +570,28 @@ describe('save-time mapping compatibility (H2, #108)', () => {
         hubspot: [{ source: { kind: 'question', name: 'friends' }, properties: ['jobtitle'] }],
       })),
     ).rejects.toMatchObject({ response: { error: 'CRM_MAPPING_INCOMPATIBLE' } });
+  });
+
+  it('refuses a campaign key aimed at a number property, and accepts it on a text one', async () => {
+    await expect(
+      crud.createEventType({} as never, body({
+        hubspot: [{ source: { kind: 'utm', field: 'utm_source' }, properties: ['annualrevenue'] }],
+      })),
+    ).rejects.toMatchObject({ response: { error: 'CRM_MAPPING_INCOMPATIBLE' } });
+    const out = await crud.createEventType({} as never, body({
+      hubspot: [{ source: { kind: 'utm', field: 'utm_source' }, properties: ['jobtitle'] }],
+    }, 'compat-utm'));
+    expect((out as { crmPropertyMappings: unknown }).crmPropertyMappings).toEqual({
+      hubspot: [{ source: { kind: 'utm', field: 'utm_source' }, properties: ['jobtitle'] }],
+    });
+  });
+
+  it('refuses a key that is not one of the five utm_*', async () => {
+    await expect(
+      crud.createEventType({} as never, body({
+        hubspot: [{ source: { kind: 'utm', field: 'gclid' }, properties: ['jobtitle'] }],
+      })),
+    ).rejects.toMatchObject({ status: 400 });
   });
 
   it('accepts a compatible pair', async () => {

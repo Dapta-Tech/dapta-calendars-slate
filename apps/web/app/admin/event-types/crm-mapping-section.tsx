@@ -12,6 +12,7 @@ import {
   type MappableField,
 } from '@slate/crm/mapping';
 import {
+  BOOKING_UTM_KEYS,
   CRM_ATTENDEE_SOURCE_FIELDS,
   CRM_EVENT_SOURCE_FIELDS,
   MAX_CRM_MAPPINGS_PER_EVENT,
@@ -498,9 +499,10 @@ interface SourceGroup {
  *
  * `guests` is excluded because guests are not contacts (#63), and a question
  * with no name is excluded because it is a row the host has not finished
- * writing yet.
+ * writing yet. The campaign group lists the five `utm_*` a booking can keep;
+ * a booking without the mapped one sends nothing for it.
  */
-function buildSourceGroups(
+export function buildSourceGroups(
   fields: MappableField[],
   m: EventTypeMessages['crmMapping'],
 ): SourceGroup[] {
@@ -525,6 +527,13 @@ function buildSourceGroups(
     hostName: m.eventHostName,
     hostEmail: m.eventHostEmail,
   };
+  const utmLabels: Record<(typeof BOOKING_UTM_KEYS)[number], string> = {
+    utm_source: m.utmSource,
+    utm_medium: m.utmMedium,
+    utm_campaign: m.utmCampaign,
+    utm_term: m.utmTerm,
+    utm_content: m.utmContent,
+  };
 
   return [
     { label: m.groupQuestions, options: questions },
@@ -542,6 +551,14 @@ function buildSourceGroups(
         key: `event:${field}`,
         label: eventLabels[field],
         source: { kind: 'event', field } as const,
+      })),
+    },
+    {
+      label: m.groupCampaign,
+      options: BOOKING_UTM_KEYS.map((field) => ({
+        key: `utm:${field}`,
+        label: utmLabels[field],
+        source: { kind: 'utm', field } as const,
       })),
     },
   ];

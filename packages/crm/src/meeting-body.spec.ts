@@ -108,6 +108,32 @@ describe('renderMeetingBody', () => {
     });
     expect(body).toContain('Seats: 0');
   });
+
+  it("lists the booking's campaign, one utm_* line per key in link order, before the reference", () => {
+    const body = renderMeetingBody({
+      hostName: 'Alex Rivera',
+      bookingUid: 'bk_9',
+      answers: [{ label: 'Company', value: 'Acme' }],
+      utm: { utm_campaign: 'q4 launch', utm_source: 'newsletter', utm_content: '  ' },
+      labels: EN,
+    });
+    expect(body).toBe(
+      [
+        'Host: Alex Rivera',
+        'Company: Acme',
+        'utm_source: newsletter',
+        'utm_campaign: q4 launch',
+        'Booking reference: bk_9',
+      ].join('\n'),
+    );
+  });
+
+  it('adds no campaign line to a booking without one', () => {
+    for (const utm of [null, undefined, {}]) {
+      const body = renderMeetingBody({ hostName: null, bookingUid: 'bk_2', answers: [], utm, labels: EN });
+      expect(body).toBe('Booking reference: bk_2');
+    }
+  });
 });
 
 describe('prefixCancelledTitle', () => {

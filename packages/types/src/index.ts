@@ -1206,9 +1206,9 @@ export type MemberViewDto = z.infer<typeof memberViewSchema>;
 
 // --- CRM property mapping (H2 / #108) -------------------------------------
 //
-// Per event type, a host wires intake questions (plus a few attendee details
-// and a closed catalog of event metadata) onto CONTACT properties that already
-// exist in the connected portal. Nothing here can create a property: the
+// Per event type, a host wires intake questions (plus a few attendee details,
+// a closed catalog of event metadata and the booking's campaign UTMs) onto
+// CONTACT properties that already exist in the connected portal. Nothing here can create a property: the
 // picker offers what the portal has, which is what keeps the free tier's ~10
 // custom-property cap out of this feature (#64).
 //
@@ -1242,11 +1242,19 @@ export const CRM_EVENT_SOURCE_FIELDS = [
 ] as const;
 export type CrmEventSourceField = (typeof CRM_EVENT_SOURCE_FIELDS)[number];
 
-/** Where a mapped value comes from. `guests` is not a source — guests are not contacts. */
+/**
+ * Where a mapped value comes from. `guests` is not a source: guests are not contacts.
+ *
+ * `utm` is the campaign the booking came from: one of `BOOKING_UTM_KEYS` (the
+ * stored `booking.utm`), so a host can write `utm_source` and the rest to the
+ * contact properties of their choice. A booking without that key sends nothing
+ * for it, never a blank.
+ */
 export const crmMappingSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('question'), name: z.string().min(1).max(64) }),
   z.object({ kind: z.literal('attendee'), field: z.enum(CRM_ATTENDEE_SOURCE_FIELDS) }),
   z.object({ kind: z.literal('event'), field: z.enum(CRM_EVENT_SOURCE_FIELDS) }),
+  z.object({ kind: z.literal('utm'), field: z.enum(BOOKING_UTM_KEYS) }),
 ]);
 export type CrmMappingSource = z.infer<typeof crmMappingSourceSchema>;
 

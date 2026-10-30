@@ -294,3 +294,84 @@ describe('auto-map', () => {
     expect(suggestMappings([question('company')], properties, fields)).toEqual([]);
   });
 });
+
+describe('the booking campaign as a source (utm_*)', () => {
+  const utm = (field: 'utm_source' | 'utm_medium' | 'utm_campaign' | 'utm_term' | 'utm_content'): CrmMappingSource => ({
+    kind: 'utm',
+    field,
+  });
+  const leadSource = prop({
+    name: 'lead_source',
+    label: 'Lead source',
+    type: 'enumeration',
+    fieldType: 'select',
+    options: [
+      { value: 'newsletter', label: 'Newsletter' },
+      { value: 'paid_search', label: 'Paid search' },
+    ],
+  });
+  const properties = [
+    prop({ name: 'utm_source', label: 'UTM source' }),
+    prop({ name: 'utm_campaign', label: 'UTM campaign' }),
+    prop({ name: 'annualrevenue', type: 'number' }),
+    leadSource,
+  ];
+  const ctx = {
+    answers: {},
+    fields: [] as MappableField[],
+    attendee: { phone: null, notes: null, timeZone: null, language: null },
+    event: { eventTypeTitle: null, startUtc: null, lengthMinutes: null, hostName: null, hostEmail: null },
+    utm: { utm_source: 'Newsletter', utm_campaign: 'q4 launch' },
+  };
+
+  it('targets a text property or a single-choice enumeration, never a number, a multi-select or identity', () => {
+    expect(isCompatible(utm('utm_source'), prop({ name: 'utm_source' }), [])).toBe(true);
+    expect(isCompatible(utm('utm_source'), leadSource, [])).toBe(true);
+    expect(isCompatible(utm('utm_source'), prop({ name: 'annualrevenue', type: 'number' }), [])).toBe(false);
+    expect(isCompatible(utm('utm_source'), prop({ name: 'tags', type: 'enumeration', fieldType: 'checkbox' }), [])).toBe(false);
+    expect(isCompatible(utm('utm_source'), prop({ name: 'email' }), [])).toBe(false);
+    expect(candidateProperties(utm('utm_campaign'), properties, []).map((p) => p.name)).toEqual([
+      'lead_source',
+      'utm_campaign',
+      'utm_source',
+    ]);
+  });
+
+  it("writes the booking's value to the host's chosen properties", () => {
+    const out = buildMappedProperties(
+      [
+        { source: utm('utm_source'), properties: ['utm_source', 'lead_source'] },
+        { source: utm('utm_campaign'), properties: ['utm_campaign'] },
+      ],
+      properties,
+      ctx,
+    );
+    // The enumeration takes the matching option's value, as any answer would.
+    expect(out).toEqual({ utm_source: 'Newsletter', lead_source: 'newsletter', utm_campaign: 'q4 launch' });
+  });
+
+  it('sends nothing for a key the booking does not have, or a booking without a campaign', () => {
+    const mappings = [
+      { source: utm('utm_term'), properties: ['utm_source'] },
+      { source: utm('utm_campaign'), properties: ['utm_campaign'] },
+    ];
+    expect(buildMappedProperties(mappings, properties, ctx)).toEqual({ utm_campaign: 'q4 launch' });
+    expect(buildMappedProperties(mappings, properties, { ...ctx, utm: null })).toEqual({});
+    const { utm: _omitted, ...older } = ctx;
+    expect(buildMappedProperties(mappings, properties, older)).toEqual({});
+  });
+
+  it('omits a value no enumeration option matches, rather than sending one the portal would refuse', () => {
+    const out = buildMappedProperties(
+      [{ source: utm('utm_source'), properties: ['lead_source'] }],
+      properties,
+      { ...ctx, utm: { utm_source: 'linkedin' } },
+    );
+    expect(out).toEqual({});
+  });
+
+  it('auto-map suggests a portal property named after the key', () => {
+    const out = suggestMappings([utm('utm_source'), utm('utm_medium')], properties, []);
+    expect(out).toEqual([{ source: utm('utm_source'), properties: ['utm_source'] }]);
+  });
+});

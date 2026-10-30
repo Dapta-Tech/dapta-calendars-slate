@@ -12,6 +12,8 @@
  * diverge later without either dragging the other.
  */
 
+import { BOOKING_UTM_KEYS, type BookingUtm } from '@slate/types';
+
 /** The few fixed labels this body needs, supplied by the caller from the i18n catalog. */
 export interface MeetingBodyLabels {
   host: string;
@@ -24,11 +26,19 @@ export interface MeetingBodyInput {
   hostName: string | null;
   bookingUid: string;
   answers: { label: string; value: unknown }[];
+  /** The campaign the booking came from (`booking.utm`); absent or null when none. */
+  utm?: BookingUtm | null;
   labels: MeetingBodyLabels;
 }
 
 /**
- * `label: answer` lines, plus the assigned host and the booking reference.
+ * `label: answer` lines, plus the assigned host, the booking's campaign and the
+ * booking reference.
+ *
+ * The campaign is one `utm_*: value` line per key the booking kept, in the
+ * order a UTM link lists them, under the key itself: it is the name the host
+ * put on the link and the one a marketer searches for, so it is never
+ * translated. A booking without UTMs adds no line.
  *
  * The host line is here because `hubspot_owner_id` is deliberately left unset
  * (#63): setting it needs an owner lookup by email plus another scope, and the
@@ -46,6 +56,10 @@ export function renderMeetingBody(input: MeetingBodyInput): string {
   for (const a of input.answers) {
     const text = answerText(a.value, input.labels);
     if (text) lines.push(`${a.label}: ${text}`);
+  }
+  for (const key of BOOKING_UTM_KEYS) {
+    const value = input.utm?.[key]?.trim();
+    if (value) lines.push(`${key}: ${value}`);
   }
   lines.push(`${input.labels.bookingReference}: ${input.bookingUid}`);
   return lines.join('\n');

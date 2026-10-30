@@ -809,6 +809,8 @@ export interface BookingMessages {
         groupQuestions: string;
         groupAttendee: string;
         groupEvent: string;
+        /** The booking's campaign: the `utm_*` of the link the invitee booked from. */
+        groupCampaign: string;
         /** Attendee + event metadata source names. */
         attendeePhone: string;
         attendeeNotes: string;
@@ -819,6 +821,12 @@ export interface BookingMessages {
         eventLength: string;
         eventHostName: string;
         eventHostEmail: string;
+        /** Campaign source names; each carries its `utm_*` key, which is never translated. */
+        utmSource: string;
+        utmMedium: string;
+        utmCampaign: string;
+        utmTerm: string;
+        utmContent: string;
         /** Enumeration reconciliation, shown at configure time. */
         optionsMatch: string;
         /** {matched}, {total} and {values} interpolate the diff. */
@@ -2515,6 +2523,7 @@ export const en: BookingMessages = {
         groupQuestions: 'Intake questions',
         groupAttendee: 'Attendee details',
         groupEvent: 'Event details',
+        groupCampaign: 'Campaign (UTM)',
         attendeePhone: 'Phone',
         attendeeNotes: 'Notes',
         attendeeTimeZone: 'Time zone',
@@ -2524,6 +2533,11 @@ export const en: BookingMessages = {
         eventLength: 'Length in minutes',
         eventHostName: 'Assigned host',
         eventHostEmail: 'Assigned host email',
+        utmSource: 'Source (utm_source)',
+        utmMedium: 'Medium (utm_medium)',
+        utmCampaign: 'Campaign (utm_campaign)',
+        utmTerm: 'Term (utm_term)',
+        utmContent: 'Content (utm_content)',
         optionsMatch: 'All options match this property.',
         optionsPartial: '{matched} of {total} options match. These will not be sent: {values}',
         optionsNone:
@@ -4257,6 +4271,7 @@ export const es: BookingMessages = {
         groupQuestions: 'Preguntas del formulario',
         groupAttendee: 'Datos del invitado',
         groupEvent: 'Datos del evento',
+        groupCampaign: 'Campaña (UTM)',
         attendeePhone: 'Teléfono',
         attendeeNotes: 'Notas',
         attendeeTimeZone: 'Zona horaria',
@@ -4266,6 +4281,11 @@ export const es: BookingMessages = {
         eventLength: 'Duración en minutos',
         eventHostName: 'Anfitrión asignado',
         eventHostEmail: 'Correo del anfitrión asignado',
+        utmSource: 'Fuente (utm_source)',
+        utmMedium: 'Medio (utm_medium)',
+        utmCampaign: 'Campaña (utm_campaign)',
+        utmTerm: 'Término (utm_term)',
+        utmContent: 'Contenido (utm_content)',
         optionsMatch: 'Todas las opciones coinciden con esta propiedad.',
         optionsPartial:
           '{matched} de {total} opciones coinciden. Estas no se enviarán: {values}',

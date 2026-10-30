@@ -27,6 +27,7 @@
 import {
   CRM_IDENTITY_PROPERTIES,
   crmSourceKey,
+  type BookingUtm,
   type CrmAttendeeSourceField,
   type CrmEventSourceField,
   type CrmMappingSource,
@@ -74,6 +75,7 @@ export function targetShapeForSource(
 ): TargetShape {
   if (source.kind === 'attendee') return attendeeTargetShape(source.field);
   if (source.kind === 'event') return eventTargetShape(source.field);
+  if (source.kind === 'utm') return UTM_TARGET_SHAPE;
   const field = fields.find((f) => f.name === source.name);
   if (!field) return null;
   return questionTargetShape(field);
@@ -123,6 +125,14 @@ function questionTargetShape(field: MappableField): TargetShape {
       return null;
   }
 }
+
+/**
+ * A campaign value (`utm_source` and the rest) is free text from the booking
+ * link, so a text property takes it as is. A single-choice enumeration takes
+ * it too, a "Lead source" dropdown being where hosts usually keep it: the
+ * value is matched to an option like any answer, and omitted when none fits.
+ */
+const UTM_TARGET_SHAPE: TargetShape = { types: ['string', 'enumeration'], enumeration: 'single' };
 
 function attendeeTargetShape(field: CrmAttendeeSourceField): TargetShape {
   if (field === 'phone') {
@@ -286,6 +296,12 @@ export interface MappingValueContext {
     hostName: string | null;
     hostEmail: string | null;
   };
+  /**
+   * The campaign the booking came from (`booking.utm`), null when none.
+   * Optional so a context built before campaigns were mappable still compiles;
+   * absent reads as none.
+   */
+  utm?: BookingUtm | null;
 }
 
 /** The raw value behind a source, before any provider-shaped coercion. */
@@ -297,6 +313,8 @@ function rawValue(source: CrmMappingSource, ctx: MappingValueContext): unknown {
       return ctx.attendee[source.field];
     case 'event':
       return ctx.event[source.field];
+    case 'utm':
+      return ctx.utm?.[source.field];
   }
 }
 
