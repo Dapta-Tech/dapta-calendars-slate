@@ -455,8 +455,10 @@ export async function signOutKeepingPlace(session: Session | null): Promise<neve
  *  - a `SessionUnavailableError` when the identity service could not answer
  *    (#114) — the session is untouched and the caller surfaces something
  *    retryable, because a blip is not proof that anyone's credential is dead;
- *  - a redirect to `/login` when there is nothing to refresh or the refresh
- *    token really is dead.
+ *  - a redirect to the plain `/login` when nobody is signed in at all, the
+ *    same hand-off the dashboard layout and the root page make;
+ *  - a redirect to the signed-out `/login` when the refresh token really is
+ *    dead.
  *
  * Both callers get the same contract because both serve both contexts: an
  * action reaching `admin-api.ts` refreshes inline, exactly as `hostFetch` does,
@@ -465,7 +467,15 @@ export async function signOutKeepingPlace(session: Session | null): Promise<neve
  */
 export async function refreshOrSignOut(): Promise<void> {
   const session = await getSession();
-  if (session?.provider === 'workos') {
+  // Nobody is signed in: a first visit, or a cookie already gone. There is
+  // nothing to refresh, clear or revoke, and nothing was signed out of, so the
+  // login is the plain one, which under workos signs in silently. `?signedout=1`
+  // stays for a session that ENDED (the sign-out button, a dead refresh token, a
+  // fresh token the API still rejects): that is what keeps a bare /login from
+  // walking straight back into the account just left. No loop either way: the
+  // sign-in comes back with a session, and a session that then fails ends below.
+  if (!session) redirect(withReturnTo('/login', await currentReturnTo()));
+  if (session.provider === 'workos') {
     // The page travels with the hand-off, so a refreshed session lands back on
     // it rather than on /admin.
     if (!(await sessionCookieIsWritable())) {
