@@ -238,30 +238,46 @@ export async function enqueueOutbox(db: Db, input: EnqueueOutboxInput): Promise<
 
 /**
  * Mark a booking's change on the calendar with the invitee email queued for that
- * same change: the newest still-pending calendar row of `action` gets
- * `{ inviteeEmailId }` as its payload. The calendar write reads it to mute the
- * provider's own invitation only when this exact email exists (F4, 2026-10-30
- * production E2E). Matches nothing when the calendar row is gone, already run,
- * or was never queued (no calendar), and the write then lets the provider
- * invite. Returns whether a row was marked.
+ * same change: a still-waiting calendar row of `action` (pending, not leased by
+ * a worker, not yet marked) gets `{ inviteeEmailId }` as its payload. The
+ * calendar write reads it to mute the provider's own invitation only when this
+ * exact email exists (F4, 2026-10-30 production E2E).
+ *
+ * Each email marks at most one row and each row is marked at most once: the
+ * write is conditional on the row still being unmarked and unleased, so two
+ * changes queued at the same moment cannot both take the same row; the loser
+ * takes the next waiting one. Which of two such rows an email lands on does not
+ * matter, since every move writes the booking's current time. Nothing matches
+ * when the row is gone, already running or done, or was never queued (no
+ * calendar), and the write then lets the provider invite. Returns whether a
+ * row was marked.
  */
 export async function tagCalendarChangeWithInviteeEmail(
   db: Db,
   input: { bookingUid: string; action: string; emailOutboxId: string; now?: number },
 ): Promise<boolean> {
-  const target = await db.get<{ id: string }>(
-    sql`SELECT id FROM outbox
-        WHERE kind = 'calendar' AND booking_uid = ${input.bookingUid} AND action = ${input.action}
-          AND status = 'pending'
-        ORDER BY created_at DESC, id DESC LIMIT 1`,
-  );
-  if (!target) return false;
-  await db.run(
-    sql`UPDATE outbox SET payload = ${JSON.stringify({ inviteeEmailId: input.emailOutboxId })},
-          updated_at = ${input.now ?? Date.now()}
-        WHERE id = ${target.id} AND status = 'pending'`,
-  );
-  return true;
+  const now = input.now ?? Date.now();
+  const payload = JSON.stringify({ inviteeEmailId: input.emailOutboxId });
+  // A handful of tries is plenty: each lost race means another email marked a
+  // row of the same booking and change in the same instant.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const target = await db.get<{ id: string }>(
+      sql`SELECT id FROM outbox
+          WHERE kind = 'calendar' AND booking_uid = ${input.bookingUid} AND action = ${input.action}
+            AND status = 'pending' AND payload IS NULL
+            AND (lease_until IS NULL OR lease_until <= ${now})
+          ORDER BY created_at DESC, id DESC LIMIT 1`,
+    );
+    if (!target) return false;
+    const marked = await db.get<{ id: string }>(
+      sql`UPDATE outbox SET payload = ${payload}, updated_at = ${now}
+          WHERE id = ${target.id} AND status = 'pending' AND payload IS NULL
+            AND (lease_until IS NULL OR lease_until <= ${now})
+          RETURNING id`,
+    );
+    if (marked) return true;
+  }
+  return false;
 }
 
 /**
