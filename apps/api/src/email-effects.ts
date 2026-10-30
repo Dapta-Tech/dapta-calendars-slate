@@ -12,6 +12,7 @@ import {
   type InvitationSendClaim,
   loadBookingMeetingUrl,
   loadBookingNotificationContext,
+  claimIcsSequence,
   defaultNotificationSetting,
   type BookingNotificationContext,
   type EventReminder,
@@ -129,6 +130,12 @@ export const CONFERENCING_LINK_WAIT_ATTEMPTS = 3;
 const LINK_AWARE_KINDS = new Set(['confirmation', 'reschedule']);
 
 /**
+ * The highest .ics SEQUENCE a booking email carried before changes were
+ * counted (a cancellation's fixed 2). Every counted change starts above it.
+ */
+const LEGACY_ICS_SEQUENCE_CEILING = 2;
+
+/**
  * Whether a booking is an online meeting that should carry a join link: a
  * `conferencing` location, and also a booking whose host set no location at
  * all. Without a place, the meeting happens online; the organizer's calendar
@@ -136,12 +143,18 @@ const LINK_AWARE_KINDS = new Set(['confirmation', 'reschedule']);
  * and .ics. (Dapta's calendar backend always added a room to such events and
  * the invitee got it only from the provider's own invitation, which F4 of the
  * 2026-10-30 production E2E removes.) Any other kind (in person, a phone
- * number, a custom place) never asks for one. `undefined` is not "no
- * location": it is a queued row from before the kind was snapshotted, which
- * never waits for a link.
+ * number, a custom place) never asks for one. "No location" means no kind AND
+ * no location text: a booking written before the kind existed can carry an
+ * address with a null kind, and it is not an online meeting. `undefined` is a
+ * queued row from before the kind was snapshotted, which never waits for a
+ * link.
  */
-export function wantsConferencingLink(kind: string | null | undefined): boolean {
-  return kind === 'conferencing' || kind === null || kind === '';
+export function wantsConferencingLink(
+  kind: string | null | undefined,
+  location?: string | null,
+): boolean {
+  if (kind === 'conferencing') return true;
+  return (kind === null || kind === '') && !location?.trim();
 }
 
 /**
@@ -590,7 +603,7 @@ export class EmailEffects {
   private async enqueue(
     kind: Exclude<EmailKind, 'reminder'>,
     uid: string,
-    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
   ): Promise<void> {
     try {
       const ctx = await loadBookingNotificationContext(this.db, uid);
@@ -599,6 +612,15 @@ export class EmailEffects {
         return;
       }
       const settings = await getNotificationSettings(this.db, ctx.accountId);
+      // The .ics SEQUENCE of this change, claimed ONCE so both sides' copies
+      // carry the same number: a move, a cancellation, and a confirmation of a
+      // booking that took over a moved meeting. It starts above the fixed 1 / 2
+      // the .ics carried before, so a meeting already moved once still updates.
+      const calendarUid = ctx.calendarUid ?? ctx.uid;
+      const isChange =
+        kind === 'reschedule' || kind === 'cancellation' || (kind === 'confirmation' && calendarUid !== ctx.uid);
+      const claimed = isChange ? await claimIcsSequence(this.db, calendarUid) : null;
+      const sideExtra = claimed === null ? extra : { ...extra, icsSequence: LEGACY_ICS_SEQUENCE_CEILING + claimed };
       // ADR 0007: a conferencing booking's mail is made due slightly LATE, so
       // the calendar row that mints the link gets a head start. Every other
       // booking is due immediately — the wait must never tax a booking that
@@ -607,13 +629,13 @@ export class EmailEffects {
       // rather than discovered three failed attempts later.
       const waitsForLink =
         LINK_AWARE_KINDS.has(kind) &&
-        wantsConferencingLink(ctx.locationKind) &&
+        wantsConferencingLink(ctx.locationKind, ctx.location) &&
         this.calendar?.enabled === true;
       // The grace must outlast a poll tick, or it expires before the worker
       // has looked at the calendar row even once.
       const graceMs = Math.max(CONFERENCING_LINK_GRACE_MS, (this.env?.OUTBOX_POLL_MS ?? 0) * 3);
       for (const side of KIND_SIDES[kind]) {
-        const n = this.sideNotification(kind, ctx, side, settings, extra);
+        const n = this.sideNotification(kind, ctx, side, settings, sideExtra);
         if (!n) continue;
         await enqueueOutbox(this.db, {
           kind: 'email',
@@ -645,7 +667,7 @@ export class EmailEffects {
     ctx: BookingNotificationContext,
     side: { key: EmailTemplateKey; audience: 'attendee' | 'host' },
     settings: Map<string, NotificationSetting>,
-    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
     // Present for reminder / follow_up: the EVENT TYPE's row, which owns the
     // switch, the lead and the copy for both sides (#68).
     reminder?: EventReminder,
@@ -751,7 +773,7 @@ export class EmailEffects {
 
   private toNotification(
     ctx: BookingNotificationContext,
-    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
     // The language this copy is written in, which the Where is worded in too.
     locale: string | null = ctx.hostLocale,
     // The variables this copy's template reads, when it has one.
@@ -798,6 +820,7 @@ export class EmailEffects {
       manageUrl: extra.manageUrl ?? null,
       cancellationReason: extra.cancellationReason ?? null,
       previousStartUtc: extra.previousStartUtc ?? null,
+      ...(extra.icsSequence !== undefined ? { icsSequence: extra.icsSequence } : {}),
       accountCode: ctx.accountCode ?? null,
       // Only when it differs: a booking never moved to a new uid keeps its own.
       ...(ctx.calendarUid && ctx.calendarUid !== ctx.uid ? { calendarUid: ctx.calendarUid } : {}),
@@ -956,7 +979,7 @@ export class EmailEffects {
       // for the full budget and log a failure per attempt, for nothing.
       const stillWriting =
         !n.meetingUrl &&
-        wantsConferencingLink(n.locationKind) &&
+        wantsConferencingLink(n.locationKind, n.location) &&
         LINK_AWARE_KINDS.has(kind) &&
         (await hasPendingCalendarJob(this.db, n.uid));
       if (stillWriting && attempts < CONFERENCING_LINK_WAIT_ATTEMPTS) {

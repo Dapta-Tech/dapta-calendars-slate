@@ -4,7 +4,7 @@ import { createDb, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
-import { loadBookingNotificationContext, rescheduleChainRoot } from './parity';
+import { claimIcsSequence, loadBookingNotificationContext, rescheduleChainRoot } from './parity';
 
 /**
  * The uid the invitee's calendar knows a meeting by. A move through the v2 API
@@ -73,5 +73,12 @@ describe('rescheduleChainRoot', () => {
     await pointBack(b, a);
     const root = await rescheduleChainRoot(db, a, b);
     expect([a, b]).toContain(root);
+  });
+
+  it('claimIcsSequence: one increment per change, never the same number twice', async () => {
+    const uid = await bookOne();
+    const claimed = await Promise.all([claimIcsSequence(db, uid), claimIcsSequence(db, uid), claimIcsSequence(db, uid)]);
+    expect([...claimed].sort()).toEqual([1, 2, 3]);
+    expect(await claimIcsSequence(db, 'no-such-booking')).toBeNull();
   });
 });

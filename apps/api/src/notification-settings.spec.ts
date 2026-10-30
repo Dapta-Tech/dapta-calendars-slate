@@ -457,6 +457,33 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(after[0]!.nextAttemptAt).not.toBe(before.nextAttemptAt);
   });
 
+  // F4 (2026-10-30 production E2E): with the provider's invitation muted, this
+  // .ics alone moves and cancels the invitee's entry, so each change carries a
+  // number that outranks the last, the same on both sides' copies.
+  it('each move and the cancellation claim a higher .ics SEQUENCE, shared by both copies', async () => {
+    const uid = await book();
+    await settle();
+    const seq = async (action: string) =>
+      (await emailRows(uid, action)).map((r) => (JSON.parse(r.payload!) as { icsSequence?: number }).icsSequence);
+    expect(await seq('confirmation')).toEqual([undefined, undefined]); // a first confirmation keeps 0
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 4 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    for (const slot of [a!.slots[5]!, a!.slots[7]!]) {
+      const out = await booking.reschedule(uid, { newStartUtc: slot.startUtc, byHost: true });
+      expect('error' in out).toBe(false);
+      await settle();
+    }
+    expect((await seq('reschedule')).sort()).toEqual([3, 3, 4, 4]);
+    await booking.cancel(uid, { byHost: true, reason: 'done', accountId });
+    await settle();
+    expect(await seq('cancellation')).toEqual([5, 5]);
+  });
+
   it('cancel deletes the pending follow-up', async () => {
     await setReminders(withFollowUp());
     const uid = await book();

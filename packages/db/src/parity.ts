@@ -2167,6 +2167,20 @@ export async function rescheduleChainRoot(db: Db, uid: string, from: string | nu
   return root;
 }
 
+/**
+ * Claim the next .ics SEQUENCE change number for a meeting, by its calendar uid
+ * (the first booking of its reschedule chain). One atomic increment per change,
+ * so two changes queued in the same instant still get distinct, increasing
+ * numbers. Null when that booking row is gone: the caller falls back to the
+ * fixed numbers.
+ */
+export async function claimIcsSequence(db: Db, calendarUid: string): Promise<number | null> {
+  const row = await db.get<{ ics_sequence: number | string }>(
+    sql`UPDATE booking SET ics_sequence = ics_sequence + 1 WHERE uid = ${calendarUid} RETURNING ics_sequence`,
+  );
+  return row ? Number(row.ics_sequence) : null;
+}
+
 export async function loadBookingNotificationContext(
   db: Db,
   uid: string,

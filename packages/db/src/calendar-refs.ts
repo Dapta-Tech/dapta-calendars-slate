@@ -365,7 +365,12 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   return {
     bookingId: b.id,
     accountId: b.account_id,
-    otherGuestCount: Math.max(0, uniqueEmails(guestEmails).length - 1),
+    // The organizer's own address among the attendees (a host who booked
+    // themselves) is not a guest anyone has to invite.
+    otherGuestCount: Math.max(
+      0,
+      uniqueEmails(guestEmails).filter((e) => normalizeAttendeeEmail(e) !== organizerKey).length - 1,
+    ),
     uid: b.uid,
     title: b.title,
     description: b.calendar_description,

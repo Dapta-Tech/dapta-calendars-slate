@@ -356,8 +356,6 @@ describe('BookingNotifier: the .ics keeps updating the same calendar entry', () 
     audience: 'attendee' as const,
     stamp: '2026-07-09T12:00:00.000Z',
   };
-  // Seconds from 2026-01-01 to the stamp above.
-  const LATER = 189 * 86_400 + 12 * 3_600;
   const capture = () => {
     const sent: Array<{ headers?: Record<string, string>; idempotencyKey?: string; attachments?: Array<{ content: unknown }> }> = [];
     const provider = {
@@ -380,32 +378,23 @@ describe('BookingNotifier: the .ics keeps updating the same calendar entry', () 
     expect(m.idempotencyKey).toContain('bk_chain_2');
   });
 
-  it('SEQUENCE: 0 on a first confirmation, the stamp clock on every later change', async () => {
-    const first = capture();
-    await new BookingNotifier(first.provider as never).sendConfirmation(booking);
-    expect(line(ics(first.sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:0');
+  it('SEQUENCE: the number claimed for the change when it was queued', async () => {
     const moved = capture();
-    await new BookingNotifier(moved.provider as never).sendReschedule(booking);
-    expect(line(ics(moved.sent[0]!), 'SEQUENCE')).toBe(`SEQUENCE:${LATER}`);
-    // A second move a minute later outranks the first: fixed numbers never did.
-    const again = capture();
-    await new BookingNotifier(again.provider as never).sendReschedule({ ...booking, stamp: '2026-07-09T12:01:00.000Z' });
-    expect(line(ics(again.sent[0]!), 'SEQUENCE')).toBe(`SEQUENCE:${LATER + 60}`);
+    await new BookingNotifier(moved.provider as never).sendReschedule({ ...booking, icsSequence: 3 });
+    expect(line(ics(moved.sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:3');
     const cancelled = capture();
-    await new BookingNotifier(cancelled.provider as never).sendCancellation({ ...booking, stamp: '2026-07-09T12:02:00.000Z' });
-    expect(line(ics(cancelled.sent[0]!), 'SEQUENCE')).toBe(`SEQUENCE:${LATER + 120}`);
-    // A confirmation inside a chain of moves must outrank what the entry holds.
+    await new BookingNotifier(cancelled.provider as never).sendCancellation({ ...booking, icsSequence: 4 });
+    expect(line(ics(cancelled.sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:4');
     const chained = capture();
-    await new BookingNotifier(chained.provider as never).sendConfirmation({ ...booking, calendarUid: 'bk_chain_1' });
-    expect(line(ics(chained.sent[0]!), 'SEQUENCE')).toBe(`SEQUENCE:${LATER}`);
+    await new BookingNotifier(chained.provider as never).sendConfirmation({ ...booking, calendarUid: 'bk_chain_1', icsSequence: 5 });
+    expect(line(ics(chained.sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:5');
   });
 
-  it('without a stamp the fixed sequence stands, as before', async () => {
+  it('without a claimed number the fixed 0 / 1 / 2 stand, as before', async () => {
     const { sent, provider } = capture();
-    const { stamp: _stamp, ...unstamped } = booking;
-    await new BookingNotifier(provider as never).sendReschedule(unstamped);
-    await new BookingNotifier(provider as never).sendCancellation(unstamped);
-    expect(line(ics(sent[0]!), 'SEQUENCE')).toBe('SEQUENCE:1');
-    expect(line(ics(sent[1]!), 'SEQUENCE')).toBe('SEQUENCE:2');
+    await new BookingNotifier(provider as never).sendConfirmation(booking);
+    await new BookingNotifier(provider as never).sendReschedule(booking);
+    await new BookingNotifier(provider as never).sendCancellation(booking);
+    expect(sent.map((m) => line(ics(m), 'SEQUENCE'))).toEqual(['SEQUENCE:0', 'SEQUENCE:1', 'SEQUENCE:2']);
   });
 });

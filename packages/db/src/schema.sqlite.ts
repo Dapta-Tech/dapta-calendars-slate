@@ -308,6 +308,8 @@ export const booking = sqliteTable('booking', {
    * in @slate/types). NULL = none. See migration 0037 (pg).
    */
   utm: text('utm'),
+  /** The .ics SEQUENCE counter of the meeting this booking starts (see schema.pg.ts). */
+  icsSequence: integer('ics_sequence').notNull().default(0),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });

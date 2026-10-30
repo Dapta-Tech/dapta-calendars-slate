@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { createDb, migrate, seed, sql, createBooking, getAvailability, type Db } from '@slate/db';
+import { createDb, migrate, seed, sql, createBooking, getAvailability, listOutbox, type Db } from '@slate/db';
 import type {
   CalendarProvider,
   CalendarSummary,
@@ -153,6 +153,53 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       );
       await (effects as unknown as Awaitable).writeEvent(uid);
       expect(provider.created[0]!.sendInvitations).toBe(true);
+    });
+
+    it('the decision is taken when the change is queued and kept on the row', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      effects.onBookingAccepted(uid);
+      let row;
+      for (let i = 0; i < 50 && !row; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+        row = (await listOutbox(db, { kind: 'calendar', bookingUid: uid }))[0];
+      }
+      expect(row!.payload).toBe(JSON.stringify({ sendInvitations: false }));
+      // The toggle flips while the row waits: the row keeps the decision the
+      // invitee's email was queued with.
+      await db.run(
+        sql`INSERT INTO notification_setting (id, account_id, email_key, enabled, created_at, updated_at)
+            VALUES (${randomUUID()}, ${accountId}, ${'attendee_confirmation'}, ${0}, ${Date.now()}, ${Date.now()})`,
+      );
+      await effects.runCalendarJob('create', uid, row!.payload);
+      expect(provider.created[0]!.sendInvitations).toBe(false);
+      // A row queued before the snapshot existed decides when it runs.
+      await db.run(sql`DELETE FROM booking_reference WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`);
+      await effects.runCalendarJob('create', uid, null);
+      expect(provider.created[1]!.sendInvitations).toBe(true);
+    });
+
+    it("the organizer's own address among the attendees is not a guest to invite", async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
+      await db.run(
+        sql`INSERT INTO booking_guest (id, booking_id, email, email_normalized, name, created_at)
+            VALUES (${randomUUID()}, ${bookingId}, ${'Alex@Example.com'}, ${'alex@example.com'}, ${null}, ${Date.now()})`,
+      );
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      expect(provider.created[0]!.sendInvitations).toBe(false);
+    });
+
+    it('a booking with an address but no kind (written before kinds) is not an online meeting', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await db.run(sql`UPDATE booking SET location_kind = ${null}, location = ${'12 Main St'} WHERE uid = ${uid}`);
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      expect(provider.created[0]!.requestConferenceLink).toBe(false);
     });
 
     it('an online meeting or no location asks for a room; in person never does', async () => {

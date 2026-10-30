@@ -11,6 +11,7 @@ import {
   loadBookingHostConnectionRefs,
   attendeesFor,
   loadBookingReferences,
+  parseJsonColumn,
   releaseBookingReference,
   setBookingReferenceMeetingUrl,
   sql,
@@ -41,6 +42,13 @@ export function eventBody(
     : null;
   return [ctx.description, join].filter(Boolean).join('\n\n') || null;
 }
+
+/** The invitee email each calendar change goes out with. */
+const CHANGE_FOR_ACTION: Record<CalendarAction, 'confirmation' | 'reschedule' | 'cancellation'> = {
+  create: 'confirmation',
+  reschedule: 'reschedule',
+  delete: 'cancellation',
+};
 
 /**
  * The single place the booking lifecycle reaches the CalendarProvider PORT to
@@ -162,13 +170,38 @@ export class CalendarEffects {
    */
   private enqueue(action: CalendarAction, uid: string): void {
     if (!this.calendar.enabled) return;
-    void enqueueOutbox(this.db, {
-      kind: 'calendar',
-      action,
-      bookingUid: uid,
-    }).catch((err) => {
-      this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
-    });
+    void this.invitationSnapshot(action, uid)
+      .then((sendInvitations) =>
+        enqueueOutbox(this.db, {
+          kind: 'calendar',
+          action,
+          bookingUid: uid,
+          payload: sendInvitations === null ? null : JSON.stringify({ sendInvitations }),
+        }),
+      )
+      .catch((err) => {
+        this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
+      });
+  }
+
+  /**
+   * Decide whether the provider invites for this change NOW, in the same
+   * request that queues the invitee's email from the same settings, and keep
+   * the answer on the calendar row. A row can wait (retries back off for
+   * hours); deciding again when it runs would read a toggle the email row
+   * never saw, and the guest could get both invitations or neither. Null when
+   * it cannot be decided now: the job then decides when it runs, as a row
+   * queued before this snapshot existed does. Never throws: a failed read must
+   * not cost the calendar write.
+   */
+  private async invitationSnapshot(action: CalendarAction, uid: string): Promise<boolean | null> {
+    try {
+      const ctx = await loadBookingForCalendarWrite(this.db, uid);
+      if (!ctx) return null;
+      return await this.providerInvites(ctx, CHANGE_FOR_ACTION[action]);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -176,8 +209,11 @@ export class CalendarEffects {
    * vendor write via the port and THROWS on failure so the worker retries
    * (idempotent via the DH1 claim). No-op when the provider is disabled.
    */
-  async runCalendarJob(action: CalendarAction, uid: string): Promise<void> {
+  async runCalendarJob(action: CalendarAction, uid: string, payload: string | null = null): Promise<void> {
     if (!this.calendar.enabled) return;
+    // The provider-invitation decision taken when the row was queued.
+    const decided = parseJsonColumn<{ sendInvitations?: unknown }>(payload, {}).sendInvitations;
+    const snapshot = typeof decided === 'boolean' ? decided : undefined;
     if (action !== 'delete') {
       // A write or a move is for a booking that is ON. One that was cancelled
       // or declined while this row waited (a retry can wait hours) must not
@@ -191,11 +227,11 @@ export class CalendarEffects {
       }
     }
     if (action === 'delete') {
-      await this.removeEvent(uid);
+      await this.removeEvent(uid, snapshot);
     } else if (action === 'reschedule') {
-      await this.moveEvent(uid);
+      await this.moveEvent(uid, snapshot);
     } else {
-      await this.writeEvent(uid);
+      await this.writeEvent(uid, snapshot);
     }
     // The hosts' calendars now hold (or no longer hold) the event, so a read
     // cached before this write is out of date on this process.
@@ -210,13 +246,13 @@ export class CalendarEffects {
    * events to move. If nothing was written yet (e.g. accepted then rescheduled
    * before the create drained), fall back to a fresh create.
    */
-  private async moveEvent(uid: string): Promise<void> {
+  private async moveEvent(uid: string, snapshot?: boolean): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
     const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
     const movable = refs.filter((r) => r.externalEventId);
     if (movable.length === 0) {
-      await this.writeEvent(uid);
+      await this.writeEvent(uid, snapshot);
       return;
     }
     // Organizer's destination first, mirroring write-out: only that event may
@@ -225,13 +261,13 @@ export class CalendarEffects {
     const ordered = [...movable].sort((a, b) =>
       Number(b.destination === organizerRef) - Number(a.destination === organizerRef),
     );
-    const wantsLink = wantsConferencingLink(ctx.locationKind);
+    const wantsLink = wantsConferencingLink(ctx.locationKind, ctx.location);
     // Already have a room? Then never ask for another. This is what keeps a
     // RETRIED move (the outbox re-runs the whole job after a partial failure)
     // from churning a fresh room on every attempt against a backend that
     // reissues rather than echoes.
     const storedUrl = refs.find((r) => r.meetingUrl)?.meetingUrl ?? null;
-    const sendInvitations = await this.providerInvites(ctx, 'reschedule');
+    const sendInvitations = snapshot ?? (await this.providerInvites(ctx, 'reschedule'));
     let meetingUrl: string | null = null;
     for (const ref of ordered) {
       // Identity, not position: if NO movable ref belongs to the organizer, none
@@ -286,11 +322,11 @@ export class CalendarEffects {
    * throws and the outbox retries it, with the DH1 claim keeping destinations
    * that already succeeded from being written twice.
    */
-  private async writeEvent(uid: string): Promise<void> {
+  private async writeEvent(uid: string, snapshot?: boolean): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx || ctx.destinationRefs.length === 0) return;
-    const wantsLink = wantsConferencingLink(ctx.locationKind);
-    const sendInvitations = await this.providerInvites(ctx, 'confirmation');
+    const wantsLink = wantsConferencingLink(ctx.locationKind, ctx.location);
+    const sendInvitations = snapshot ?? (await this.providerInvites(ctx, 'confirmation'));
     // The room, once the organizer's destination has minted it. Every later
     // destination is told about it instead of asking for one of its own.
     let meetingUrl: string | null = null;
@@ -371,11 +407,11 @@ export class CalendarEffects {
     return !(await attendeeEmailedFor(this.db, ctx.accountId, kind));
   }
 
-  private async removeEvent(uid: string): Promise<void> {
+  private async removeEvent(uid: string, snapshot?: boolean): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
     const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
-    const sendInvitations = await this.providerInvites(ctx, 'cancellation');
+    const sendInvitations = snapshot ?? (await this.providerInvites(ctx, 'cancellation'));
     for (const ref of refs) {
       if (!ref.externalEventId) continue;
       await this.calendar.deleteEvent({

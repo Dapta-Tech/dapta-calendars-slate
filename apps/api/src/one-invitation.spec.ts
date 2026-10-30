@@ -20,6 +20,12 @@ describe('wantsConferencingLink', () => {
     for (const kind of ['in_person', 'phone', 'link', 'custom']) expect(wantsConferencingLink(kind), kind).toBe(false);
     expect(wantsConferencingLink(undefined)).toBe(false);
   });
+
+  it('no kind but an address (a booking written before kinds) is not an online meeting', () => {
+    expect(wantsConferencingLink(null, '12 Main St')).toBe(false);
+    expect(wantsConferencingLink(null, '   ')).toBe(true);
+    expect(wantsConferencingLink('conferencing', 'Zoom room 4')).toBe(true);
+  });
 });
 
 describe('attendeeEmailedFor', () => {
