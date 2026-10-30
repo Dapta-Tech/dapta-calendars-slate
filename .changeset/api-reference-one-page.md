@@ -1,6 +1,5 @@
 ---
 "@slate/api": patch
-"@slate/config": minor
 ---
 
 `/docs` is one page: the Scalar reference alone, full page, themed with the web
