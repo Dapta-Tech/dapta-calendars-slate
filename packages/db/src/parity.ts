@@ -2139,13 +2139,6 @@ function asAnswerRecord(raw: unknown): Record<string, unknown> {
 }
 
 /**
- * Load the attendee + host + timing a booking email needs (B1-B4). Returns null
- * if the booking or its attendee is gone. Host email is included so the .ics
- * carries an ORGANIZER and the host can be a recipient (parity with old). On
- * multi-host team bookings, every assigned co-host is loaded too so all hosts
- * are notified.
- */
-/**
  * The first booking of a reschedule chain, walking `rescheduled_from_uid` back.
  * Cycle-safe, and bounded only so bad data cannot spin a worker: the bound is
  * far above any real chain, because stopping short would hand the invitee's
@@ -2169,13 +2162,6 @@ export async function rescheduleChainRoot(db: Db, uid: string, from: string | nu
   return root;
 }
 
-/**
- * Claim the next .ics SEQUENCE change number for a meeting, by its calendar uid
- * (the first booking of its reschedule chain). One atomic increment per change,
- * so two changes queued in the same instant still get distinct, increasing
- * numbers. Null when that booking row is gone: the caller falls back to the
- * fixed numbers.
- */
 /** The uid the invitee's calendar knows a booking's meeting by (`rescheduleChainRoot` from its row). */
 export async function bookingCalendarUid(db: Db, uid: string): Promise<string> {
   const row = await db.get<{ rescheduled_from_uid: string | null }>(
@@ -2184,6 +2170,43 @@ export async function bookingCalendarUid(db: Db, uid: string): Promise<string> {
   return rescheduleChainRoot(db, uid, row?.rescheduled_from_uid ?? null);
 }
 
+/**
+ * The oldest booking of a reschedule chain whose row still exists, walking
+ * `rescheduled_from_uid` back from `uid` (itself when its predecessor is gone
+ * or it has none). Where a meeting's .ics SEQUENCE is counted when the first
+ * booking's row is gone: nothing in the app deletes a booking row, so this is
+ * a guard against data removed by hand, and a later move in the chain still
+ * finds the same row. Null when `uid` itself is gone. Cycle-safe and bounded
+ * like `rescheduleChainRoot`.
+ */
+export async function oldestLiveChainUid(db: Db, uid: string): Promise<string | null> {
+  const MAX_CHAIN = 1000;
+  const first = await db.get<{ rescheduled_from_uid: string | null }>(
+    sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${uid} LIMIT 1`,
+  );
+  if (!first) return null;
+  const seen = new Set<string>([uid]);
+  let oldest = uid;
+  let previous = first.rescheduled_from_uid;
+  for (let hop = 0; previous && hop < MAX_CHAIN && !seen.has(previous); hop++) {
+    seen.add(previous);
+    const row = await db.get<{ rescheduled_from_uid: string | null }>(
+      sql`SELECT rescheduled_from_uid FROM booking WHERE uid = ${previous} LIMIT 1`,
+    );
+    if (!row) break;
+    oldest = previous;
+    previous = row.rescheduled_from_uid;
+  }
+  return oldest;
+}
+
+/**
+ * Claim the next .ics SEQUENCE change number for a meeting, by its calendar uid
+ * (the first booking of its reschedule chain). One atomic increment per change,
+ * so two changes queued in the same instant still get distinct, increasing
+ * numbers. Null when that booking row is gone (see `oldestLiveChainUid` for
+ * where the count then lives).
+ */
 export async function claimIcsSequence(db: Db, calendarUid: string): Promise<number | null> {
   const row = await db.get<{ ics_sequence: number | string }>(
     sql`UPDATE booking SET ics_sequence = ics_sequence + 1 WHERE uid = ${calendarUid} RETURNING ics_sequence`,
@@ -2191,6 +2214,13 @@ export async function claimIcsSequence(db: Db, calendarUid: string): Promise<num
   return row ? Number(row.ics_sequence) : null;
 }
 
+/**
+ * Load the attendee + host + timing a booking email needs (B1-B4). Returns null
+ * if the booking or its attendee is gone. Host email is included so the .ics
+ * carries an ORGANIZER and the host can be a recipient (parity with old). On
+ * multi-host team bookings, every assigned co-host is loaded too so all hosts
+ * are notified.
+ */
 export async function loadBookingNotificationContext(
   db: Db,
   uid: string,

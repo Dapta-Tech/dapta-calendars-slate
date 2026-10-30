@@ -281,6 +281,96 @@ export async function tagCalendarChangeWithInviteeEmail(
 }
 
 /**
+ * What a calendar change's outbox row records about the invitee email queued
+ * for it (its payload, as JSON). `inviteeEmailId` is the mark the email side
+ * puts on it (`tagCalendarChangeWithInviteeEmail`). `providerMuted` is set by
+ * the calendar job when it wrote the change without the provider's own
+ * invitation, and `reinvited` once the provider was asked to invite after all,
+ * because that email never went out (`reinvite` calendar job).
+ */
+export interface CalendarChangeMark {
+  inviteeEmailId: string;
+  providerMuted?: boolean;
+  /** A delete's looks at its cancellation email so far (its own count, apart from failures). */
+  emailWaits?: number;
+  /** The reinvite has taken the guest off the event; a retry only puts them back. */
+  guestRemoved?: boolean;
+  reinvited?: boolean;
+}
+
+/**
+ * The calendar change (`create` or `reschedule`, or `delete`) marked with this
+ * invitee email, or null when the email marked none. A `reinvite` row names
+ * the same email and is never the change itself.
+ */
+export async function findCalendarChangeForInviteeEmail(
+  db: Db,
+  bookingUid: string,
+  emailOutboxId: string,
+): Promise<{ id: string; action: string; status: OutboxStatus; mark: CalendarChangeMark } | null> {
+  const rows = await db.all<{ id: string; action: string; status: OutboxStatus; payload: string | null }>(
+    sql`SELECT id, action, status, payload FROM outbox
+        WHERE kind = 'calendar' AND booking_uid = ${bookingUid}
+          AND action IN ('create', 'reschedule', 'delete')
+          AND payload LIKE ${`%${emailOutboxId}%`}`,
+  );
+  for (const row of rows) {
+    const mark = readCalendarChangeMark(row.payload);
+    if (mark?.inviteeEmailId === emailOutboxId) return { id: row.id, action: row.action, status: row.status, mark };
+  }
+  return null;
+}
+
+/** A calendar row's payload as a `CalendarChangeMark`, or null when it carries none. */
+export function readCalendarChangeMark(payload: string | null): CalendarChangeMark | null {
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload) as Partial<CalendarChangeMark> | null;
+    if (!parsed || typeof parsed.inviteeEmailId !== 'string' || !parsed.inviteeEmailId) return null;
+    const waits = parsed.emailWaits;
+    return {
+      inviteeEmailId: parsed.inviteeEmailId,
+      ...(parsed.providerMuted === true ? { providerMuted: true } : {}),
+      ...(typeof waits === 'number' && Number.isInteger(waits) && waits > 0 ? { emailWaits: waits } : {}),
+      ...(parsed.guestRemoved === true ? { guestRemoved: true } : {}),
+      ...(parsed.reinvited === true ? { reinvited: true } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Write a calendar row's mark (its payload). Only the calendar job and the reinvite job call it. */
+export async function writeCalendarChangeMark(db: Db, outboxId: string, mark: CalendarChangeMark): Promise<void> {
+  await db.run(sql`UPDATE outbox SET payload = ${JSON.stringify(mark)} WHERE id = ${outboxId} AND kind = 'calendar'`);
+}
+
+/** Whether a `reinvite` row for this invitee email was already queued (any status). */
+export async function hasReinviteFor(db: Db, bookingUid: string, emailOutboxId: string): Promise<boolean> {
+  const rows = await db.all<{ payload: string | null }>(
+    sql`SELECT payload FROM outbox
+        WHERE kind = 'calendar' AND booking_uid = ${bookingUid} AND action = 'reinvite'
+          AND payload LIKE ${`%${emailOutboxId}%`}`,
+  );
+  return rows.some((r) => readCalendarChangeMark(r.payload)?.inviteeEmailId === emailOutboxId);
+}
+
+/**
+ * Take a queued row back before it goes out: mark it `skipped` with `reason`,
+ * unless a worker is delivering it right now (leased) or it already finished.
+ * Answers whether it was taken.
+ */
+export async function skipQueuedOutboxRow(db: Db, id: string, reason: string, now: number = Date.now()): Promise<boolean> {
+  const row = await db.get<{ id: string }>(
+    sql`UPDATE outbox
+        SET status = 'skipped', last_error = ${reason.slice(0, 1000)}, updated_at = ${now}
+        WHERE id = ${id} AND status = 'pending' AND (lease_until IS NULL OR lease_until <= ${now})
+        RETURNING id`,
+  );
+  return !!row;
+}
+
+/**
  * Delete still-PENDING rows matching a booking + kind + action — used to cancel
  * scheduled reminders when a booking is cancelled/declined or moved (before they
  * fire). Never touches rows already `done`/`failed`.

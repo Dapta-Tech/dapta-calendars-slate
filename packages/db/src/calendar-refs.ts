@@ -162,6 +162,11 @@ export interface CalendarWriteContext {
    * one. Optional like `accountId`; absent reads as none.
    */
   otherGuestCount?: number;
+  /**
+   * The booking's invitee, normalized (`primaryAttendeeKey`): the one person
+   * this service emails about the booking. Optional like `accountId`.
+   */
+  inviteeKey?: string | null;
   title: string;
   /**
    * The event's body, rendered from the event type's description template
@@ -392,6 +397,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     bookingId: b.id,
     accountId: b.account_id,
     otherGuestCount,
+    inviteeKey,
     uid: b.uid,
     title: b.title,
     description: b.calendar_description,
@@ -532,12 +538,14 @@ export async function setBookingReferenceMeetingUrl(
  * The precise answer to "is it worth waiting for a link" (ADR 0007). It is
  * FALSE by construction on a bare fork — a disabled provider enqueues no
  * calendar row at all — and false once the job has finished or given up, so a
- * booking that can never receive a link is never delayed for one.
+ * booking that can never receive a link is never delayed for one. A
+ * `reinvite` row only asks the provider to invite and never mints a room, so
+ * it is not a write-out to wait for.
  */
 export async function hasPendingCalendarJob(db: Db, uid: string): Promise<boolean> {
   const row = await db.get<{ n: number }>(
     sql`SELECT COUNT(*) AS n FROM outbox
-        WHERE kind = 'calendar' AND booking_uid = ${uid} AND status = 'pending'`,
+        WHERE kind = 'calendar' AND booking_uid = ${uid} AND status = 'pending' AND action <> 'reinvite'`,
   );
   return Number(row?.n ?? 0) > 0;
 }

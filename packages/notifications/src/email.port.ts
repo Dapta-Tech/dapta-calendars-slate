@@ -50,6 +50,17 @@ export interface EmailResult {
   driver: EmailDriver;
 }
 
+/**
+ * Thrown by a transport when the mail service refuses a message for good: a
+ * recipient it has suppressed (an earlier bounce, a spam report, an
+ * unsubscribe) or another policy block. Sending the same message again cannot
+ * change the answer, so a caller that queues mail records the refusal once
+ * instead of retrying it.
+ */
+export class EmailRefusedError extends Error {
+  override readonly name = 'EmailRefusedError';
+}
+
 export interface EmailProvider {
   /**
    * Deliver one email. Implementations resolve with `delivered:false` for an

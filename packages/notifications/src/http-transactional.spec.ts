@@ -6,7 +6,7 @@ import {
 } from './adapters/http';
 import { BookingNotifier, type BookingNotification } from './booking-notifier';
 import { icsContentType } from './ics';
-import type { EmailMessage } from './email.port';
+import { EmailRefusedError, type EmailMessage } from './email.port';
 
 /** A fetch stub that records the request and returns a canned JSON response. */
 function stubFetch(status: number, body: unknown) {
@@ -291,6 +291,27 @@ describe('transactional-v1 wire — response interpretation', () => {
     ).toThrow(/blocked by policy: suppressed recipient/);
   });
 
+  it('blocked_by_policy is a refusal for good (EmailRefusedError), unlike a transport failure', () => {
+    const refusal = (() => {
+      try {
+        interpretTransactionalResponse(200, { status: 'blocked_by_policy', blockedReason: 'recipient_suppressed' });
+      } catch (err) {
+        return err;
+      }
+    })();
+    expect(refusal).toBeInstanceOf(EmailRefusedError);
+    expect((refusal as Error).name).toBe('EmailRefusedError');
+    // A failure the service may get past later stays a plain error, retried.
+    const failures = [
+      () => interpretTransactionalResponse(503, {}),
+      () => interpretTransactionalResponse(200, { status: 'bounced' }),
+    ];
+    for (const attempt of failures) {
+      expect(attempt).toThrow();
+      expect(attempt).not.toThrow(EmailRefusedError);
+    }
+  });
+
   it('a malformed 2xx (no status) THROWS', () => {
     expect(() => interpretTransactionalResponse(200, { messageId: 'x' })).toThrow(/malformed/);
     expect(() => interpretTransactionalResponse(200, null)).toThrow(/malformed/);
@@ -313,6 +334,7 @@ describe('transactional-v1 wire — response interpretation', () => {
       impl,
     );
     await expect(provider.send(message)).rejects.toThrow(/blocked by policy: bounced/);
+    await expect(provider.send(message)).rejects.toBeInstanceOf(EmailRefusedError);
   });
 });
 

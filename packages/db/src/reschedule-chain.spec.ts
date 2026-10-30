@@ -4,7 +4,13 @@ import { createDb, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
-import { bookingCalendarUid, claimIcsSequence, loadBookingNotificationContext, rescheduleChainRoot } from './parity';
+import {
+  bookingCalendarUid,
+  claimIcsSequence,
+  loadBookingNotificationContext,
+  oldestLiveChainUid,
+  rescheduleChainRoot,
+} from './parity';
 
 /**
  * The uid the invitee's calendar knows a meeting by. A move through the v2 API
@@ -82,5 +88,25 @@ describe('rescheduleChainRoot', () => {
     const claimed = await Promise.all([claimIcsSequence(db, uid), claimIcsSequence(db, uid), claimIcsSequence(db, uid)]);
     expect([...claimed].sort()).toEqual([1, 2, 3]);
     expect(await claimIcsSequence(db, 'no-such-booking')).toBeNull();
+  });
+
+  it('oldestLiveChainUid: the oldest booking of the chain whose row is still there', async () => {
+    const a = await bookOne();
+    const b = await bookOne();
+    const c = await bookOne();
+    await pointBack(b, a);
+    await pointBack(c, b);
+    expect(await oldestLiveChainUid(db, c)).toBe(a);
+    // The first booking's row removed by hand: the next one down holds the count,
+    // for every later move in the chain alike.
+    await db.run(sql`DELETE FROM booking WHERE uid = ${a}`);
+    expect(await bookingCalendarUid(db, c)).toBe(a);
+    expect(await claimIcsSequence(db, a)).toBeNull();
+    expect(await oldestLiveChainUid(db, c)).toBe(b);
+    expect(await oldestLiveChainUid(db, b)).toBe(b);
+    expect(await oldestLiveChainUid(db, 'no-such-booking')).toBeNull();
+    // A cycle ends the walk.
+    await pointBack(b, c);
+    expect([b, c]).toContain(await oldestLiveChainUid(db, c));
   });
 });

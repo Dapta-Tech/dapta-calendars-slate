@@ -2,7 +2,18 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createDb, type Db } from './client';
 import { migrate } from './migrate';
-import { enqueueOutbox, listOutbox, markOutboxDone, tagCalendarChangeWithInviteeEmail } from './outbox';
+import {
+  enqueueOutbox,
+  findCalendarChangeForInviteeEmail,
+  hasReinviteFor,
+  listOutbox,
+  markOutboxDone,
+  readCalendarChangeMark,
+  skipQueuedOutboxRow,
+  tagCalendarChangeWithInviteeEmail,
+  writeCalendarChangeMark,
+} from './outbox';
+import { hasPendingCalendarJob } from './calendar-refs';
 
 /**
  * The invitee email marks the calendar change it goes out with, so the
@@ -64,5 +75,89 @@ describe('tagCalendarChangeWithInviteeEmail', () => {
     await db.run(sql`UPDATE outbox SET lease_until = ${Date.now() + 60_000}, lease_token = ${'w1'} WHERE id = ${claimed}`);
     expect(await tagCalendarChangeWithInviteeEmail(db, { bookingUid: 'bk-4', action: 'create', emailOutboxId: 'em-4' })).toBe(false);
     expect((await calendarRows('bk-4'))[0]!.payload).toBeNull();
+  });
+});
+
+/**
+ * What a calendar change records about the invitee email it counted on, and
+ * how the job that has the provider invite after all finds it.
+ */
+describe('the calendar change mark', () => {
+  let db: Db;
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+  });
+
+  it('finds the change an email marked, keeps its flags, and never takes a reinvite row for it', async () => {
+    const create = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: 'bk-5', now: 100 });
+    await tagCalendarChangeWithInviteeEmail(db, { bookingUid: 'bk-5', action: 'create', emailOutboxId: 'em-5' });
+    await enqueueOutbox(db, {
+      kind: 'calendar',
+      action: 'reinvite',
+      bookingUid: 'bk-5',
+      payload: JSON.stringify({ inviteeEmailId: 'em-5' }),
+    });
+    expect(await findCalendarChangeForInviteeEmail(db, 'bk-5', 'em-5')).toEqual({
+      id: create,
+      action: 'create',
+      status: 'pending',
+      mark: { inviteeEmailId: 'em-5' },
+    });
+    await writeCalendarChangeMark(db, create, { inviteeEmailId: 'em-5', providerMuted: true });
+    expect((await findCalendarChangeForInviteeEmail(db, 'bk-5', 'em-5'))!.mark).toEqual({
+      inviteeEmailId: 'em-5',
+      providerMuted: true,
+    });
+    // Another email, another booking: nothing.
+    expect(await findCalendarChangeForInviteeEmail(db, 'bk-5', 'em-6')).toBeNull();
+    expect(await findCalendarChangeForInviteeEmail(db, 'bk-other', 'em-5')).toBeNull();
+  });
+
+  it('reads only a well-formed mark', () => {
+    expect(readCalendarChangeMark(null)).toBeNull();
+    expect(readCalendarChangeMark('not json')).toBeNull();
+    expect(readCalendarChangeMark(JSON.stringify({ providerMuted: true }))).toBeNull();
+    expect(readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', providerMuted: 'yes' }))).toEqual({
+      inviteeEmailId: 'em-7',
+    });
+    expect(readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', reinvited: true }))).toEqual({
+      inviteeEmailId: 'em-7',
+      reinvited: true,
+    });
+    expect(
+      readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', emailWaits: 2, guestRemoved: true })),
+    ).toEqual({ inviteeEmailId: 'em-7', emailWaits: 2, guestRemoved: true });
+    expect(readCalendarChangeMark(JSON.stringify({ inviteeEmailId: 'em-7', emailWaits: -1 }))).toEqual({
+      inviteeEmailId: 'em-7',
+    });
+  });
+
+  it('knows a reinvite already queued for an email, and only for that email', async () => {
+    expect(await hasReinviteFor(db, 'bk-9', 'em-9')).toBe(false);
+    await enqueueOutbox(db, { kind: 'calendar', action: 'reinvite', bookingUid: 'bk-9', payload: JSON.stringify({ inviteeEmailId: 'em-9' }) });
+    expect(await hasReinviteFor(db, 'bk-9', 'em-9')).toBe(true);
+    expect(await hasReinviteFor(db, 'bk-9', 'em-90')).toBe(false);
+  });
+
+  it('takes back a queued row, never one being sent or already finished', async () => {
+    const queued = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'bk-10' });
+    expect(await skipQueuedOutboxRow(db, queued, 'superseded')).toBe(true);
+    const row = (await listOutbox(db, { bookingUid: 'bk-10' }))[0]!;
+    expect([row.status, row.lastError]).toEqual(['skipped', 'superseded']);
+    const leased = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'bk-11' });
+    await db.run(sql`UPDATE outbox SET lease_until = ${Date.now() + 60_000}, lease_token = ${'w1'} WHERE id = ${leased}`);
+    expect(await skipQueuedOutboxRow(db, leased, 'superseded')).toBe(false);
+    const sent = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'bk-12' });
+    await markOutboxDone(db, sent);
+    expect(await skipQueuedOutboxRow(db, sent, 'superseded')).toBe(false);
+  });
+
+  it('a pending reinvite is not a write-out an email waits on for its link', async () => {
+    await enqueueOutbox(db, { kind: 'calendar', action: 'reinvite', bookingUid: 'bk-8', payload: '{}' });
+    expect(await hasPendingCalendarJob(db, 'bk-8')).toBe(false);
+    await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: 'bk-8' });
+    expect(await hasPendingCalendarJob(db, 'bk-8')).toBe(true);
   });
 });

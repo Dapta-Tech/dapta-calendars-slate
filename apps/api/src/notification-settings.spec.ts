@@ -484,6 +484,30 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(await seq('cancellation')).toEqual([5, 5]);
   });
 
+  it('a move whose first booking row is gone still claims a number above the fixed ones', async () => {
+    const uid = await book();
+    await settle();
+    // The meeting began as another booking whose row no longer exists: the .ics
+    // keeps that uid, and the count lives on the oldest row still there.
+    await db.run(sql`UPDATE booking SET rescheduled_from_uid = ${'gone-first-booking'} WHERE uid = ${uid}`);
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 4 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    for (const slot of [a!.slots[5]!, a!.slots[7]!]) {
+      const out = await booking.reschedule(uid, { newStartUtc: slot.startUtc, byHost: true });
+      expect('error' in out).toBe(false);
+      await settle();
+    }
+    const payloads = (await emailRows(uid, 'reschedule')).map(
+      (r) => JSON.parse(r.payload!) as { icsSequence?: number; calendarUid?: string },
+    );
+    expect(payloads.map((p) => p.icsSequence).sort()).toEqual([3, 3, 4, 4]);
+  });
+
   it("the invitee's email marks the pending calendar change it goes out with", async () => {
     const uid = await book();
     await settle();
