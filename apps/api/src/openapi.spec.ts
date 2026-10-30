@@ -34,7 +34,7 @@ describe('OpenAPI spec (E11)', () => {
     for (const tok of tokens) expect(json.toLowerCase()).not.toContain(tok);
   });
 
-  it('locks the MVP versions, Bearer auth, response envelopes, and mutation idempotency', () => {
+  it('locks the versions, Bearer auth, response envelopes, and mutation idempotency', () => {
     const slots = openapiSpec.paths['/v2/slots'].get;
     const bookings = openapiSpec.paths['/v2/bookings'].post;
     const getBooking = openapiSpec.paths['/v2/bookings/{uid}'].get;
@@ -67,13 +67,46 @@ describe('OpenAPI spec (E11)', () => {
     expect([...CAL_VERSION_PINS].map(([op, v]) => [op, v]).sort()).toEqual(declared.sort());
   });
 
+  it('groups every operation under a declared tag, with no internal wording in what the sidebar shows', () => {
+    const declared = openapiSpec.tags.map((t) => t.name);
+    const used = new Set<string>();
+    const internal = /\bmvp\b|pilot|flow[ -]?studio|vault|dapta|^agent\b/i;
+    for (const t of openapiSpec.tags) expect(`${t.name} ${t.description}`).not.toMatch(internal);
+    for (const [path, item] of Object.entries(openapiSpec.paths as unknown as Record<string, Record<string, { tags?: readonly string[]; summary?: string; description?: string }>>))
+      for (const [method, op] of Object.entries(item)) {
+        const where = `${method.toUpperCase()} ${path}`;
+        expect(op.tags, where).toHaveLength(1);
+        expect(declared, where).toContain(op.tags![0]);
+        used.add(op.tags![0]!);
+        expect(op.summary ?? '', where).not.toMatch(internal);
+        expect(op.description ?? '', where).not.toMatch(internal);
+      }
+    expect([...used].sort()).toEqual([...declared].sort());
+  });
+
+  it('carries no internal or build-stage wording anywhere in the document, keys included', () => {
+    const found: string[] = [];
+    const walk = (v: unknown, at: string): void => {
+      if (typeof v === 'string') {
+        if (/\bmvp\b|pilot|flow[ -]?studio|vault/i.test(v)) found.push(at);
+      } else if (v && typeof v === 'object') {
+        for (const [k, x] of Object.entries(v)) {
+          if (/\bmvp\b|pilot|flow[ -]?studio|vault/i.test(k)) found.push(`${at}.${k}`);
+          walk(x, `${at}.${k}`);
+        }
+      }
+    };
+    walk(openapiSpec, '$');
+    expect(found).toEqual([]);
+  });
+
   it('documents discoverable permissions and the 100-calendar JSON batch extension', () => {
     const calendar = openapiSpec.components.schemas.Calendar;
     const batch = openapiSpec.components.schemas.CalendarAvailabilityInput;
     expect(calendar.properties).toHaveProperty('accessRole');
     expect(calendar.properties).toHaveProperty('capabilities');
     expect(batch.properties.calendarIds.maxItems).toBe(100);
-    expect(openapiSpec.paths['/v2/calendars/availability'].post.tags).toContain('Dapta MVP extension');
+    expect(openapiSpec.paths['/v2/calendars/availability'].post.tags).toContain('Calendar availability');
   });
 });
 
