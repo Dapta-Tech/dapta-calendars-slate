@@ -8,7 +8,8 @@ import type { AnchorHTMLAttributes, ReactElement, ReactNode } from 'react';
 
 const admin = vi.hoisted(() => ({ listBookings: vi.fn(), me: vi.fn() }));
 vi.mock('@/lib/admin-api', () => ({ adminApi: admin }));
-vi.mock('@/lib/locale', () => ({ getLocale: async () => 'en' }));
+const locale = vi.hoisted(() => ({ current: 'en' as 'en' | 'es' }));
+vi.mock('@/lib/locale', () => ({ getLocale: async () => locale.current }));
 vi.mock('next/link', () => ({
   default: ({ children, ...rest }: AnchorHTMLAttributes<HTMLAnchorElement> & { children: ReactNode }) => (
     <a {...rest}>{children}</a>
@@ -37,7 +38,21 @@ const render = async () => renderToStaticMarkup((await BookingsPage()) as ReactE
 describe('the bookings list', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    locale.current = 'en';
     admin.me.mockResolvedValue({ timeZone: 'UTC' });
+  });
+
+  it("writes each row's date in the reader's language", async () => {
+    const start = '2026-11-19T23:00:00.000Z';
+    admin.me.mockResolvedValue({ timeZone: 'America/Bogota' });
+    admin.listBookings.mockResolvedValue({ items: [{ ...row('up-1', 'accepted', 3, 'Coming up'), startUtc: start }] });
+
+    expect(await render()).toContain('Thu, Nov 19, 6:00 PM GMT-5');
+
+    locale.current = 'es';
+    const es = await render();
+    expect(es).toContain('jue, 19 nov, 18:00 GMT-5');
+    expect(es).not.toContain('Thu, Nov 19');
   });
 
   it("links every row, in each part of the list, to the booking's own page", async () => {

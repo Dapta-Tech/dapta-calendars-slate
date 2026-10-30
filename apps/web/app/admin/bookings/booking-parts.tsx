@@ -1,4 +1,4 @@
-import type { BookingMessages } from '@slate/shared';
+import type { BookingMessages, Locale } from '@slate/shared';
 
 /**
  * What the bookings list and a booking's own page both say about a booking,
@@ -33,9 +33,17 @@ export function statusLabel(status: string, m: BookingsMessages): string {
   }
 }
 
-/** The booking's start in the host's zone, with the zone's short name. */
-export function formatBookingStart(startUtc: string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-US', {
+/**
+ * The Intl locale a dashboard date is written in: Spanish for a Spanish
+ * reader ("jue, 19 nov, 18:00 GMT-5"), else the US English it always was.
+ */
+export function dateLocale(locale: Locale): string {
+  return locale === 'es' ? 'es' : 'en-US';
+}
+
+/** The booking's start in the host's zone, with the zone's short name, in the reader's language. */
+export function formatBookingStart(startUtc: string, timeZone: string, locale: Locale = 'en'): string {
+  return new Intl.DateTimeFormat(dateLocale(locale), {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
