@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getMessages, isNavItemActive } from '@slate/shared';
 import {
   adminNav,
+  apiDocsNavHref,
   DEVELOPER_PAGES,
   DEVELOPERS_CONNECT_HREF,
   DEVELOPERS_DOCS_HREF,
@@ -17,6 +18,7 @@ import {
  * only draws this list, so the rules live (and are proven) here.
  */
 const DOCS = 'https://docs.example.test/?utm_source=calendars&utm_medium=sidebar';
+const API_DOCS = 'https://api.example.test/docs';
 const keys = (items: ReturnType<typeof adminNav>) => items.map((i) => i.key);
 
 describe('adminNav', () => {
@@ -74,21 +76,29 @@ describe('adminNav', () => {
     expect(items.filter((i) => i.prominent).map((i) => i.key)).toEqual(['connect']);
   });
 
-  it('makes API and webhooks a quiet group of the keys, webhooks and API docs pages', () => {
-    const api = adminNav({ isAdmin: true, docsHref: null }).find((i) => i.key === 'api');
+  it('makes API and webhooks a quiet group of the keys and webhooks pages, then the API reference, external', () => {
+    const api = adminNav({ isAdmin: true, docsHref: null, apiDocsHref: API_DOCS }).find((i) => i.key === 'api');
     expect(api).toMatchObject({ href: DEVELOPERS_HREF, icon: 'api' });
     expect(api?.prominent).toBeUndefined();
     expect(api?.external).toBeUndefined();
-    expect(api?.children?.map((p) => [p.key, p.href])).toEqual([
-      ['keys', DEVELOPERS_KEYS_HREF],
-      ['webhooks', DEVELOPERS_WEBHOOKS_HREF],
-      ['docs', DEVELOPERS_DOCS_HREF],
+    expect(api?.children?.map((p) => [p.key, p.href, p.external])).toEqual([
+      ['keys', DEVELOPERS_KEYS_HREF, undefined],
+      ['webhooks', DEVELOPERS_WEBHOOKS_HREF, undefined],
+      // The reference itself, never the dashboard page that only redirects to it.
+      ['docs', API_DOCS, true],
     ]);
+    expect(api?.children?.map((p) => p.href)).not.toContain(DEVELOPERS_DOCS_HREF);
+  });
+
+  it('has no API docs item when the deployment does not say where its API is served', () => {
+    const api = adminNav({ isAdmin: true, docsHref: null, apiDocsHref: null }).find((i) => i.key === 'api');
+    expect(api?.children?.map((p) => p.key)).toEqual(['keys', 'webhooks']);
+    expect(adminNav({ isAdmin: true, docsHref: null }).find((i) => i.key === 'api')?.children).toHaveLength(2);
   });
 
   it('marks the group active on its own pages only, never on the connect guide or Tools beside them', () => {
     const api = adminNav({ isAdmin: true, docsHref: null }).find((i) => i.key === 'api')!;
-    for (const page of DEVELOPER_PAGES) {
+    for (const page of [...DEVELOPER_PAGES, { href: DEVELOPERS_DOCS_HREF }]) {
       expect(isNavItemActive(page.href, api.href, api.match)).toBe(true);
       expect(isNavItemActive(`${page.href}/anything`, api.href, api.match)).toBe(true);
     }
@@ -102,9 +112,18 @@ describe('adminNav', () => {
   it('has a label for every item and page in both languages', () => {
     for (const locale of ['en', 'es'] as const) {
       const admin = getMessages(locale).admin;
-      for (const item of adminNav({ isAdmin: true, docsHref: DOCS })) expect(admin.nav[item.key]).toBeTruthy();
-      for (const page of DEVELOPER_PAGES) expect(admin.developerNav[page.key]).toBeTruthy();
+      const items = adminNav({ isAdmin: true, docsHref: DOCS, apiDocsHref: API_DOCS });
+      for (const item of items) expect(admin.nav[item.key]).toBeTruthy();
+      for (const page of items.find((i) => i.key === 'api')!.children!) expect(admin.developerNav[page.key]).toBeTruthy();
     }
+  });
+});
+
+describe('apiDocsNavHref', () => {
+  it("is the reference on the API's origin, path prefix kept, or null without one", () => {
+    expect(apiDocsNavHref('https://api.example.test')).toBe(API_DOCS);
+    expect(apiDocsNavHref('https://host.example.test/calendar-api')).toBe('https://host.example.test/calendar-api/docs');
+    expect(apiDocsNavHref(null)).toBeNull();
   });
 });
 
