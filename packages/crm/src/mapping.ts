@@ -411,19 +411,34 @@ export function buildMappedProperties(
 ): Record<string, string> {
   const byName = new Map(properties.map((p) => [p.name.toLowerCase(), p]));
   const out: Record<string, string> = {};
+  const campaign = hasCampaign(ctx.utm);
   for (const mapping of mappings) {
     const raw = rawValue(mapping.source, ctx);
-    if (raw == null || raw === '') continue;
+    const missing = raw == null || raw === '';
+    // A campaign is one set: once a booking carries any `utm_*`, a mapped key
+    // it lacks clears its property, so two campaigns never mix on one contact.
+    // A booking with no campaign at all leaves the earlier one in place.
+    const clear = missing && mapping.source.kind === 'utm' && campaign;
+    if (missing && !clear) continue;
     for (const target of mapping.properties) {
       const key = target.toLowerCase();
       if ((CRM_IDENTITY_PROPERTIES as readonly string[]).includes(key)) continue;
       const property = byName.get(key);
       if (!property) continue;
+      if (clear) {
+        out[property.name] = '';
+        continue;
+      }
       const coerced = coerceValue(raw, property);
       if (coerced !== null) out[property.name] = coerced;
     }
   }
   return out;
+}
+
+/** Whether the booking kept any `utm_*` at all. */
+function hasCampaign(utm: BookingUtm | null | undefined): boolean {
+  return !!utm && Object.values(utm).some((v) => typeof v === 'string' && v.trim() !== '');
 }
 
 // --- Auto-map --------------------------------------------------------------

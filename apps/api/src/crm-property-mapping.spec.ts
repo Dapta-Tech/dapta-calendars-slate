@@ -392,7 +392,9 @@ describe('CRM property mapping (H2, #108)', () => {
     await setBookingUtm(db, uid, { utm_source: 'newsletter', utm_medium: 'SMB', utm_campaign: 'q4 launch' });
     const write = await deliver(uid);
 
-    expect(write.properties).toEqual({ jobtitle: 'newsletter', tier: 'smb' });
+    // utm_term is mapped but this campaign has none: its property is cleared, so an
+    // earlier campaign's term never sits beside this one.
+    expect(write.properties).toEqual({ jobtitle: 'newsletter', tier: 'smb', phone: '' });
     const body = crm.meetings.at(-1)!.body!;
     expect(body).toContain('utm_source: newsletter\nutm_medium: SMB\nutm_campaign: q4 launch');
     expect(body).not.toContain('utm_term');

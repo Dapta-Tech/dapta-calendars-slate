@@ -128,6 +128,23 @@ describe('renderMeetingBody', () => {
     );
   });
 
+  it('turns markup typed into a link or an answer into text, and keeps an ampersand as typed', () => {
+    const body = renderMeetingBody({
+      hostName: null,
+      bookingUid: 'bk_3',
+      answers: [{ label: 'Team', value: 'R&D <b>' }],
+      utm: { utm_campaign: '<a href="https://x.example">Verify</a>' },
+      labels: EN,
+    });
+    expect(body).toBe(
+      [
+        'Team: R&D &lt;b&gt;',
+        'utm_campaign: &lt;a href="https://x.example"&gt;Verify&lt;/a&gt;',
+        'Booking reference: bk_3',
+      ].join('\n'),
+    );
+  });
+
   it('adds no campaign line to a booking without one', () => {
     for (const utm of [null, undefined, {}]) {
       const body = renderMeetingBody({ hostName: null, bookingUid: 'bk_2', answers: [], utm, labels: EN });

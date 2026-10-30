@@ -350,12 +350,13 @@ describe('the booking campaign as a source (utm_*)', () => {
     expect(out).toEqual({ utm_source: 'Newsletter', lead_source: 'newsletter', utm_campaign: 'q4 launch' });
   });
 
-  it('sends nothing for a key the booking does not have, or a booking without a campaign', () => {
+  it('clears a mapped key the booking lacks when it has a campaign, and sends nothing without one', () => {
     const mappings = [
       { source: utm('utm_term'), properties: ['utm_source'] },
       { source: utm('utm_campaign'), properties: ['utm_campaign'] },
     ];
-    expect(buildMappedProperties(mappings, properties, ctx)).toEqual({ utm_campaign: 'q4 launch' });
+    // One set: an earlier campaign's utm_term must not stay beside this utm_campaign.
+    expect(buildMappedProperties(mappings, properties, ctx)).toEqual({ utm_source: '', utm_campaign: 'q4 launch' });
     expect(buildMappedProperties(mappings, properties, { ...ctx, utm: null })).toEqual({});
     const { utm: _omitted, ...older } = ctx;
     expect(buildMappedProperties(mappings, properties, older)).toEqual({});

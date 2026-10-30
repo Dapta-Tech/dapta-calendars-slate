@@ -62,7 +62,17 @@ export function renderMeetingBody(input: MeetingBodyInput): string {
     if (value) lines.push(`${key}: ${value}`);
   }
   lines.push(`${input.labels.bookingReference}: ${input.bookingUid}`);
-  return lines.join('\n');
+  return withoutMarkup(lines.join('\n'));
+}
+
+/**
+ * The body as text a CRM cannot read as markup: answers and campaign values
+ * come from whoever opened the booking link, and a CRM that renders the body
+ * as rich text would otherwise turn `<a href=...>` in one into a live link on
+ * the host's record. Only `<` and `>` change, so an `&` in "R&D" reads as typed.
+ */
+function withoutMarkup(text: string): string {
+  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** `[Canceled] ` prefix on cancel, applied once — a re-run must not stack it. */
