@@ -60,6 +60,11 @@ never give the model orders, as the Claude and ChatGPT connector directories
 require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
 exposed over MCP: webhooks, API keys, team administration, event-type edits.
 
+Output schemas are open: every object in them allows properties it does not
+list, so a new field never breaks a session that listed the tools before a
+deploy (clients check each result against the schema they listed);
+`apps/api/src/mcp/mcp.output-schema.spec.ts` pins it.
+
 Every tool that acts on the caller's account (all but `book_meeting` and
 `list_my_accounts`) takes an optional `account_id`. A key or a sign-in that
 reaches one account never needs it, and may name only that account. A sign-in
