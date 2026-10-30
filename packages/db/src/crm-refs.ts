@@ -13,7 +13,7 @@
  * context.
  */
 import { sql } from 'drizzle-orm';
-import type { CrmPropertyMappings } from '@slate/types';
+import { normalizeBookingUtm, type BookingUtm, type CrmPropertyMappings } from '@slate/types';
 import type { Db } from './client';
 import { parseJsonColumn, type BookingFieldDef } from './repository';
 
@@ -82,6 +82,11 @@ export interface CrmWriteContext {
   eventTypeTitle: string | null;
   lengthMinutes: number | null;
   hostEmail: string | null;
+  /**
+   * The campaign the booking came from (`booking.utm`), null when none: listed
+   * in the meeting body and mappable onto contact properties (`kind: 'utm'`).
+   */
+  utm: BookingUtm | null;
 }
 
 /**
@@ -126,6 +131,7 @@ export async function loadBookingForCrmWrite(db: Db, uid: string): Promise<CrmWr
     end_ms: number;
     status: string;
     responses: unknown;
+    utm: unknown;
     rescheduled_from_uid: string | null;
     booking_fields: unknown;
     host_name: string | null;
@@ -136,7 +142,7 @@ export async function loadBookingForCrmWrite(db: Db, uid: string): Promise<CrmWr
     host_email: string | null;
   }>(
     sql`SELECT b.id, b.uid, b.account_id, b.title, b.start_ms, b.end_ms, b.status, b.responses,
-               b.rescheduled_from_uid,
+               b.utm, b.rescheduled_from_uid,
                et.booking_fields, et.crm_property_mappings,
                et.title AS event_type_title, et.length_minutes,
                m.display_name AS host_name, m.locale AS host_locale, m.email AS host_email
@@ -194,6 +200,7 @@ export async function loadBookingForCrmWrite(db: Db, uid: string): Promise<CrmWr
     eventTypeTitle: b.event_type_title,
     lengthMinutes: b.length_minutes == null ? null : Number(b.length_minutes),
     hostEmail: b.host_email,
+    utm: normalizeBookingUtm(parseJsonColumn<unknown>(b.utm, null)),
     answers,
     rescheduledFromUid: b.rescheduled_from_uid,
   };

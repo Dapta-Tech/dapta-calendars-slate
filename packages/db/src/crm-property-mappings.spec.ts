@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createDb, migrate, seed, sql, type Db } from './index';
-import { createEventType, getEventTypeById, updateEventType } from './crud';
+import { createEventType, getEventTypeById, setBookingUtm, updateEventType } from './crud';
 import { loadBookingForCrmWrite } from './crm-refs';
 import { createBooking, getAvailability } from './repository';
 import { crmPropertyMappingsSchema } from '@slate/types';
@@ -138,6 +138,13 @@ describe('crm_property_mappings (H2, #108)', () => {
     expect(ctx!.eventTypeTitle).toBe('Context call');
     expect(ctx!.lengthMinutes).toBe(45);
     expect(ctx!.hostEmail).toBeTruthy();
+    // No campaign on this booking yet: null, never a missing key.
+    expect(ctx!.utm).toBeNull();
+
+    // The campaign the booking came from, for the meeting body and `kind: 'utm'`.
+    const uid = (booked as { booking: { uid: string } }).booking.uid;
+    await setBookingUtm(db, uid, { utm_source: 'newsletter', utm_campaign: 'q4' });
+    expect((await loadBookingForCrmWrite(db, uid))!.utm).toEqual({ utm_source: 'newsletter', utm_campaign: 'q4' });
   });
 
   describe('the contract refuses what the editor never offers', () => {
@@ -186,6 +193,50 @@ describe('crm_property_mappings (H2, #108)', () => {
           hubspot: [{ source: { kind: 'event', field: 'manageUrl' }, properties: ['x'] }],
         }).success,
       ).toBe(false);
+    });
+
+    it('accepts a campaign key as a source, and only the five utm_* keys', () => {
+      const ok = crmPropertyMappingsSchema.safeParse({
+        hubspot: [
+          { source: { kind: 'utm', field: 'utm_source' }, properties: ['utm_source', 'lead_source'] },
+          { source: { kind: 'utm', field: 'utm_campaign' }, properties: ['utm_campaign'] },
+        ],
+      });
+      expect(ok.success).toBe(true);
+      for (const field of ['gclid', 'utm_id', 'source', '']) {
+        expect(
+          crmPropertyMappingsSchema.safeParse({
+            hubspot: [{ source: { kind: 'utm', field }, properties: ['x'] }],
+          }).success,
+          field,
+        ).toBe(false);
+      }
+    });
+
+    it('holds a campaign source to the same rules: once per event, never onto identity, one source per property', () => {
+      const twice = crmPropertyMappingsSchema.safeParse({
+        hubspot: [
+          { source: { kind: 'utm', field: 'utm_source' }, properties: ['utm_source'] },
+          { source: { kind: 'utm', field: 'utm_source' }, properties: ['lead_source'] },
+        ],
+      });
+      expect(twice.success).toBe(false);
+      expect(twice.error!.issues[0]!.message).toMatch(/utm:utm_source is mapped more than once/);
+
+      const identity = crmPropertyMappingsSchema.safeParse({
+        hubspot: [{ source: { kind: 'utm', field: 'utm_source' }, properties: ['email'] }],
+      });
+      expect(identity.success).toBe(false);
+      expect(identity.error!.issues[0]!.message).toMatch(/identity property/);
+
+      const shared = crmPropertyMappingsSchema.safeParse({
+        hubspot: [
+          { source: { kind: 'utm', field: 'utm_source' }, properties: ['lead_source'] },
+          { source: { kind: 'question', name: 'heard_from' }, properties: ['lead_source'] },
+        ],
+      });
+      expect(shared.success).toBe(false);
+      expect(shared.error!.issues[0]!.message).toMatch(/already mapped/);
     });
 
     it('accepts one source fanned out onto several properties', () => {
