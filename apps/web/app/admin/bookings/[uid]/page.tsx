@@ -60,7 +60,7 @@ export default async function BookingPage({ params }: { params: Promise<{ uid: s
           section === 'past' ? 'opacity-70' : ''
         }`}
       >
-        <span className="font-medium">{formatBookingStart(booking.startUtc, tz)}</span>
+        <span className="font-medium">{formatBookingStart(booking.startUtc, tz, locale)}</span>
         <BookingStatusPill status={booking.status} m={m} />
       </section>
       {/* Which zone the short "MST"-style label above refers to (QA2 fix 8c). */}

@@ -200,6 +200,16 @@ describe('the booking page the request email opens', () => {
     expect(html).not.toContain('mailto:');
   });
 
+  it("writes the booking's date in the reader's language", async () => {
+    admin.getBooking.mockResolvedValue(booking({ status: 'accepted', startUtc: '2026-11-19T23:00:00.000Z' }));
+    expect(await render()).toContain('Thu, Nov 19, 6:00 PM GMT-5');
+
+    locale.current = 'es';
+    const es = await render();
+    expect(es).toContain('jue, 19 nov, 18:00 GMT-5');
+    expect(es).not.toContain('Thu, Nov 19');
+  });
+
   it('asks the API in Spanish and says it in Spanish too', async () => {
     locale.current = 'es';
     admin.getBooking.mockResolvedValue(booking({ guest: { ...GUEST, answers: [{ label: 'Notas', value: 'Llamar antes' }] } }));

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { adminBookingPath, getMessages, t, safeTimeZone } from '@slate/shared';
+import { adminBookingPath, getMessages, t, safeTimeZone, type Locale } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
@@ -22,7 +22,8 @@ export default async function BookingsPage() {
   ]);
   // safeTimeZone: a corrupt stored zone must never crash the whole page (QA fix 1).
   const tz = safeTimeZone(me?.timeZone);
-  const m = getMessages(await getLocale()).admin.bookings;
+  const locale = await getLocale();
+  const m = getMessages(locale).admin.bookings;
   const now = Date.now();
   const pending = items.filter((b) => bookingSection(b, now) === 'pending');
   const upcoming = items.filter((b) => bookingSection(b, now) === 'upcoming');
@@ -50,10 +51,10 @@ export default async function BookingsPage() {
       </p>
 
       {pending.length > 0 ? (
-        <Section title={`${m.pendingConfirmation} (${pending.length})`} rows={pending} action="pending" timeZone={tz} m={m} />
+        <Section title={`${m.pendingConfirmation} (${pending.length})`} rows={pending} action="pending" timeZone={tz} locale={locale} m={m} />
       ) : null}
-      <Section title={`${m.upcoming} (${upcoming.length})`} rows={upcoming} action="cancel" timeZone={tz} m={m} />
-      <Section title={`${m.pastCancelled} (${past.length})`} rows={past} muted timeZone={tz} m={m} />
+      <Section title={`${m.upcoming} (${upcoming.length})`} rows={upcoming} action="cancel" timeZone={tz} locale={locale} m={m} />
+      <Section title={`${m.pastCancelled} (${past.length})`} rows={past} muted timeZone={tz} locale={locale} m={m} />
     </div>
   );
 }
@@ -64,6 +65,7 @@ function Section({
   muted,
   action,
   timeZone,
+  locale,
   m,
 }: {
   title: string;
@@ -71,6 +73,7 @@ function Section({
   muted?: boolean;
   action?: 'pending' | 'cancel';
   timeZone: string;
+  locale: Locale;
   m: BookingsMessages;
 }) {
   return (
@@ -97,7 +100,7 @@ function Section({
                   from and the same action this row offers. */}
               <Link href={adminBookingPath(b.uid)} className="group flex min-w-0 flex-col">
                 <span className="font-medium group-hover:underline">{b.title}</span>
-                <span className="text-sm text-muted-foreground">{formatBookingStart(b.startUtc, timeZone)}</span>
+                <span className="text-sm text-muted-foreground">{formatBookingStart(b.startUtc, timeZone, locale)}</span>
               </Link>
               <div className="flex items-center gap-field">
                 {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
