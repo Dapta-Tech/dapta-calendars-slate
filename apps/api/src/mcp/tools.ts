@@ -1267,7 +1267,12 @@ const whoami: ToolDef = {
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: whoamiInput,
   output: z.looseObject({
-    account: z.looseObject({ code: z.string(), name: z.string() }),
+    account: z.looseObject({
+      code: z
+        .string()
+        .describe("The first segment of the workspace's public booking links, as the dashboard shows it: its claimed public name when it has one, else its short code."),
+      name: z.string(),
+    }),
     host: z.looseObject({ display_name: z.string().nullable(), time_zone: z.string().nullable() }),
     key: z.looseObject({
       prefix: z.string(),
@@ -1281,9 +1286,12 @@ const whoami: ToolDef = {
     if (!call.principal)
       throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key.', CREDENTIAL_HINT);
     const p = call.principal;
-    const account = await deps.db.get<{ code: string; name: string }>(
-      sql`SELECT code, name FROM account WHERE id = ${p.accountId} LIMIT 1`,
+    const row = await deps.db.get<{ code: string; vanity_slug: string | null; name: string }>(
+      sql`SELECT code, vanity_slug, name FROM account WHERE id = ${p.accountId} LIMIT 1`,
     );
+    // The code the links carry and the dashboard shows (the vanity slug when
+    // claimed), never the short code the web layer redirects from.
+    const account = row ? { code: canonicalPublicCode(row), name: row.name } : null;
     const host =
       (await deps.db.get<{ display_name: string | null; time_zone: string | null }>(
         sql`SELECT display_name, time_zone FROM member WHERE account_id = ${p.accountId} AND role = 'owner'
