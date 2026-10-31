@@ -61,8 +61,10 @@ require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
 exposed over MCP: webhooks, API keys, team administration, event-type edits.
 
 Output schemas are open: every object in them allows properties it does not
-list, so a new field never breaks a session that listed the tools before a
-deploy (clients check each result against the schema they listed);
+list, and a value from a set (an event's `kind`, a team's `scheduling_type`)
+lists the known values but takes any string, so a new field or value never
+breaks a session that listed the tools before a deploy (clients check each
+result against the schema they listed);
 `apps/api/src/mcp/mcp.output-schema.spec.ts` pins it.
 
 Every tool that acts on the caller's account (all but `book_meeting` and
