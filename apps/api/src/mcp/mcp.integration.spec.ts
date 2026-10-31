@@ -325,7 +325,7 @@ describe('keyed tools', () => {
     expect(errorText(await narrow.callTool({ name: 'get_booking_page_link', arguments: { event_type_id: team.id } }))).toContain('NOT_FOUND');
   });
 
-  it('links use the claimed vanity slug, not the short code the web layer redirects', async () => {
+  it('links and whoami use the claimed vanity slug, not the short code the web layer redirects', async () => {
     await h.db.run(sql`UPDATE account SET vanity_slug = 'acme-inc' WHERE id = ${h.accountId}`);
     try {
       const c = await h.connect(await h.key(['event-types:read']));
@@ -338,6 +338,10 @@ describe('keyed tools', () => {
       expect(team.booking_page_url).toMatch(/^https:\/\/calendar\.example\.test\/acme-inc\/team\/[^/]+\/team-demo$/);
       const link = structured<{ booking_page_url: string }>(await c.callTool({ name: 'get_booking_page_link', arguments: { event_type_id: intro.id } }));
       expect(link.booking_page_url).toBe(intro.booking_page_url);
+      // whoami names the workspace the same way the links and the dashboard do.
+      const me = await c.callTool({ name: 'whoami', arguments: {} });
+      expect(structured<{ account: { code: string } }>(me).account.code).toBe('acme-inc');
+      expect(JSON.stringify(me)).not.toContain('(acme)');
     } finally {
       await h.db.run(sql`UPDATE account SET vanity_slug = NULL WHERE id = ${h.accountId}`);
     }
