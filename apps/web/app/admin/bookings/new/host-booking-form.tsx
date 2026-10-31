@@ -13,6 +13,7 @@ import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { FormHeader } from '@/components/ui/page-header';
 import { createDefaultScheduleAction } from '@/app/admin/availability/actions';
 import { createHostBookingAction, loadHostSlotsAction } from './actions';
+import { dateLocale } from '../booking-parts';
 
 type BookingsMessages = BookingMessages['admin']['bookings'];
 
@@ -289,7 +290,7 @@ export function HostBookingForm({
                 (startUtc === s ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background hover:border-primary')
               }
             >
-              {new Intl.DateTimeFormat('en-US', { weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz }).format(new Date(s))}
+              {new Intl.DateTimeFormat(dateLocale(locale ?? 'en'), { weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz }).format(new Date(s))}
             </button>
           ))}
           {slots.length === 0 ? (

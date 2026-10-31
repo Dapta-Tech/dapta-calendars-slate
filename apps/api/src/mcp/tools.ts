@@ -1599,7 +1599,13 @@ const createBookingInput = z.object({
   event_type_id: z.string().min(1).max(64).describe('From list_event_types.'),
   start: z.string().max(40).describe('Exact start of an offered slot from find_available_slots, ISO-8601 with offset.'),
   attendee,
-  guests: z.array(z.string().email().max(254)).max(10).optional().describe('Extra attendee emails; each is emailed.'),
+  guests: z
+    .array(z.string().email().max(254))
+    .max(10)
+    .optional()
+    .describe(
+      "Extra attendees' emails, added to the booking. dCal emails the invitee and the host, never the guests; the host's connected calendar, when there is one, invites the guests.",
+    ),
   answers,
   language: z.enum(['en', 'es']).optional(),
   hold_id: holdId,
@@ -1609,7 +1615,7 @@ const createBooking: ToolDef = {
   name: 'create_booking',
   title: 'Create a booking',
   description:
-    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee (and guests), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held.',
+    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee and the host (guests are invited by the host\'s connected calendar, not emailed by dCal), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held.',
   scope: 'bookings:write',
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
