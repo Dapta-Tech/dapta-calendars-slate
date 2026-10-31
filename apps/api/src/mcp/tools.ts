@@ -86,10 +86,11 @@ export interface ToolDef {
   };
   input: z.ZodObject<z.ZodRawShape>;
   /**
-   * Built from `z.looseObject` at every level, never `z.object`: a client checks
-   * each result against the schema it listed when its session began, and a
-   * closed object there (`additionalProperties: false`) fails every call once a
-   * later deploy adds a field. `mcp.output-schema.spec.ts` holds the rule.
+   * Built from `z.looseObject` at every level, never `z.object`, and with
+   * `openEnum` for a value from a set, never `z.enum`: a client checks each
+   * result against the schema it listed when its session began, and a closed
+   * object (`additionalProperties: false`) or enum there fails every call once a
+   * later deploy adds a field or a value. `mcp.output-schema.spec.ts` holds the rule.
    */
   output: z.ZodObject<z.ZodRawShape>;
   run(args: never, call: McpCall, deps: McpToolDeps): Promise<ToolResult>;
@@ -110,6 +111,17 @@ export const accountIdArg = z
   .describe(
     'The account to act on, from list_my_accounts. Needed only when this connection reaches several accounts; otherwise its own account is used.',
   );
+
+/**
+ * A result value from a known set that may grow: the listed values document
+ * it, and any other string still passes. A client checks each result against
+ * the schema it listed when its session began, so a closed `z.enum` in a result
+ * fails every call once a later deploy adds a value, the same way a closed
+ * object fails on a new field (see `ToolDef.output`). Inputs keep `z.enum`.
+ */
+function openEnum<const T extends readonly [string, ...string[]]>(values: T) {
+  return z.union([z.enum(values), z.string()]);
+}
 
 const timeZone = z
   .string()
@@ -328,9 +340,9 @@ async function teamFacts(deps: McpToolDeps, resolved: Resolved) {
 const teamShape = z.looseObject({
   slug: z.string(),
   name: z.string(),
-  scheduling_type: z
-    .enum(['round_robin', 'collective', 'fixed_round_robin'])
-    .describe('round_robin: one free host is picked at booking time. collective: every host attends. fixed_round_robin: the fixed hosts plus one rotating host.'),
+  scheduling_type: openEnum(['round_robin', 'collective', 'fixed_round_robin']).describe(
+    'round_robin: one free host is picked at booking time. collective: every host attends. fixed_round_robin: the fixed hosts plus one rotating host.',
+  ),
   host_count: z.number(),
 });
 
@@ -537,7 +549,7 @@ const slotsOutput = z.looseObject({
     title: z.string(),
     slug: z.string(),
     duration_minutes: z.number(),
-    kind: z.enum(['personal', 'team']),
+    kind: openEnum(['personal', 'team']),
     questions: z.array(questionShape),
   }),
   time_zone: z.string(),
@@ -1267,7 +1279,12 @@ const whoami: ToolDef = {
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: whoamiInput,
   output: z.looseObject({
-    account: z.looseObject({ code: z.string(), name: z.string() }),
+    account: z.looseObject({
+      code: z
+        .string()
+        .describe("The first segment of the workspace's public booking links, as the dashboard shows it: its claimed public name when it has one, else its short code."),
+      name: z.string(),
+    }),
     host: z.looseObject({ display_name: z.string().nullable(), time_zone: z.string().nullable() }),
     key: z.looseObject({
       prefix: z.string(),
@@ -1281,9 +1298,12 @@ const whoami: ToolDef = {
     if (!call.principal)
       throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key.', CREDENTIAL_HINT);
     const p = call.principal;
-    const account = await deps.db.get<{ code: string; name: string }>(
-      sql`SELECT code, name FROM account WHERE id = ${p.accountId} LIMIT 1`,
+    const row = await deps.db.get<{ code: string; vanity_slug: string | null; name: string }>(
+      sql`SELECT code, vanity_slug, name FROM account WHERE id = ${p.accountId} LIMIT 1`,
     );
+    // The code the links carry and the dashboard shows (the vanity slug when
+    // claimed), never the short code the web layer redirects from.
+    const account = row ? { code: canonicalPublicCode(row), name: row.name } : null;
     const host =
       (await deps.db.get<{ display_name: string | null; time_zone: string | null }>(
         sql`SELECT display_name, time_zone FROM member WHERE account_id = ${p.accountId} AND role = 'owner'
@@ -1355,7 +1375,7 @@ const listEventTypes: ToolDef = {
         slug: z.string(),
         description: z.string().nullable(),
         duration_minutes: z.number(),
-        kind: z.enum(['personal', 'team']),
+        kind: openEnum(['personal', 'team']),
         host_handle: z.string().nullable(),
         team_slug: z.string().nullable(),
         scheduling_type: z.string().nullable(),
