@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '@slate/db';
-import { bootHarness, structured, type Harness } from './mcp-harness';
+import { bootHarness, idem, structured, type Harness } from './mcp-harness';
 
 /**
  * `list_bookings` as a change feed: an agent that only has the MCP used to
@@ -103,6 +103,60 @@ describe('list_bookings updated_since', () => {
     expect(row).toBeTruthy();
     expect(row!.rescheduled_from_uid).toBeNull();
     expect(row!.rescheduled_to_uid).toBeNull();
+  });
+
+  it('keeps the first page watermark across a walk through pages', async () => {
+    const now = Date.now();
+    for (let i = 0; i < 3; i++) await insertBooking(now + (6 + i) * DAY, 'accepted', now);
+    const reader = await h.connect(await h.key(['bookings:read']));
+    type Page = { bookings: { uid: string }[]; next_cursor: string | null; next_updated_since: string };
+    const read = async (args: Record<string, unknown>) =>
+      structured<Page>(await reader.callTool({ name: 'list_bookings', arguments: { limit: 1, updated_since: new Date(now - HOUR).toISOString(), ...args } }));
+    const first = await read({});
+    expect(first.next_cursor).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await read({ cursor: first.next_cursor });
+    expect(second.next_updated_since).toBe(first.next_updated_since);
+    expect(second.bookings[0]!.uid).not.toBe(first.bookings[0]!.uid);
+    // A cursor whose watermark was tampered with is refused, not misread.
+    const bad = await reader.callTool({ name: 'list_bookings', arguments: { cursor: `${first.next_cursor!.split('.')[0]}.soon` } });
+    expect(bad.isError).toBe(true);
+  });
+
+  it('reads a reschedule_booking move as one move: the old booking points to the new one', async () => {
+    const client = await h.connect(await h.key(['availability:read', 'bookings:read', 'bookings:write']));
+    const slots = structured<{ days: { slots: { start: string }[] }[] }>(
+      await client.callTool({
+        name: 'find_available_slots',
+        arguments: { booking_page_url: 'https://calendar.example.test/acme/alex-rivera/intro-call', time_zone: 'America/New_York' },
+      }),
+    ).days.flatMap((d) => d.slots);
+    const since = new Date(Date.now() - 60_000).toISOString();
+    const made = structured<{ booking: { uid: string } }>(
+      await client.callTool({
+        name: 'create_booking',
+        arguments: {
+          event_type_id: introId,
+          start: slots[3]!.start,
+          attendee: { name: 'Morgan Mover', email: 'morgan.mover@example.org', time_zone: 'America/New_York' },
+          answers: { company: 'Initech' },
+          idempotency_key: idem('feed-move-create-01'),
+        },
+      }),
+    );
+    const moved = structured<{ booking: { uid: string }; previous_uid: string }>(
+      await client.callTool({
+        name: 'reschedule_booking',
+        arguments: { booking_uid: made.booking.uid, start: slots[7]!.start, idempotency_key: idem('feed-move-resched-1') },
+      }),
+    );
+    const rows = structured<{
+      bookings: { uid: string; status: string; rescheduled_from_uid: string | null; rescheduled_to_uid: string | null }[];
+    }>(await client.callTool({ name: 'list_bookings', arguments: { limit: 50, updated_since: since } })).bookings;
+    const old = rows.find((b) => b.uid === made.booking.uid);
+    const fresh = rows.find((b) => b.uid === moved.booking.uid);
+    expect(old).toMatchObject({ status: 'cancelled', rescheduled_to_uid: moved.booking.uid });
+    expect(fresh).toMatchObject({ rescheduled_from_uid: made.booking.uid });
   });
 
   it('describes the change feed and points to webhooks for push', async () => {

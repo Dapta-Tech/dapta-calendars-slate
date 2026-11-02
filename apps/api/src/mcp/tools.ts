@@ -1475,6 +1475,25 @@ const bookingRows = z.looseObject({
 /** How far before a read its `next_updated_since` starts, so a write committing during the read is not missed. */
 const CHANGE_FEED_OVERLAP_MS = 60_000;
 
+/**
+ * A list cursor carries the watermark of the walk's first page
+ * (`<page cursor>.<ms>`; the page cursor is base64url, which has no dot), so
+ * every page of one walk returns the same `next_updated_since`. A fresh one
+ * per page would skip a booking changed mid-walk whose start sorts before the
+ * cursor: later pages no longer reach it, and the newer watermark leaves it
+ * out of the next poll. A cursor from before this has no watermark and starts
+ * a new one.
+ */
+function splitListCursor(cursor: string | undefined): { pageCursor: string | undefined; watermarkMs: number | null } {
+  if (!cursor) return { pageCursor: undefined, watermarkMs: null };
+  const dot = cursor.lastIndexOf('.');
+  if (dot < 0) return { pageCursor: cursor, watermarkMs: null };
+  const ms = cursor.slice(dot + 1);
+  if (!/^\d{1,15}$/.test(ms))
+    throw new ToolFailure('INVALID_ARGUMENT', 'cursor is not valid for this query.', 'Pass the next_cursor exactly as returned, with the same filters and order.');
+  return { pageCursor: cursor.slice(0, dot), watermarkMs: Number(ms) };
+}
+
 /** One page of bookings with minimal fields, for list_bookings and list_pending_bookings. */
 async function bookingPage(
   deps: McpToolDeps,
@@ -1486,8 +1505,11 @@ async function bookingPage(
   // Taken before the read and a minute early: a booking whose write was still
   // committing while this page was read carries an earlier time, and the next
   // call starting here still sees it. The overlap repeats a few bookings, never
-  // drops one; callers match by uid.
-  const nextUpdatedSince = new Date(Date.now() - CHANGE_FEED_OVERLAP_MS).toISOString();
+  // drops one; callers match by uid. Later pages of the same walk keep the
+  // first page's value (see `splitListCursor`).
+  const { pageCursor, watermarkMs } = splitListCursor(args.cursor);
+  const watermark = watermarkMs ?? Date.now() - CHANGE_FEED_OVERLAP_MS;
+  const nextUpdatedSince = new Date(watermark).toISOString();
   // Requests still waiting for an answer have no lower bound by default: one
   // whose time has passed still needs the host's decision, so hiding it from
   // "from now" would hide it for good. Everything else starts from now.
@@ -1512,7 +1534,7 @@ async function bookingPage(
     allowedEventTypeIds: p.eventTypeIds,
     eventTypeId: args.event_type_id,
     limit: args.limit,
-    cursor: args.cursor,
+    cursor: pageCursor,
     order,
   });
   const bookings = page.items.map((b) => ({
@@ -1529,7 +1551,11 @@ async function bookingPage(
     rescheduled_to_uid: b.rescheduledToUid,
   }));
   return {
-    data: { bookings, next_cursor: page.nextCursor, next_updated_since: nextUpdatedSince },
+    data: {
+      bookings,
+      next_cursor: page.nextCursor ? `${page.nextCursor}.${watermark}` : null,
+      next_updated_since: nextUpdatedSince,
+    },
     summary: `${bookings.length} ${status === 'pending' ? 'pending ' : ''}booking(s)${page.nextCursor ? ' (more available: pass next_cursor)' : ''}.`,
     affected: bookings.map((b) => b.uid),
   };
