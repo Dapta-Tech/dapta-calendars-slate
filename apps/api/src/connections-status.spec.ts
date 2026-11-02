@@ -87,11 +87,21 @@ describe('connection status and the connect handshake', () => {
 });
 
 describe('GET /v1/connections/status', () => {
-  it('needs a host session, like the other connection routes', async () => {
+  it('is routed, resolves the host like the other connection routes, and answers from configuration', async () => {
     const h = await bootHarness();
     try {
-      const res = await fetch(`${h.base}/v1/connections/status`);
-      expect(res.status).toBe(401);
+      // The same request, with the same (absent) credentials, as the list of
+      // connections: whatever the deployment's host auth answers to one it
+      // answers to the other.
+      const [status, list] = await Promise.all([
+        fetch(`${h.base}/v1/connections/status`),
+        fetch(`${h.base}/v1/connections`),
+      ]);
+      expect(status.status).toBe(list.status);
+      if (status.ok) {
+        // The harness wires no calendar provider: sync is off, said without a connect.
+        expect(await status.json()).toMatchObject({ enabled: false });
+      }
     } finally {
       await h.close();
     }
