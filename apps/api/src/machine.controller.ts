@@ -16,6 +16,7 @@ import {
   Req,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ZodError } from 'zod';
 import type { Db } from '@slate/db';
 import {
   addAttendeeToBooking,
@@ -28,11 +29,48 @@ import {
   resolveBooking,
   sql,
 } from '@slate/db';
-import type { ApiScope } from '@slate/types';
+import { availabilityQuerySchema, type ApiScope } from '@slate/types';
 import { BookingService } from './booking.service';
 import { AuthService, type ReqLike } from './auth.service';
 import { unwrap } from './http';
 import { DB } from './tokens';
+
+/**
+ * The field an input issue is about, named as this surface's request names
+ * it: the booking engine validates one `attendee`, the machine body sends
+ * `attendees[]` whose first entry becomes it. An issue with no path is about
+ * a bare value, `emptyPathField` (the `Idempotency-Key` header on writes).
+ */
+function machineField(path: ReadonlyArray<PropertyKey>, emptyPathField = ''): string {
+  if (path.length === 0) return emptyPathField;
+  const parts = path[0] === 'attendee' ? ['attendees', 0, ...path.slice(1)] : [...path];
+  return parts
+    .map((part, index) => (typeof part === 'number' ? `[${part}]` : `${index === 0 ? '' : '.'}${String(part)}`))
+    .join('');
+}
+
+/** A refused input as the 400 the public routes answer, naming the field. */
+function invalidInput(err: ZodError, emptyPathField = ''): BadRequestException {
+  const issue = err.issues[0];
+  const field = issue ? machineField(issue.path, emptyPathField) : '';
+  const message = issue ? (field ? `${field}: ${issue.message}` : issue.message) : 'Invalid request.';
+  return new BadRequestException({ error: 'BAD_REQUEST', message });
+}
+
+/**
+ * Run a booking write and answer its input validation failure as a 400 that
+ * names the field, instead of letting the `ZodError` escape as a 500. Only
+ * for calls whose zod checks are all on the caller's input (the booking and
+ * the `Idempotency-Key`); anything else is rethrown untouched.
+ */
+async function rejectInvalidInput<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (err) {
+    if (err instanceof ZodError) throw invalidInput(err, 'Idempotency-Key');
+    throw err;
+  }
+}
 
 /**
  * Agent / machine surface — API-key authenticated. Deliberately distinct from
@@ -105,14 +143,12 @@ export class MachineController {
       etId = await this.resolveEventTypeId(principal.accountId, handle, slug);
     }
     this.auth.assertEventTypeAllowed(principal, etId);
-    const r = await this.svc.availability({
-      accountCode: code,
-      handle,
-      slug,
-      from: q.from,
-      to: q.to,
-      timeZone: q.timeZone,
-    });
+    const query = { accountCode: code, handle, slug, from: q.from, to: q.to, timeZone: q.timeZone };
+    // Checked here rather than around the call: the service also checks its
+    // own answer with zod, and that failure is ours (a 500), not the caller's.
+    const checked = availabilityQuerySchema.safeParse(query);
+    if (!checked.success) throw invalidInput(checked.error);
+    const r = await this.svc.availability(query);
     if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     return r;
   }
@@ -154,27 +190,29 @@ export class MachineController {
 
     const primary = body.attendees[0]!;
     const result = unwrap(
-      await this.svc.book(
-        {
-          accountCode: code,
-          handle,
-          slug,
-          startUtc: body.startUtc,
-          attendee: primary,
-          answers: body.answers,
-        },
-        true,
-        // `apiKeyWrite` is stated rather than left to `onBehalf` above: it is
-        // the flag the duplicate-booking guard (#69) exempts on, and the
-        // reason this caller is exempt is that it holds an API key. The
-        // `Idempotency-Key` header rides the same context channel (#104):
-        // `createBookingSchema` no longer carries the field, so an
-        // unauthenticated booker cannot set it on the public route.
-        {
-          additionalAttendees: body.attendees.slice(1),
-          apiKeyWrite: true,
-          idempotencyKey,
-        },
+      await rejectInvalidInput(
+        this.svc.book(
+          {
+            accountCode: code,
+            handle,
+            slug,
+            startUtc: body.startUtc,
+            attendee: primary,
+            answers: body.answers,
+          },
+          true,
+          // `apiKeyWrite` is stated rather than left to `onBehalf` above: it is
+          // the flag the duplicate-booking guard (#69) exempts on, and the
+          // reason this caller is exempt is that it holds an API key. The
+          // `Idempotency-Key` header rides the same context channel (#104):
+          // `createBookingSchema` no longer carries the field, so an
+          // unauthenticated booker cannot set it on the public route.
+          {
+            additionalAttendees: body.attendees.slice(1),
+            apiKeyWrite: true,
+            idempotencyKey,
+          },
+        ),
       ),
     );
     // Machine envelope: attendees[] (plural).
@@ -233,7 +271,9 @@ export class MachineController {
     if (!body?.newStartUtc)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'newStartUtc required' });
     // P1-2: honor Idempotency-Key so an agent retry doesn't double-move.
-    return unwrap(await this.svc.reschedule(uid, { newStartUtc: body.newStartUtc, byHost: true, idempotencyKey }));
+    return unwrap(
+      await rejectInvalidInput(this.svc.reschedule(uid, { newStartUtc: body.newStartUtc, byHost: true, idempotencyKey })),
+    );
   }
 
   @Post('bookings/:uid/cancel')

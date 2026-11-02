@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { unstable_rethrow } from 'next/navigation';
 import { adminApi, type Connection, type ConnectionTestResult } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
@@ -78,8 +79,17 @@ export async function connectCalendarAction(
   provider: string,
   email: string,
 ): Promise<{ enabled: boolean; connectUrl: string | null; message: string }> {
-  const r = await adminApi.connectionToken(provider, email);
-  return { enabled: r.enabled, connectUrl: r.connectUrl, message: r.message };
+  try {
+    const r = await adminApi.connectionToken(provider, email);
+    return { enabled: r.enabled, connectUrl: r.connectUrl, message: r.message };
+  } catch (e) {
+    unstable_rethrow(e); // a 401 redirect to sign-in goes through
+    // The connect could not start (the API answers 503 when the provider is
+    // busy). Thrown, it would reach the error page; answered, the dialog
+    // closes its popup and shows its own "try again" text in the host's
+    // language (an empty message picks it).
+    return { enabled: true, connectUrl: null, message: '' };
+  }
 }
 
 /**
