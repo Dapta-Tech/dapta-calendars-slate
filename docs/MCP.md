@@ -42,8 +42,8 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
-| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, status, times, event type, invitee email domain. Cursor pagination. |
-| `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. |
+| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, status, times, event type, invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
+| `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
 | `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
 | `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. |
