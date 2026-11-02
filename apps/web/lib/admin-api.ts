@@ -318,6 +318,9 @@ export const adminApi = {
   // endpoint is part of the host API a self-hoster scripts against, and this is
   // its typed client — not because anything in the app still reaches it.
   createConnection: (b: unknown) => req('POST', '/v1/connections', b),
+  /** Whether calendar sync is available here, without starting a connect. */
+  connectionStatus: () => req<{ enabled: boolean; message: string }>('GET', '/v1/connections/status'),
+  /** Starts a real connect with the provider: only for a connect the host asked for. */
   connectionToken: (provider?: string, email?: string) =>
     req<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }>(
       'POST',
