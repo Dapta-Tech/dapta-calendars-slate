@@ -23,6 +23,10 @@ export interface BookingListRow {
   eventTypeTitle: string;
   primaryEmail: string | null;
   attendeeCount: number;
+  /** The booking this one replaced (a move made as cancel + new booking), or null. */
+  rescheduledFromUid: string | null;
+  /** The booking that replaced this one, or null. */
+  rescheduledToUid: string | null;
 }
 
 export type BookingOrder = 'asc' | 'desc';
@@ -51,6 +55,8 @@ export async function queryBookings(
     accountId: string;
     fromMs?: number;
     toMs?: number;
+    /** Created or last changed at or after this instant (`updated_at`). */
+    updatedSinceMs?: number;
     status?: string;
     /** The key's allowlist; null = unrestricted, [] = nothing. */
     allowedEventTypeIds: string[] | null;
@@ -63,6 +69,7 @@ export async function queryBookings(
   const conds = [sql`b.account_id = ${args.accountId}`];
   if (args.fromMs != null) conds.push(sql`b.start_ms >= ${args.fromMs}`);
   if (args.toMs != null) conds.push(sql`b.start_ms < ${args.toMs}`);
+  if (args.updatedSinceMs != null) conds.push(sql`b.updated_at >= ${args.updatedSinceMs}`);
   if (args.status) conds.push(sql`b.status = ${args.status}`);
   if (args.eventTypeId) conds.push(sql`b.event_type_id = ${args.eventTypeId}`);
   if (args.allowedEventTypeIds) {
@@ -93,8 +100,11 @@ export async function queryBookings(
     event_title: string;
     primary_email: string | null;
     attendee_count: number | string;
+    rescheduled_from_uid: string | null;
+    rescheduled_to_uid: string | null;
   }>(
     sql`SELECT b.uid, b.status, b.start_ms, b.end_ms, b.event_type_id, et.title AS event_title,
+               b.rescheduled_from_uid, b.rescheduled_to_uid,
                (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
                   ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS primary_email,
                (SELECT COUNT(*) FROM booking_attendee bc WHERE bc.booking_id = b.id) AS attendee_count
@@ -116,6 +126,8 @@ export async function queryBookings(
       eventTypeTitle: r.event_title,
       primaryEmail: r.primary_email,
       attendeeCount: Number(r.attendee_count),
+      rescheduledFromUid: r.rescheduled_from_uid ?? null,
+      rescheduledToUid: r.rescheduled_to_uid ?? null,
     })),
     nextCursor: hasMore && last ? encodeCursor(args.order, Number(last.start_ms), last.uid) : null,
   };

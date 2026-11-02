@@ -1445,6 +1445,11 @@ const listBookingsInput = z.object({
   limit: z.number().int().min(1).max(50).default(25),
   cursor: z.string().max(300).optional().describe('next_cursor from the previous page, with the other arguments unchanged.'),
   time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
+  updated_since: z
+    .string()
+    .max(40)
+    .optional()
+    .describe('Only bookings created or changed (confirmed, declined, moved, cancelled, or someone added) at or after this instant (ISO with offset, or a bare date in time_zone). Pass next_updated_since from your previous call to pick up what changed since; a few bookings may repeat, so match by uid. With it and neither from nor to, bookings at any start time are listed.'),
 });
 
 const bookingRows = z.looseObject({
@@ -1459,10 +1464,16 @@ const bookingRows = z.looseObject({
       event_type_title: z.string(),
       invitee_email_domain: z.string().nullable(),
       attendee_count: z.number(),
+      rescheduled_from_uid: z.string().nullable(),
+      rescheduled_to_uid: z.string().nullable(),
     }),
   ),
   next_cursor: z.string().nullable(),
+  next_updated_since: z.string(),
 });
+
+/** How far before a read its `next_updated_since` starts, so a write committing during the read is not missed. */
+const CHANGE_FEED_OVERLAP_MS = 60_000;
 
 /** One page of bookings with minimal fields, for list_bookings and list_pending_bookings. */
 async function bookingPage(
@@ -1472,10 +1483,22 @@ async function bookingPage(
   status: string | undefined,
 ): Promise<ToolResult> {
   const tz = args.time_zone ?? (await hostZone(deps.db, p.accountId));
+  // Taken before the read and a minute early: a booking whose write was still
+  // committing while this page was read carries an earlier time, and the next
+  // call starting here still sees it. The overlap repeats a few bookings, never
+  // drops one; callers match by uid.
+  const nextUpdatedSince = new Date(Date.now() - CHANGE_FEED_OVERLAP_MS).toISOString();
   // Requests still waiting for an answer have no lower bound by default: one
   // whose time has passed still needs the host's decision, so hiding it from
   // "from now" would hide it for good. Everything else starts from now.
-  const fromMs = args.from ? instantFrom(args.from, tz).getTime() : args.to || status === 'pending' ? undefined : Date.now();
+  // A change feed (`updated_since`) has no lower bound by default either: a
+  // booking cancelled or declined after its time is still a change to report.
+  const updatedSinceMs = args.updated_since ? instantFrom(args.updated_since, tz).getTime() : undefined;
+  const fromMs = args.from
+    ? instantFrom(args.from, tz).getTime()
+    : args.to || status === 'pending' || updatedSinceMs != null
+      ? undefined
+      : Date.now();
   // Pending requests never expire, so with no lower bound oldest-first would
   // fill the first page with stale ones; latest-first keeps upcoming requests
   // on top and the stale ones last, still one cursor away.
@@ -1484,6 +1507,7 @@ async function bookingPage(
     accountId: p.accountId,
     fromMs,
     toMs: args.to ? instantFrom(args.to, tz).getTime() : undefined,
+    updatedSinceMs,
     status,
     allowedEventTypeIds: p.eventTypeIds,
     eventTypeId: args.event_type_id,
@@ -1501,9 +1525,11 @@ async function bookingPage(
     event_type_title: untrusted(b.eventTypeTitle, 200),
     invitee_email_domain: emailDomain(b.primaryEmail),
     attendee_count: b.attendeeCount,
+    rescheduled_from_uid: b.rescheduledFromUid,
+    rescheduled_to_uid: b.rescheduledToUid,
   }));
   return {
-    data: { bookings, next_cursor: page.nextCursor },
+    data: { bookings, next_cursor: page.nextCursor, next_updated_since: nextUpdatedSince },
     summary: `${bookings.length} ${status === 'pending' ? 'pending ' : ''}booking(s)${page.nextCursor ? ' (more available: pass next_cursor)' : ''}.`,
     affected: bookings.map((b) => b.uid),
   };
@@ -1513,7 +1539,7 @@ const listBookings: ToolDef = {
   name: 'list_bookings',
   title: 'List bookings',
   description:
-    'List bookings with minimal fields (no notes, answers or names). Needs scope bookings:read and respects an API key\'s event-type allowlist. get_booking returns one booking\'s details.',
+    'List bookings with minimal fields (no notes, answers or names). Needs scope bookings:read and respects an API key\'s event-type allowlist. get_booking returns one booking\'s details. To learn about new or changed bookings, pass updated_since (the next_updated_since of your previous call) instead of re-reading the whole list; a booking moved with reschedule_booking shows as the old one cancelled with rescheduled_to_uid and the new one with rescheduled_from_uid; to be told as they happen, without polling, a workspace admin adds a webhook in the web app (API and webhooks, then Webhooks).',
   scope: 'bookings:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1530,6 +1556,11 @@ const listPendingInput = listBookingsInput.omit({ status: true }).extend({
     .max(40)
     .optional()
     .describe('Earliest start (ISO with offset, or a bare date in time_zone). No default: requests whose time has passed still wait for an answer and are listed too.'),
+  updated_since: z
+    .string()
+    .max(40)
+    .optional()
+    .describe('Only requests that arrived or changed at or after this instant (ISO with offset, or a bare date in time_zone). Pass next_updated_since from your previous call to pick up new requests; a few may repeat, so match by uid.'),
 });
 const listPendingBookings: ToolDef = {
   name: 'list_pending_bookings',

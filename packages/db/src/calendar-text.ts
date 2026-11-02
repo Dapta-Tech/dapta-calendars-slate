@@ -147,7 +147,8 @@ export function markSharedSql(bookingId: string, title: string) {
   return sql`UPDATE booking SET seated = 1,
         title = CASE WHEN seated = 1 THEN title ELSE ${plainCalendarTitle(title)} END,
         calendar_description = CASE WHEN seated = 1 OR calendar_description IS NULL
-          THEN calendar_description ELSE '' END
+          THEN calendar_description ELSE '' END,
+        updated_at = ${Date.now()}
       WHERE id = ${bookingId}`;
 }
 
