@@ -37,4 +37,13 @@ describe('connectCalendarAction', () => {
     // Next's own control flow (a sign-in redirect) is handed back first.
     expect(nav.unstable_rethrow).toHaveBeenCalledWith(refused);
   });
+
+  it('throws any other failure, so it is not mistaken for a busy provider', async () => {
+    const broken = Object.assign(new Error('Internal server error'), { status: 500 });
+    admin.connectionToken.mockRejectedValue(broken);
+    await expect(connectCalendarAction('google', 'host@example.com')).rejects.toBe(broken);
+    const unreachable = new TypeError('fetch failed');
+    admin.connectionToken.mockRejectedValue(unreachable);
+    await expect(connectCalendarAction('google', 'host@example.com')).rejects.toBe(unreachable);
+  });
 });

@@ -162,6 +162,20 @@ describe('list_bookings updated_since', () => {
     expect(fresh).toMatchObject({ rescheduled_from_uid: made.booking.uid });
   });
 
+  it('keeps a booking whose event type was deleted in the feed', async () => {
+    const now = Date.now();
+    const uid = randomUUID();
+    await h.db.run(
+      sql`INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, start_ms, end_ms, status, metadata, created_at, updated_at)
+          VALUES (${randomUUID()}, ${h.accountId}, ${uid}, ${'et-deleted-' + randomUUID()}, ${alexId}, 'Gone Event', ${now + 9 * DAY}, ${now + 9 * DAY + 1_800_000}, 'cancelled', ${null}, ${now - DAY}, ${now})`,
+    );
+    const reader = await h.connect(await h.key(['bookings:read']));
+    const rows = structured<{ bookings: { uid: string; event_type_title: string }[] }>(
+      await reader.callTool({ name: 'list_bookings', arguments: { limit: 50, updated_since: new Date(now - HOUR).toISOString() } }),
+    ).bookings;
+    expect(rows.find((b) => b.uid === uid)).toMatchObject({ event_type_title: '' });
+  });
+
   it('describes the change feed and points to webhooks for push', async () => {
     const reader = await h.connect(await h.key(['bookings:read']));
     const { tools } = await reader.listTools();

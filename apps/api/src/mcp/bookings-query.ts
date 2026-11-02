@@ -103,12 +103,15 @@ export async function queryBookings(
     rescheduled_from_uid: string | null;
     rescheduled_to_uid: string | null;
   }>(
-    sql`SELECT b.uid, b.status, b.start_ms, b.end_ms, b.event_type_id, et.title AS event_title,
+    // LEFT JOIN: an event type can be deleted while its bookings stay, and a
+    // later change to one of them (a cancellation) must still reach the
+    // updated_since feed. Such a row lists with an empty event title.
+    sql`SELECT b.uid, b.status, b.start_ms, b.end_ms, b.event_type_id, COALESCE(et.title, '') AS event_title,
                b.rescheduled_from_uid, b.rescheduled_to_uid,
                (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
                   ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS primary_email,
                (SELECT COUNT(*) FROM booking_attendee bc WHERE bc.booking_id = b.id) AS attendee_count
-        FROM booking b JOIN event_type et ON et.id = b.event_type_id
+        FROM booking b LEFT JOIN event_type et ON et.id = b.event_type_id
         WHERE ${where}
         ORDER BY b.start_ms ${direction}, b.uid ${direction}
         LIMIT ${args.limit + 1}`,
