@@ -84,11 +84,17 @@ export async function connectCalendarAction(
     return { enabled: r.enabled, connectUrl: r.connectUrl, message: r.message };
   } catch (e) {
     unstable_rethrow(e); // a 401 redirect to sign-in goes through
-    // The connect could not start (the API answers 503 when the provider is
-    // busy). Thrown, it would reach the error page; answered, the dialog
-    // closes its popup and shows its own "try again" text in the host's
-    // language (an empty message picks it).
-    return { enabled: true, connectUrl: null, message: '' };
+    // Only "the connect could not start" (the API's 503 CONNECT_UNAVAILABLE,
+    // the provider busy) is answered: the dialog closes its popup and shows
+    // its own "try again" text in the host's language (an empty message picks
+    // it). Any other failure, including the session's own 503
+    // (SESSION_REFRESH_UNAVAILABLE), a 500 or the API unreachable, is thrown as
+    // before, so it reaches the error page and error tracking.
+    const failure = e as { status?: unknown; code?: unknown } | null;
+    if (failure?.status === 503 && failure.code === 'CONNECT_UNAVAILABLE') {
+      return { enabled: true, connectUrl: null, message: '' };
+    }
+    throw e;
   }
 }
 

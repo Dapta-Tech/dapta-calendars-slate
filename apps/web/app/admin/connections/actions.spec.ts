@@ -27,7 +27,10 @@ describe('connectCalendarAction', () => {
   });
 
   it('answers a connect that could not start, with no URL and no server text', async () => {
-    const refused = Object.assign(new Error('The calendar connection could not start right now.'), { status: 503 });
+    const refused = Object.assign(new Error('The calendar connection could not start right now.'), {
+      status: 503,
+      code: 'CONNECT_UNAVAILABLE',
+    });
     admin.connectionToken.mockRejectedValue(refused);
     await expect(connectCalendarAction('google', 'host@example.com')).resolves.toEqual({
       enabled: true,
@@ -36,5 +39,18 @@ describe('connectCalendarAction', () => {
     });
     // Next's own control flow (a sign-in redirect) is handed back first.
     expect(nav.unstable_rethrow).toHaveBeenCalledWith(refused);
+  });
+
+  it('throws any other failure, so it is not mistaken for a busy provider', async () => {
+    const broken = Object.assign(new Error('Internal server error'), { status: 500 });
+    admin.connectionToken.mockRejectedValue(broken);
+    await expect(connectCalendarAction('google', 'host@example.com')).rejects.toBe(broken);
+    // The session's own 503 is an identity outage, not a busy provider.
+    const noSession = Object.assign(new Error('Sign-in service unavailable'), { status: 503, code: 'SESSION_REFRESH_UNAVAILABLE' });
+    admin.connectionToken.mockRejectedValue(noSession);
+    await expect(connectCalendarAction('google', 'host@example.com')).rejects.toBe(noSession);
+    const unreachable = new TypeError('fetch failed');
+    admin.connectionToken.mockRejectedValue(unreachable);
+    await expect(connectCalendarAction('google', 'host@example.com')).rejects.toBe(unreachable);
   });
 });
