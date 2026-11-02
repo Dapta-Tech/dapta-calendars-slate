@@ -595,7 +595,13 @@ type Health = 'off' | 'checking' | 'ok' | 'error';
  *  own line underneath, instead of the timestamp living *inside* the pill's
  *  own flex column and skewing the row's vertical centering against the
  *  buttons next to it. */
-function useConnectionHealth(c: Connection, enabled: boolean, m: ConnectionsMessages) {
+function useConnectionHealth(
+  c: Connection,
+  enabled: boolean,
+  m: ConnectionsMessages,
+  locale: Locale,
+  timeZone: string,
+) {
   const [state, setState] = useState<Health>(
     !enabled ? 'off' : c.lastCheckOk == null ? 'checking' : c.lastCheckOk ? 'ok' : 'error',
   );
@@ -643,16 +649,22 @@ function useConnectionHealth(c: Connection, enabled: boolean, m: ConnectionsMess
           ? m.healthChecking
           : m.healthRecorded;
 
+  // An EXPLICIT locale and zone, not the runtime's: `lastCheckAt` arrives as a
+  // server prop and this is a client component, so a zone-less formatter
+  // renders in the server's zone and hydrates in the browser's (React #418).
+  // The account's own zone is also the right answer for the reader, as on
+  // the integrations page.
   const checkedCaption = !enabled
     ? null
     : lastCheckAt
       ? m.lastChecked.replace(
           '{time}',
-          new Intl.DateTimeFormat(undefined, {
+          new Intl.DateTimeFormat(locale, {
             month: 'short',
             day: 'numeric',
             hour: 'numeric',
             minute: '2-digit',
+            timeZone,
           }).format(new Date(lastCheckAt)),
         )
       : m.neverChecked;
@@ -769,6 +781,8 @@ function ConnectionRow({
   c,
   m,
   enabled,
+  locale,
+  timeZone,
   busy,
   error,
   onSetDestination,
@@ -779,6 +793,9 @@ function ConnectionRow({
   c: Connection;
   m: ConnectionsMessages;
   enabled: boolean;
+  locale: Locale;
+  /** The account's zone, for the "last checked" time. */
+  timeZone: string;
   // True while any mutation on THIS row is in flight — disables every control
   // so a toggle and a disconnect (or two rapid toggles) can't race.
   busy: boolean;
@@ -794,7 +811,7 @@ function ConnectionRow({
     start(async () => {
       setTestResult(await testConnectionAction(c.id));
     });
-  const health = useConnectionHealth(c, enabled, m);
+  const health = useConnectionHealth(c, enabled, m, locale, timeZone);
 
   return (
     <li
@@ -968,7 +985,8 @@ export function ConnectionsClient({
   status,
   messages: m,
   defaultEmail,
-  locale,
+  locale = 'en',
+  timeZone = 'UTC',
 }: {
   title: string;
   subtitle: string;
@@ -979,6 +997,8 @@ export function ConnectionsClient({
   defaultEmail?: string | null;
   /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
   locale?: Locale;
+  /** The account's zone (its saved one), for times shown on the page. */
+  timeZone?: string;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Optimistic mirror of the server list so the destination radio and conflict
@@ -1117,6 +1137,8 @@ export function ConnectionsClient({
                   c={c}
                   m={m}
                   enabled={status.enabled}
+                  locale={locale}
+                  timeZone={timeZone}
                   busy={pendingId === c.id}
                   error={rowError?.id === c.id ? rowError.message : null}
                   onSetDestination={setDestination}

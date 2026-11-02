@@ -649,6 +649,16 @@ export class HostController {
   }
 
   /**
+   * Whether calendar sync (the connect flow) is available, without starting a
+   * connect. The connections page reads this on every load.
+   */
+  @Get('connections/status')
+  async connectionStatus(@Req() req: ReqLike) {
+    await this.auth.resolveHost(req);
+    return this.admin.connectionStatus();
+  }
+
+  /**
    * Mint the token + connect URL the browser uses to start an OAuth connect flow.
    * When a provider is wired this returns a real `{ token, connectUrl }`; with the
    * OSS default it honestly reports the disabled state (no vendor named — R15).

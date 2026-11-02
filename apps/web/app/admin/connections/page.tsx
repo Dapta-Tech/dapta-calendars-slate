@@ -1,4 +1,5 @@
-import { getMessages } from '@slate/shared';
+import { unstable_rethrow } from 'next/navigation';
+import { getMessages, safeTimeZone } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { ConnectionsClient } from './connections-client';
@@ -10,16 +11,22 @@ export const dynamic = 'force-dynamic';
 const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
 export default async function ConnectionsPage() {
-  const [connections, token, me] = await Promise.all([
+  const [connections, syncStatus, me] = await Promise.all([
     adminApi.listConnections(),
     // Provider status: enabled only when an external calendar adapter is wired.
-    adminApi.connectionToken().catch(() => ({ enabled: false, message: 'Calendar sync unavailable.' })),
+    // Asks the API only; a connect handshake starts on the host's click.
+    adminApi.connectionStatus().catch((e: unknown) => {
+      unstable_rethrow(e); // a 401 redirect to sign-in goes through
+      return { enabled: false, message: 'Calendar sync unavailable.' };
+    }),
     // Best-effort default for the connect dialog's "which account?" prompt —
     // most hosts connect their own Dapta login email, so pre-filling it (still
     // editable) saves a step; never required for the flow to work.
     adminApi.me().catch(() => null),
   ]);
   const locale = await getLocale();
+  // safeTimeZone: a corrupt stored zone must never crash the page (QA fix 1).
+  const timeZone = safeTimeZone(me?.timeZone);
   const admin = getMessages(locale).admin;
   const messages = {
     ...admin.connections,
@@ -41,10 +48,11 @@ export default async function ConnectionsPage() {
         title={admin.nav.calendars}
         subtitle={messages.pageDesc}
         connections={connections}
-        status={{ enabled: token.enabled, message: token.message }}
+        status={{ enabled: syncStatus.enabled, message: syncStatus.message }}
         messages={messages}
         defaultEmail={me?.email ?? null}
         locale={locale}
+        timeZone={timeZone}
       />
     </div>
   );

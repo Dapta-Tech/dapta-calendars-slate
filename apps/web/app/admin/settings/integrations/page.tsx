@@ -1,5 +1,5 @@
 import { unstable_rethrow } from 'next/navigation';
-import { getMessages } from '@slate/shared';
+import { getMessages, safeTimeZone } from '@slate/shared';
 import type { IntegrationCapabilities, IntegrationStatusView } from '@slate/types';
 import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
@@ -56,7 +56,7 @@ export default async function IntegrationsSettings() {
         // Explicit, so the health timestamp formats identically on the server
         // and in the browser. A zone-less formatter in a client component
         // renders in the server's zone and hydrates in the reader's.
-        timeZone={me.timeZone ?? 'UTC'}
+        timeZone={safeTimeZone(me.timeZone)}
         messages={m}
       />
     </div>

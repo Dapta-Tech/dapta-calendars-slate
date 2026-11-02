@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   Optional,
   ServiceUnavailableException,
   UnprocessableEntityException,
@@ -100,7 +101,7 @@ import type { HostPrincipal } from './auth.service';
 import { AnalyticsEffects, analyticsLabel } from './analytics-effects';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
-import { asConnector, failureDetail } from './calendar.http-provider';
+import { asConnector, failureCause, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
 import { enqueueBookingWebhook } from './booking-webhook';
 import { assertTemplates, templateFieldLabel } from './template-validation';
@@ -711,9 +712,12 @@ export class AdminService {
    * `email` is a DIFFERENT subject, so the "one connection per subject" rule
    * upstream never collides across accounts. `email` is the account the host
    * is ABOUT to connect (collected by the caller before this call, mirroring
-   * adminpanel's own "which account?" prompt) — omitted only for the cheap
-   * enabled/disabled probe (`ConnectionsPage`), which never uses the resulting
-   * connectUrl.
+   * adminpanel's own "which account?" prompt). Omitted, the connect starts
+   * under the bare `iamUserId` (legacy subject).
+   *
+   * Every call runs the provider's real connect handshake, so it is for a
+   * connect the host asked for, never for "is sync on?": that question is
+   * `connectionStatus`, which asks nobody.
    */
   async connectionToken(
     p: HostPrincipal,
@@ -732,8 +736,42 @@ export class AdminService {
     const identity = await getMemberIdentity(this.db, p.memberId);
     const iamUserId = identity?.iamUserId ?? p.memberId;
     const subject = email ? `${iamUserId}-${email}` : iamUserId;
-    const start = await connector.startConnect(provider, subject);
+    let start: Awaited<ReturnType<typeof connector.startConnect>>;
+    try {
+      start = await connector.startConnect(provider, subject);
+    } catch (err) {
+      // The provider refused or could not be reached (a rate limit is the
+      // usual case). The host gets a retryable answer they can act on; the
+      // cause stays on the exception for error tracking, which reports a 503
+      // like any 5xx, and the log names it for a deployment without tracking
+      // (Nest logs no HttpException).
+      new Logger(AdminService.name).warn(`connect could not start: ${failureCause(err)}`);
+      throw new ServiceUnavailableException(
+        {
+          error: 'CONNECT_UNAVAILABLE',
+          message: 'The calendar connection could not start right now. Try again in a minute.',
+        },
+        { cause: err },
+      );
+    }
     return { enabled: true, token: start.token, connectUrl: start.connectUrl, message: 'Connect started.' };
+  }
+
+  /**
+   * Whether a connect flow is available on this deployment, without starting
+   * one. The connections page asks this on every load (and again on every
+   * refresh while a connect is in progress), so it must not reach the
+   * provider: a real handshake per page view creates provider-side state and
+   * spends the provider's rate limit.
+   */
+  connectionStatus(): { enabled: boolean; message: string } {
+    if (!asConnector(this.provider)) {
+      return {
+        enabled: false,
+        message: 'No external calendar provider configured (OSS default). Add a connection manually.',
+      };
+    }
+    return { enabled: true, message: 'Calendar sync is available.' };
   }
 
   /**

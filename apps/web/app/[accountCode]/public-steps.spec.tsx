@@ -37,6 +37,19 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => actions);
 
+// The zone picker writes the zone's offset as of today, so this snapshot
+// flipped between GMT-4 and GMT-5 with New York's daylight saving time (it
+// broke on 2026-11-01). The offset is read at the fixture's own instant
+// instead (`NOW`, checked below); nothing else in the markup reads the clock.
+const PINNED_AT = vi.hoisted(() => '2026-03-02T14:00:00.000Z');
+vi.mock('@slate/shared', async (importOriginal) => {
+  const shared = await importOriginal<typeof import('@slate/shared')>();
+  return {
+    ...shared,
+    zoneOffsetLabel: (timeZone: string, at?: Date) => shared.zoneOffsetLabel(timeZone, at ?? new Date(PINNED_AT)),
+  };
+});
+
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { CANVASES, BASE_STYLE, NOW, TIME_ZONE, availability, booking, pretty } from './__fixtures__/public-surface';
@@ -48,6 +61,7 @@ let container: HTMLElement | null = null;
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  expect(PINNED_AT).toBe(NOW);
 });
 
 afterEach(() => {
