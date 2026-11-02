@@ -121,6 +121,9 @@ describe('list_bookings updated_since', () => {
     // A cursor whose watermark was tampered with is refused, not misread.
     const bad = await reader.callTool({ name: 'list_bookings', arguments: { cursor: `${first.next_cursor!.split('.')[0]}.soon` } });
     expect(bad.isError).toBe(true);
+    // One moved into the future is held to the server's own time.
+    const future = await read({ cursor: `${first.next_cursor!.split('.')[0]}.999999999999999` });
+    expect(Date.parse(future.next_updated_since)).toBeLessThanOrEqual(Date.now());
   });
 
   it('reads a reschedule_booking move as one move: the old booking points to the new one', async () => {

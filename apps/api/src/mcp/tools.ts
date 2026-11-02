@@ -1508,7 +1508,10 @@ async function bookingPage(
   // drops one; callers match by uid. Later pages of the same walk keep the
   // first page's value (see `splitListCursor`).
   const { pageCursor, watermarkMs } = splitListCursor(args.cursor);
-  const watermark = watermarkMs ?? Date.now() - CHANGE_FEED_OVERLAP_MS;
+  // Never later than a fresh one: a cursor edited to a future watermark would
+  // otherwise hand back a next_updated_since that skips every later change.
+  const fresh = Date.now() - CHANGE_FEED_OVERLAP_MS;
+  const watermark = watermarkMs == null ? fresh : Math.min(watermarkMs, fresh);
   const nextUpdatedSince = new Date(watermark).toISOString();
   // Requests still waiting for an answer have no lower bound by default: one
   // whose time has passed still needs the host's decision, so hiding it from
