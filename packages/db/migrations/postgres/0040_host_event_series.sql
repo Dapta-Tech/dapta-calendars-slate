@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS host_event_series (
   until_date             TEXT,
   attendees              JSONB,
   status                 TEXT NOT NULL DEFAULT 'active',
+  revision               INTEGER NOT NULL DEFAULT 0,
   materialized_until_ms  BIGINT NOT NULL,
   skipped                JSONB,
   calendar_state         TEXT NOT NULL DEFAULT 'not_connected',

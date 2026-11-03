@@ -508,6 +508,13 @@ export const hostEventSeries = sqliteTable('host_event_series', {
   attendees: text('attendees'),
   /** 'active' (dates still to write), 'ended' (every date written) or 'cancelled'. */
   status: text('status').notNull().default('active'),
+  /**
+   * Bumped by every write that changes the series or its dates (written ahead,
+   * cut, moved). A write that read an older revision gives way; each date is
+   * keyed with the revision that wrote it, so a whole series moved onto its
+   * old times writes them again.
+   */
+  revision: integer('revision').notNull().default(0),
   /** Occurrences starting before this are written as bookings (the rolling horizon). */
   materializedUntilMs: integer('materialized_until_ms').notNull(),
   /** Dates left out because something else was there: [{ startMs, date, reason }]. */

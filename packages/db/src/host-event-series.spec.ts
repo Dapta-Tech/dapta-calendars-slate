@@ -74,9 +74,12 @@ describe('host event series (SQLite)', () => {
     accountId,
     memberId,
     title: 'Weekly Phone',
-    attendees: ['fausto@example.com', 'cele@example.com'],
+    attendees: ['ana@example.com', 'ben@example.com'],
     anchor,
     rule: weekly,
+    // Held by a calendar, as a series with no end must be (see 'without a calendar').
+    calendarQueued: true,
+    calendarDestination: REF,
     ...over,
   });
 
@@ -121,8 +124,8 @@ describe('host event series (SQLite)', () => {
       description: 'Agenda',
       locationKind: 'conferencing',
       status: 'active',
-      attendees: ['fausto@example.com', 'cele@example.com'],
-      calendarState: 'not_connected',
+      attendees: ['ana@example.com', 'ben@example.com'],
+      calendarState: 'queued',
       rule: weekly,
       anchor,
     });
@@ -144,7 +147,7 @@ describe('host event series (SQLite)', () => {
       occurrenceStartMs: rows[0]!.startMs,
     });
     const people = await db.all<{ email: string }>(sql`SELECT email FROM booking_attendee WHERE booking_id = ${first!['id'] as string} ORDER BY created_at`);
-    expect(people.map((p) => p.email)).toEqual(['fausto@example.com', 'cele@example.com']);
+    expect(people.map((p) => p.email)).toEqual(['ana@example.com', 'ben@example.com']);
     expect((await seriesOfBooking(db, out.firstUid, accountId))?.series.id).toBe(out.seriesId);
   });
 
@@ -345,5 +348,86 @@ describe('host event series (SQLite)', () => {
     expect(await hostEventOwnTime(db, row)).toBeNull();
     await db.run(sql`UPDATE host_event_series SET calendar_event_id = 'evt-1' WHERE id = ${out.seriesId}`);
     expect(await hostEventOwnTime(db, row)).toEqual({ startMs: Number(row.start_ms), endMs: Number(row.end_ms) });
+  });
+  it('without a calendar, a series must end within the horizon', async () => {
+    const open = await createHostEventSeries(db, args({ calendarQueued: false, calendarDestination: null }));
+    expect(open).toMatchObject({ ok: false, reason: 'INVALID' });
+    expect((open as { message: string }).message).toMatch(/must end within 180 days/);
+    const short = ok(await createHostEventSeries(db, args({ calendarQueued: false, calendarDestination: null, rule: { ...weekly, count: 4 } })));
+    expect((await loadHostEventSeries(db, short.seriesId))!.calendarState).toBe('not_connected');
+  });
+
+  it('a whole series moved by exactly one week keeps every date (dates are keyed per revision)', async () => {
+    const out = ok(await createHostEventSeries(db, args({ rule: { ...weekly, count: 10 } })));
+    const rows = await loadSeriesOccurrences(db, out.seriesId);
+    const moved = ok(await moveHostEventSeries(db, { accountId, uid: rows[0]!.uid, scope: 'series', newStartMs: rows[0]!.startMs + WEEK }));
+    expect(moved.cancelled).toHaveLength(10);
+    const after = await loadSeriesOccurrences(db, out.seriesId);
+    const accepted = after.filter((r) => r.status === 'accepted');
+    expect(accepted).toHaveLength(10);
+    expect(accepted[0]!.startMs).toBe(rows[0]!.startMs + WEEK);
+    // Away and back again: the old times are written again.
+    const away = ok(await moveHostEventSeries(db, { accountId, uid: accepted[0]!.uid, scope: 'series', newStartMs: accepted[0]!.startMs + 3_600_000 }));
+    expect(away.occurrences).toBe(10);
+    const back = (await loadSeriesOccurrences(db, out.seriesId)).filter((r) => r.status === 'accepted');
+    ok(await moveHostEventSeries(db, { accountId, uid: back[0]!.uid, scope: 'series', newStartMs: back[0]!.startMs - 3_600_000 }));
+    expect((await loadSeriesOccurrences(db, out.seriesId)).filter((r) => r.status === 'accepted')).toHaveLength(10);
+  });
+
+  it('a date already moved or cancelled cannot be the pivot of another move (a retry never moves twice)', async () => {
+    const out = ok(await createHostEventSeries(db, args({ rule: { ...weekly, count: 4 } })));
+    const first = (await loadSeriesOccurrences(db, out.seriesId))[0]!;
+    ok(await moveHostEventSeries(db, { accountId, uid: first.uid, scope: 'this_and_following', newStartMs: first.startMs + DAY }));
+    // The same request again, with the uid it was given: refused, nothing moves.
+    expect(await moveHostEventSeries(db, { accountId, uid: first.uid, scope: 'this_and_following', newStartMs: first.startMs + DAY })).toEqual({
+      ok: false,
+      reason: 'GONE',
+    });
+    const series = (await loadHostEventSeries(db, out.seriesId))!;
+    expect(series.rule.weekdays).toEqual(['monday']);
+    expect(await db.all(sql`SELECT id FROM host_event_series WHERE split_from = ${out.seriesId}`)).toHaveLength(0);
+  });
+
+  it('scope series never touches a date that has started, even one whose date moved', async () => {
+    const out = ok(await createHostEventSeries(db, args({ rule: { ...weekly, count: 5 } })));
+    const rows = await loadSeriesOccurrences(db, out.seriesId);
+    // The first date moved on its own to the Friday after the fourth.
+    const moved = await rescheduleBookingV2(db, { accountId, uid: rows[0]!.uid, newStartMs: rows[3]!.startMs + 5 * DAY, idempotencyKey: 'mv-first' });
+    expect(moved.ok).toBe(true);
+    // "Now" is just after the second date started.
+    const now = rows[1]!.startMs + 60_000;
+    const res = ok(await cancelHostEventSeries(db, { accountId, uid: rows[2]!.uid, scope: 'series', now }));
+    expect(res.calendar).toBe('trim');
+    const after = await loadSeriesOccurrences(db, out.seriesId);
+    expect(after.find((r) => r.uid === rows[1]!.uid)!.status).toBe('accepted');
+    // The moved first date, still ahead, is cancelled, and alone on the calendar (the trimmed rule still covers its date).
+    expect(res.cancelled).toContain((moved as { uid: string }).uid);
+    expect(res.occurrenceCancels).toEqual([rows[0]!.occurrenceStartMs]);
+    expect((await loadHostEventSeries(db, out.seriesId))!.rule.untilDate).toBe(
+      new Date(rows[2]!.occurrenceStartMs - DAY).toLocaleDateString('en-CA', { timeZone: TZ }),
+    );
+  });
+
+  it('a cancel after the extension cancels the dates it wrote, and a stale extension writes nothing', async () => {
+    const out = ok(await createHostEventSeries(db, args()));
+    const later = Date.now() + 30 * DAY;
+    const ext = (await extendHostEventSeries(db, out.seriesId, later))!;
+    expect(ext.added).toBeGreaterThan(0);
+    expect((await loadHostEventSeries(db, out.seriesId))!.revision).toBe(1);
+    const rows = await loadSeriesOccurrences(db, out.seriesId);
+    const res = ok(await cancelHostEventSeries(db, { accountId, uid: rows[3]!.uid, scope: 'this_and_following' }));
+    expect(res.cancelled).toHaveLength(rows.length - 3);
+    expect((await loadSeriesOccurrences(db, out.seriesId)).filter((r) => r.status === 'accepted')).toHaveLength(3);
+  });
+
+  it('this and following on a cancelled series changes nothing', async () => {
+    const out = ok(await createHostEventSeries(db, args({ rule: { ...weekly, count: 4 } })));
+    const rows = await loadSeriesOccurrences(db, out.seriesId);
+    ok(await cancelHostEventSeries(db, { accountId, uid: rows[0]!.uid, scope: 'series' }));
+    expect(await cancelHostEventSeries(db, { accountId, uid: rows[2]!.uid, scope: 'this_and_following' })).toMatchObject({
+      ok: true,
+      alreadyApplied: true,
+    });
+    expect((await loadHostEventSeries(db, out.seriesId))!.status).toBe('cancelled');
   });
 });

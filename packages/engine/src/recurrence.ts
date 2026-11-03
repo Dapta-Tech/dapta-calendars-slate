@@ -7,7 +7,7 @@
  * date, whatever the UTC offset is that day, so a weekly 15:30 stays at 15:30
  * across a DST change, as the calendar that holds the series shows it. A local
  * time a DST change skips is read with the offset before the gap (RFC 5545,
- * 3.3.5), the reading Google and Microsoft calendars use, so dCal blocks the same
+ * 3.3.5), the reading calendar providers use, so dCal blocks the same
  * instant the calendar shows; a time that happens twice is its first reading.
  */
 import { tzOffsetMs, zonedWallClockToUtc } from './tz.util';
@@ -220,7 +220,9 @@ export function seriesOccurrences(
   const startDay = dayNumber(start);
   // Weekly weeks are counted from the Monday of the first date's week (WKST=MO).
   const weekZero = startDay - isoWeekdayIndex(startDay);
-  const days = new Set(rule.weekdays.map((w) => RECURRENCE_WEEKDAYS.indexOf(w)));
+  const days = new Set(rule.weekdays.map((w) => RECURRENCE_WEEKDAYS.indexOf(w)).filter((i) => i >= 0));
+  // A rule that can give no date (a weekly one with no weekdays, a bad interval) gives none, at once.
+  if ((rule.frequency === 'weekly' && days.size === 0) || !(rule.interval >= 1)) return [];
   const out: Occurrence[] = [];
   let index = 0;
   // The last day worth looking at: a day past the window's end in any zone.

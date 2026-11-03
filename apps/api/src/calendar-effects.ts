@@ -9,6 +9,7 @@ import {
   DEFAULT_MAX_ATTEMPTS,
   fillSeriesCalendar,
   firstOccurrence,
+  firstOccurrenceOrNull,
   loadDestinationConnectionRefs,
   loadHostEventSeries,
   loadSeriesOccurrences,
@@ -295,9 +296,27 @@ export class CalendarEffects {
     this.enqueueSeries('series-delete', seriesId, anchorUid);
   }
 
-  /** Dates of a series left out after it was written: cancel each on the calendar. */
-  onSeriesDatesSkipped(seriesId: string, anchorUid: string, startsMs: readonly number[]): void {
+  /** Dates of a series taken off it after it was written (left out by the extension, or cancelled past a cut): cancel each on the calendar, by original start. */
+  onSeriesDatesCancelled(seriesId: string, anchorUid: string, startsMs: readonly number[]): void {
     for (const startMs of startsMs) this.enqueueSeries('occurrence-cancel', seriesId, anchorUid, startMs);
+  }
+
+  /**
+   * The calendar side of cancelling a series from a date on (the MCP's
+   * cancel_booking with a scope and the dashboard's Cancel share it): the
+   * series' event deleted or cut, and any date moved on its own past the cut
+   * cancelled alone. The calendar tells the attendees.
+   */
+  afterSeriesCancelled(
+    out: { seriesId: string; cancelled: readonly string[]; calendar: 'delete' | 'trim' | 'none'; occurrenceCancels: readonly number[] },
+    anchorUid: string,
+  ): void {
+    if (out.calendar === 'delete') this.onSeriesDeleted(out.seriesId, anchorUid);
+    else {
+      if (out.calendar === 'trim') this.onSeriesChanged(out.seriesId, anchorUid);
+      this.onSeriesDatesCancelled(out.seriesId, anchorUid, out.occurrenceCancels);
+    }
+    for (const uid of out.cancelled) this.onBookingChanged(uid);
   }
 
   /**
@@ -340,30 +359,41 @@ export class CalendarEffects {
    */
   private enqueue(action: CalendarAction, uid: string): void {
     if (!this.calendar.enabled) return;
-    void (async () => {
-      // A host event (ADR 0011) has no invitee email to wait for, so its write
-      // is due at once (the tool that made it waits for the video link). A
-      // date of a series is ordered with its series' jobs (ADR 0012).
-      const row = await this.db.get<{ event_type_id: string | null; recurring_event_id: string | null }>(
-        sql`SELECT event_type_id, recurring_event_id FROM booking WHERE uid = ${uid} LIMIT 1`,
-      );
-      const hostEvent = !!row && row.event_type_id == null;
-      await enqueueOutbox(this.db, {
-        kind: 'calendar',
-        action,
-        bookingUid: uid,
-        // A short head start for the invitee's email, which the same request
-        // queues right after and which marks this row (`providerInvites`). Well
-        // inside the grace a conferencing email waits for this write's link, so
-        // the link still comes first.
-        nextAttemptAt: hostEvent ? Date.now() : Date.now() + INVITEE_EMAIL_GRACE_MS,
-        ...(hostEvent && row.recurring_event_id ? { orderKey: `series:${row.recurring_event_id}` } : {}),
-        // A delete may wait for its cancellation email; the wait has its own budget.
-        ...(action === 'delete' ? { maxAttempts: DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_MAX_LOOKS } : {}),
+    void enqueueOutbox(this.db, {
+      kind: 'calendar',
+      action,
+      bookingUid: uid,
+      // A short head start for the invitee's email, which the same request
+      // queues right after and which marks this row (`providerInvites`). Well
+      // inside the grace a conferencing email waits for this write's link, so
+      // the link still comes first.
+      nextAttemptAt: Date.now() + INVITEE_EMAIL_GRACE_MS,
+      // A delete may wait for its cancellation email; the wait has its own budget.
+      ...(action === 'delete' ? { maxAttempts: DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_MAX_LOOKS } : {}),
+    })
+      .then((rowId) => this.hostEventRow(rowId, uid))
+      .catch((err) => {
+        this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
       });
-    })().catch((err) => {
-      this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
-    });
+  }
+
+  /**
+   * A host event's calendar row (ADR 0011, 0012), adjusted once queued: no
+   * invitee email marks it, so it is due at once (the tool that made it waits
+   * for the video link), and a date of a series is ordered with its series'
+   * jobs. Done AFTER the insert, so every other booking's row is queued exactly
+   * as fast as before and its invitee email still finds it.
+   */
+  private async hostEventRow(rowId: string, uid: string): Promise<void> {
+    const row = await this.db.get<{ event_type_id: string | null; recurring_event_id: string | null }>(
+      sql`SELECT event_type_id, recurring_event_id FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    if (!row || row.event_type_id != null) return;
+    const orderKey = row.recurring_event_id ? `series:${row.recurring_event_id}` : uid;
+    await this.db.run(
+      sql`UPDATE outbox SET next_attempt_at = ${Date.now()}, order_key = ${orderKey}
+          WHERE id = ${rowId} AND status = 'pending' AND lease_until IS NULL`,
+    );
   }
 
   /**
@@ -726,7 +756,12 @@ export class CalendarEffects {
     if (action === 'series-update') {
       this.requireRecurrence(series.calendarDestination);
       const ctx = await this.seriesContext(series);
-      const first = firstOccurrence(series);
+      const first = firstOccurrenceOrNull(series);
+      if (!first) {
+        // Cut before its first date: nothing of the series is left on the calendar.
+        await this.runSeriesJob('series-delete', { id: series.id });
+        return;
+      }
       const updated = await this.calendar.updateEvent({
         connectionRef: series.calendarDestination,
         calendarId: series.calendarCalendarId ?? ctx.calendarId,
@@ -866,7 +901,8 @@ export class CalendarEffects {
     const rows = await loadSeriesOccurrences(this.db, series.id);
     const live = new Set(rows.filter((r) => r.status === 'accepted' || r.status === 'pending').map((r) => r.occurrenceStartMs));
     const excluded = new Set<number>(series.skipped.map((d) => d.startMs));
-    for (const r of rows) if (r.status === 'cancelled' && !live.has(r.occurrenceStartMs)) excluded.add(r.occurrenceStartMs);
+    // A date cancelled on its own; never one replaced by a move, whose date lives on elsewhere.
+    for (const r of rows) if (r.status === 'cancelled' && !r.rescheduled && !live.has(r.occurrenceStartMs)) excluded.add(r.occurrenceStartMs);
     return {
       rrule: rruleFor(series.anchor, series.rule),
       frequency: series.rule.frequency,

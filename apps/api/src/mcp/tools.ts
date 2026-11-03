@@ -41,6 +41,7 @@ import {
   localDateParts,
   recurrenceProblem,
   seriesOccurrences,
+  seriesWallClockToUtc,
   weekdayOf,
   zonedWallClockToUtc,
   type RecurrenceRule,
@@ -85,7 +86,7 @@ export interface McpToolDeps {
   /** Busy reads for a decision (`provider`, always fresh) and the calendar write-out, for `create_event`. */
   calendar: Pick<
     CalendarEffects,
-    'provider' | 'onBookingAccepted' | 'onBookingChanged' | 'onSeriesCreated' | 'onSeriesChanged' | 'onSeriesDeleted'
+    'provider' | 'onBookingAccepted' | 'onSeriesCreated' | 'onSeriesChanged' | 'afterSeriesCancelled'
   >;
   /**
    * How long `create_event` waits for the calendar to return a video link it
@@ -1994,54 +1995,79 @@ const rescheduleBooking: ToolDef = {
           'The host\'s connected calendar cannot change a repeating event through dCal yet, so nothing was moved.',
           'Move the dates one by one (scope this).',
         );
-      const out = await moveHostEventSeries(
-        deps.db,
+      const detail = p.scopes.includes('bookings:read');
+      const newStartMs = instantFrom(args.start, tz).getTime();
+      // A retry with the same key answers what the first call did; it never moves the series again.
+      const { data, replayed } = await keyedWrite(
+        deps,
+        call,
+        p.accountId,
+        'reschedule_booking:series',
+        args.idempotency_key,
         {
-          accountId: p.accountId,
           uid: args.booking_uid,
           scope,
-          newStartMs: instantFrom(args.start, tz).getTime(),
-          allowConflicts: args.allow_conflicts === true,
-          skipConflictingDates: args.skip_conflicting_dates === true,
+          start: newStartMs,
+          allow_conflicts: args.allow_conflicts === true,
+          skip_conflicting_dates: args.skip_conflicting_dates === true,
+          time_zone: tz,
         },
-        // FRESH, never the display cache: this decides (ADR 0009).
-        deps.calendar.provider,
+        async () => {
+          const out = await moveHostEventSeries(
+            deps.db,
+            {
+              accountId: p.accountId,
+              uid: args.booking_uid,
+              scope,
+              newStartMs,
+              allowConflicts: args.allow_conflicts === true,
+              skipConflictingDates: args.skip_conflicting_dates === true,
+            },
+            // FRESH, never the display cache: this decides (ADR 0009).
+            deps.calendar.provider,
+          );
+          if (!out.ok) {
+            if (out.reason === 'NOT_FOUND') throw notFound('Booking');
+            if (out.reason === 'NOT_A_SERIES') throw new ToolFailure('INVALID_ARGUMENT', 'This booking is not a date of a repeating event.');
+            if (out.reason === 'GONE')
+              throw new ToolFailure(
+                'INVALID_ARGUMENT',
+                'That date was already moved or cancelled, or the series has no dates left to move.',
+                'Read the series again (get_booking, list_bookings by series_id) and pass a date that is still on.',
+              );
+            if (out.reason === 'CALENDAR_UNAVAILABLE') throw eventRefusal({ ok: false, reason: 'CALENDAR_UNAVAILABLE' }, tz, detail, true);
+            if ('message' in out) throw eventRefusal(out, tz, detail, true);
+            if ('conflicts' in out) throw eventRefusal(out, tz, detail, true);
+            throw new ToolFailure('INVALID_ARGUMENT', 'The series could not be moved.');
+          }
+          if (out.calendarQueued && !out.alreadyApplied) {
+            if (out.previousSeriesId) {
+              // Split: the old series ends before the moved date; the rest is a new series (its own invitation).
+              deps.calendar.onSeriesChanged(out.previousSeriesId, args.booking_uid);
+              deps.calendar.onSeriesCreated(out.seriesId, out.firstUid);
+            } else deps.calendar.onSeriesChanged(out.seriesId, out.firstUid);
+          }
+          const b = await deps.calV2.bookingResponse(p.accountId, out.firstUid);
+          const summary = await summarize(deps, p.accountId, b, tz);
+          return {
+            booking: summary,
+            previous_uid: args.booking_uid,
+            series: summary.series ?? null,
+            cancelled_uids: out.cancelled,
+            skipped_dates: out.skipped.map((d) => skippedOut(d, tz)),
+            conflicts_ignored: out.overridden.map((c) => conflictOut(c, tz, detail)),
+            new_series: out.previousSeriesId !== null,
+          };
+        },
       );
-      const detail = p.scopes.includes('bookings:read');
-      if (!out.ok) {
-        if (out.reason === 'NOT_FOUND') throw notFound('Booking');
-        if (out.reason === 'NOT_A_SERIES') throw new ToolFailure('INVALID_ARGUMENT', 'This booking is not a date of a repeating event.');
-        if (out.reason === 'GONE') throw new ToolFailure('INVALID_ARGUMENT', 'The series has no dates left to move.');
-        if (out.reason === 'CALENDAR_UNAVAILABLE') throw eventRefusal({ ok: false, reason: 'CALENDAR_UNAVAILABLE' }, tz, detail, true);
-        if ('message' in out) throw eventRefusal(out, tz, detail, true);
-        if ('conflicts' in out) throw eventRefusal(out, tz, detail, true);
-        throw new ToolFailure('INVALID_ARGUMENT', 'The series could not be moved.');
-      }
-      if (!out.alreadyApplied && out.calendarQueued) {
-        if (out.previousSeriesId) {
-          // Split: the old series ends before the moved date; the rest is a new series (its own invitation).
-          deps.calendar.onSeriesChanged(out.previousSeriesId, args.booking_uid);
-          deps.calendar.onSeriesCreated(out.seriesId, out.firstUid);
-        } else deps.calendar.onSeriesChanged(out.seriesId, out.firstUid);
-      }
-      const b = await deps.calV2.bookingResponse(p.accountId, out.firstUid);
-      const summary = await summarize(deps, p.accountId, b, tz);
-      const moved = out.cancelled.length;
+      const moved = data.cancelled_uids.length;
+      const skippedDates = data.skipped_dates.map((d) => d.date);
       return {
-        data: {
-          booking: summary,
-          previous_uid: args.booking_uid,
-          series: summary.series ?? null,
-          cancelled_uids: out.cancelled,
-          skipped_dates: out.skipped.map((d) => skippedOut(d, tz)),
-          conflicts_ignored: out.overridden.map((c) => conflictOut(c, tz, detail)),
-        },
-        summary: out.alreadyApplied
-          ? `Already there. ${line(summary)}`
-          : `Moved ${moved} date(s)${out.previousSeriesId ? ' into a new series (the attendees get it as a new invitation)' : ''}: ${summary.series?.rule ?? ''}. The first: ${line(summary)}${
-              out.skipped.length ? ` Left out ${out.skipped.length} date(s): ${out.skipped.map((d) => d.date).join(', ')}.` : ''
-            }`,
-        affected: [args.booking_uid, out.firstUid, ...out.cancelled],
+        data,
+        summary: `${replayed ? 'Already moved. ' : ''}Moved ${moved} date(s)${data.new_series ? ' into a new series (the attendees get it as a new invitation)' : ''}: ${data.series?.rule ?? ''}. The first: ${line(data.booking)}${
+          skippedDates.length ? ` Left out ${skippedDates.length} date(s): ${skippedDates.join(', ')}.` : ''
+        }`,
+        affected: [args.booking_uid, data.booking.uid, ...data.cancelled_uids],
       };
     }
     const zone = args.time_zone ?? (await hostZone(deps.db, p.accountId, args.booking_uid));
@@ -2096,9 +2122,7 @@ const cancelBooking: ToolDef = {
         throw new ToolFailure('INVALID_ARGUMENT', 'This booking is not a date of a repeating event.');
       }
       // The calendar tells the attendees: the series' event is cut, or deleted when nothing is left.
-      if (out.calendar === 'delete') deps.calendar.onSeriesDeleted(out.seriesId, args.booking_uid);
-      else if (out.calendar === 'trim') deps.calendar.onSeriesChanged(out.seriesId, args.booking_uid);
-      for (const uid of out.cancelled) deps.calendar.onBookingChanged(uid);
+      deps.calendar.afterSeriesCancelled(out, args.booking_uid);
       const tz = args.time_zone ?? found.series.anchor.timeZone;
       const b = await deps.calV2.bookingResponse(p.accountId, args.booking_uid);
       const summary = await summarize(deps, p.accountId, b, tz);
@@ -2184,7 +2208,7 @@ const createEventInput = z.object({
     .boolean()
     .optional()
     .describe(
-      'True asks the host\'s connected calendar to create a video meeting for it (a Google Meet on a Google calendar, a Microsoft Teams meeting on a Microsoft one). The link comes back in event.meeting_url; a repeating event has one link for every date.',
+      'True asks the host\'s connected calendar to create a video meeting for it, with the calendar\'s own meeting service. The link comes back in event.meeting_url; a repeating event has one link for every date.',
     ),
   time_zone: timeZone
     .optional()
@@ -2296,6 +2320,16 @@ function seriesFromArgs(
     throw new ToolFailure('INVALID_ARGUMENT', 'weekdays applies only to a weekly series.');
   const startDate = dayIn(start.getTime(), tz);
   const startTime = zonedIso(start, tz).slice(11, 16);
+  const [y, mo, d] = startDate.split('-').map(Number) as [number, number, number];
+  const [h, mi] = startTime.split(':').map(Number) as [number, number];
+  // Every date is read from the local time; a start that time cannot give back
+  // (the second of a time that happens twice when clocks go back) is refused.
+  if (seriesWallClockToUtc({ year: y, month: mo, day: d, hour: h, minute: mi }, tz).getTime() !== start.getTime())
+    throw new ToolFailure(
+      'INVALID_ARGUMENT',
+      `${startTime} happens twice on ${startDate} in ${tz} (the clocks go back), so a repeating event cannot start at its second time.`,
+      'Start the series on another date or time.',
+    );
   return {
     anchor: { startDate, startTime, durationMinutes: minutes, timeZone: tz },
     rule: {
@@ -2678,7 +2712,7 @@ const checkAttendeeAvailability: ToolDef = {
   name: 'check_attendee_availability',
   title: 'Check when people are free',
   description:
-    'When the host and a list of people are free, read through the host\'s connected calendar (Google free/busy, Microsoft availability), before create_event. Two ways: check given times (start, and with repeat the dates of a rule, e.g. every Wednesday at 15:30 for the next 5 weeks: each date says who is busy), or find times (from and to, between day_start and day_end) when everyone it can see is free. A calendar the provider will not show (another organization, sharing off) is reported as unknown, not as free: people lists whose calendars could not be seen, so the person can be told. Shows only busy or free, never what is there. Read-only. Needs scope availability:read and a key with no event-type limit; signed in it is the signed-in person\'s view, with an API key the workspace owner\'s.',
+    'When the host and a list of people are free, read through the host\'s connected calendar (its free/busy for other people), before create_event. Two ways: check given times (start, and with repeat the dates of a rule, e.g. every Wednesday at 15:30 for the next 5 weeks: each date says who is busy), or find times (from and to, between day_start and day_end) when everyone it can see is free. A calendar the provider will not show (another organization, sharing off) is reported as unknown, not as free: people lists whose calendars could not be seen, so the person can be told. Shows only busy or free, never what is there. Read-only. Needs scope availability:read (an API key also bookings:write) and a key with no event-type limit; signed in it is the signed-in person\'s view, with an API key the workspace owner\'s.',
   scope: 'availability:read',
   write: false,
   // Like find_available_slots: it reads calendars and changes nothing, so not open world.
@@ -2702,7 +2736,11 @@ const checkAttendeeAvailability: ToolDef = {
     truncated: z.boolean().describe('Find times: more free times exist than were returned.'),
   }),
   async run(args: z.infer<typeof checkAvailabilityInput>, call, deps) {
+    // An API key acts for the workspace owner's calendar connection, through
+    // which it reads other people's busy times: only a key already trusted to
+    // write to that calendar (bookings:write) may, besides availability:read.
     const p = requireScope(call, 'availability:read');
+    if (p.kind !== 'oauth' && !p.memberId) requireScope(call, 'bookings:write');
     if (p.eventTypeIds)
       throw new ToolFailure(
         'INSUFFICIENT_SCOPE',
@@ -2828,8 +2866,9 @@ const checkAttendeeAvailability: ToolDef = {
     const evaluated = candidates.map((c) => {
       const busy: string[] = [];
       const unknown: string[] = [];
-      if (hostUnknown) unknown.push(hostEmail);
-      else if (overlaps(hostBusy, c)) busy.push(hostEmail);
+      // dCal's own bookings and holds are known even when the calendar is not.
+      if (overlaps(hostBusy, c)) busy.push(hostEmail);
+      else if (hostUnknown) unknown.push(hostEmail);
       for (const email of people) {
         const v = seen.get(email)!;
         if (v.busy === null) unknown.push(email);

@@ -10,17 +10,17 @@ import { SeriesExtender } from '../series-extender';
 import { bootHarness, errorText, idem, structured, type Harness } from './mcp-harness';
 
 /**
- * Repeating host events through the MCP (ADR 0012), with Felipe's two
- * weeklies as the case: "Weekly Dapta Phone" every Wednesday 15:30-16:00 in
- * Bogota with four people and a video link, then "Avances de la plataforma"
- * right after it, checked first against everyone's calendars. One series on
+ * Repeating host events through the MCP (ADR 0012), with two weeklies as the
+ * case: "Weekly team call" every Wednesday 15:30-16:00 in Bogota with four
+ * people and a video link, then "Product review" right after it, checked
+ * first against everyone's calendars. One series on
  * the calendar, every date a dCal booking, changes by date or from a date on.
  */
 
 const ALL = ['availability:read', 'bookings:read', 'bookings:write', 'bookings:cancel', 'event-types:read'];
 const REF = 'cal-ext-owner';
 const BOGOTA = 'America/Bogota';
-const PEOPLE = ['fausto@example.com', 'cele@example.com', 'daniel@example.com', 'jonathan@example.com'];
+const PEOPLE = ['ana@example.com', 'ben@example.com', 'carla@example.com', 'dev@example.com'];
 
 type Series = { id: string; rule: string; weekdays: string[]; count: number | null; until: string | null; status: string; date: string | null; skipped_dates: string[]; start_time: string };
 type Event = { uid: string; kind: string; title: string; start: string; start_utc: string; end_utc: string; status: string; meeting_url: string | null; series: Series | null };
@@ -89,13 +89,13 @@ afterEach(() => {
 });
 
 describe('repeating events through create_event', () => {
-  it('Felipe\'s weekly: checked first, one series on the calendar with one video link, every date a booking', async () => {
+  it('a weekly with a video link: checked first, one series on the calendar with one video link, every date a booking', async () => {
     const first = wednesday(0);
-    // "Did you check everyone's schedule?": the next five Wednesdays, one calendar not shared.
-    calendar.seedAttendeeBusy('daniel@example.com', [
+    // Checked first: the next five Wednesdays, one calendar not shared.
+    calendar.seedAttendeeBusy('carla@example.com', [
       { startUtc: `${wednesday(1)}T20:00:00.000Z`, endUtc: `${wednesday(1)}T21:00:00.000Z` },
     ]);
-    calendar.seedAttendeeBusy('jonathan@example.com', 'not_shared');
+    calendar.seedAttendeeBusy('dev@example.com', 'not_shared');
     const check = structured<{
       mode: string;
       people: { email: string; role: string; calendar: string; reason: string | null }[];
@@ -111,27 +111,27 @@ describe('repeating events through create_event', () => {
     );
     expect(check.mode).toBe('check');
     expect(check.people[0]).toMatchObject({ email: 'alex@example.com', role: 'host', calendar: 'visible' });
-    expect(check.people.find((p) => p.email === 'jonathan@example.com')).toMatchObject({ calendar: 'unknown', reason: 'not_shared' });
+    expect(check.people.find((p) => p.email === 'dev@example.com')).toMatchObject({ calendar: 'unknown', reason: 'not_shared' });
     expect(check.times).toHaveLength(5);
     expect(check.times.map((t) => t.start.slice(0, 16))).toEqual([0, 1, 2, 3, 4].map((w) => `${wednesday(w)}T15:30`));
-    expect(check.times[1]!.busy).toEqual(['daniel@example.com']);
+    expect(check.times[1]!.busy).toEqual(['carla@example.com']);
     // Unknown is never free.
-    expect(check.times.every((t) => t.unknown.includes('jonathan@example.com') && !t.all_free)).toBe(true);
+    expect(check.times.every((t) => t.unknown.includes('dev@example.com') && !t.all_free)).toBe(true);
     expect(calendar.attendeeReads.at(-1)).toMatchObject({ connectionRef: REF, emails: PEOPLE });
 
     // One credential for the create and its retry: keys are per credential.
-    const felipe = await h.connect(await h.key(ALL));
+    const host = await h.connect(await h.key(ALL));
     const phone = {
-      title: 'Weekly Dapta Phone',
+      title: 'Weekly team call',
       start: bogota(first, '15:30'),
       duration_minutes: 30,
       attendees: PEOPLE,
       video_link: true,
       recurrence: { frequency: 'weekly' },
       time_zone: BOGOTA,
-      idempotency_key: idem('weekly-phone-0001'),
+      idempotency_key: idem('weekly-call-0001'),
     };
-    const out = structured<Created>(await felipe.callTool({ name: 'create_event', arguments: phone }));
+    const out = structured<Created>(await host.callTool({ name: 'create_event', arguments: phone }));
     expect(out.series).toMatchObject({
       rule: 'every Wednesday at 15:30 (America/Bogota), no end date',
       weekdays: ['wednesday'],
@@ -140,7 +140,7 @@ describe('repeating events through create_event', () => {
       status: 'active',
       date: first,
     });
-    expect(out.event).toMatchObject({ kind: 'event', title: 'Weekly Dapta Phone', start_utc: `${first}T20:30:00.000Z`, end_utc: `${first}T21:00:00.000Z` });
+    expect(out.event).toMatchObject({ kind: 'event', title: 'Weekly team call', start_utc: `${first}T20:30:00.000Z`, end_utc: `${first}T21:00:00.000Z` });
     expect(out.dates_scheduled).toBe(26);
     expect(out).toMatchObject({ calendar: 'queued', video: 'pending', already_created: false, attendees: PEOPLE });
     // ONE calendar job for the whole series, ordered with the series' other changes.
@@ -153,7 +153,7 @@ describe('repeating events through create_event', () => {
     expect(calendar.created).toHaveLength(1);
     expect(calendar.created[0]).toMatchObject({
       connectionRef: REF,
-      title: 'Weekly Dapta Phone',
+      title: 'Weekly team call',
       startUtc: `${first}T20:30:00.000Z`,
       endUtc: `${first}T21:00:00.000Z`,
       timeZone: BOGOTA,
@@ -181,31 +181,31 @@ describe('repeating events through create_event', () => {
     );
     const dates = list.bookings.filter((b) => b.series_id === out.series!.id);
     expect(dates.length).toBe(4);
-    expect(dates.every((b) => b.title === 'Weekly Dapta Phone')).toBe(true);
+    expect(dates.every((b) => b.title === 'Weekly team call')).toBe(true);
 
     // A retry answers the same series; a key used with other arguments is refused.
-    const again = structured<Created>(await felipe.callTool({ name: 'create_event', arguments: phone }));
+    const again = structured<Created>(await host.callTool({ name: 'create_event', arguments: phone }));
     expect(again).toMatchObject({ already_created: true, video: 'ready', series: { id: out.series!.id } });
     expect(again.event.meeting_url).toBe('https://video.example/evt-1');
     expect(calendar.created).toHaveLength(1);
-    expect(errorText(await felipe.callTool({ name: 'create_event', arguments: { ...phone, title: 'Other' } }))).toMatch(/IDEMPOTENCY_KEY_REUSED/);
+    expect(errorText(await host.callTool({ name: 'create_event', arguments: { ...phone, title: 'Other' } }))).toMatch(/IDEMPOTENCY_KEY_REUSED/);
     // The same key once used for a single event is refused for a series, and the other way round.
     const { recurrence: _r, ...single } = phone;
-    expect(errorText(await felipe.callTool({ name: 'create_event', arguments: single }))).toMatch(/IDEMPOTENCY_KEY_REUSED/);
+    expect(errorText(await host.callTool({ name: 'create_event', arguments: single }))).toMatch(/IDEMPOTENCY_KEY_REUSED/);
 
-    // "Avances de la plataforma" right after it: adjacent, not overlapping.
-    const avances = structured<Created>(
+    // "Product review" right after it: adjacent, not overlapping.
+    const review = structured<Created>(
       await create({
-        title: 'Avances de la plataforma',
+        title: 'Product review',
         start: bogota(first, '16:00'),
         duration_minutes: 30,
         attendees: PEOPLE.slice(1),
         video_link: true,
         recurrence: { frequency: 'weekly', weekdays: ['wednesday'] },
-        idempotency_key: idem('avances-0001'),
+        idempotency_key: idem('review-0001'),
       }),
     );
-    expect(avances.series!.rule).toBe('every Wednesday at 16:00 (America/Bogota), no end date');
+    expect(review.series!.rule).toBe('every Wednesday at 16:00 (America/Bogota), no end date');
     // Overlapping the Phone is another dCal booking: never double-booked.
     expect(
       errorText(await create({ title: 'Clash', start: bogota(wednesday(2), '15:45'), duration_minutes: 30, idempotency_key: idem('clash-0001') })),
@@ -372,5 +372,59 @@ describe('repeating events through create_event', () => {
     expect(after.skipped).toEqual([expect.objectContaining({ startMs: taken, reason: 'booked' })]);
     await drain();
     expect(calendar.deleted.at(-1)).toMatchObject({ occurrenceStartUtc: new Date(taken).toISOString() });
+  });
+  it('a series move retried with its key answers the first move; the old date is gone', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const made = structured<Created>(
+      await c.callTool({
+        name: 'create_event',
+        arguments: { title: 'Sync', start: bogota(wednesday(0), '13:00'), duration_minutes: 30, recurrence: { frequency: 'weekly', count: 3 }, time_zone: BOGOTA, idempotency_key: idem('sync-0001') },
+      }),
+    );
+    await drain();
+    const move = {
+      booking_uid: made.event.uid,
+      scope: 'this_and_following',
+      start: bogota(new Date(Date.parse(`${wednesday(0)}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10), '13:00'),
+      idempotency_key: idem('sync-move-0001'),
+    };
+    const first = structured<{ booking: Event; series: Series; cancelled_uids: string[] }>(await c.callTool({ name: 'reschedule_booking', arguments: move }));
+    expect(first.series.weekdays).toEqual(['thursday']);
+    const updates = calendar.updated.length;
+    const again = structured<{ booking: Event; series: Series }>(await c.callTool({ name: 'reschedule_booking', arguments: move }));
+    expect(again.booking.uid).toBe(first.booking.uid);
+    await drain();
+    expect(calendar.updated.length).toBe(updates + 1); // the one move, once
+    // Another key on the date that was moved: refused, nothing moves again.
+    expect(errorText(await c.callTool({ name: 'reschedule_booking', arguments: { ...move, idempotency_key: idem('sync-move-0002') } }))).toMatch(
+      /already moved or cancelled/,
+    );
+  });
+
+  it('an API key reads other people\'s busy times only with bookings:write too', async () => {
+    const text = errorText(
+      await call(
+        'check_attendee_availability',
+        { attendees: ['ana@example.com'], start: bogota(wednesday(6), '09:00'), duration_minutes: 30, time_zone: BOGOTA },
+        ['availability:read', 'bookings:read'],
+      ),
+    );
+    expect(text).toMatch(/INSUFFICIENT_SCOPE/);
+    expect(text).toContain('bookings:write');
+  });
+
+  it('refuses a series that starts at the second of a time that happens twice', async () => {
+    // 2027-11-07 01:30 happens twice in New York; -05:00 is the second time.
+    const text = errorText(
+      await call('create_event', {
+        title: 'Early',
+        start: '2027-11-07T01:30:00-05:00',
+        duration_minutes: 30,
+        recurrence: { frequency: 'weekly', count: 2 },
+        time_zone: 'America/New_York',
+        idempotency_key: idem('early-0001'),
+      }),
+    );
+    expect(text).toMatch(/happens twice/);
   });
 });

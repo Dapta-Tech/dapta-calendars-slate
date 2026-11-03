@@ -89,6 +89,10 @@ describe('seriesOccurrences', () => {
     expect(occ.map((o) => o.date)).toEqual(['2026-11-04', '2026-11-07', '2026-11-10']);
   });
 
+  it('a rule that can give no date gives none (a weekly one with no weekdays)', () => {
+    expect(seriesOccurrences(phone, weekly({ weekdays: [] }), { toMs: Number.MAX_SAFE_INTEGER })).toEqual([]);
+  });
+
   it('stops at the window end', () => {
     const occ = seriesOccurrences(phone, weekly(), { toMs: Date.parse('2026-11-18T20:30:00Z') });
     expect(occ.map((o) => o.date)).toEqual(['2026-11-04', '2026-11-11']);

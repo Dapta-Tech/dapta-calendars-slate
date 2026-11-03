@@ -423,9 +423,7 @@ export class AdminService {
       // are cancelled and its one calendar event cut or deleted (the calendar tells the attendees).
       const series = await cancelHostEventSeries(this.db, { accountId: p.accountId, uid, scope, reason: reason ?? null });
       if (!series.ok) return series;
-      if (series.calendar === 'delete') this.calendar.onSeriesDeleted(series.seriesId, uid);
-      else if (series.calendar === 'trim') this.calendar.onSeriesChanged(series.seriesId, uid);
-      for (const cancelled of series.cancelled) this.calendar.onBookingChanged(cancelled);
+      this.calendar.afterSeriesCancelled(series, uid);
       return { ok: true as const, alreadyApplied: series.alreadyApplied };
     }
     const out = await cancelBooking(this.db, { uid, reason, byHost: true, accountId: p.accountId });

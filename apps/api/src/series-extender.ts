@@ -64,7 +64,7 @@ export class SeriesExtender implements OnModuleInit, OnModuleDestroy {
             added += out.added;
             if (out.skipped.length > 0) {
               const anchor = (await loadSeriesOccurrences(this.db, id))[0]?.uid;
-              if (anchor) this.calendar.onSeriesDatesSkipped(id, anchor, out.skipped.map((d) => d.startMs));
+              if (anchor) this.calendar.onSeriesDatesCancelled(id, anchor, out.skipped.map((d) => d.startMs));
               this.log.warn(`series ${id}: ${out.skipped.length} date(s) left out, a booking was already there`);
             }
           } catch (err) {

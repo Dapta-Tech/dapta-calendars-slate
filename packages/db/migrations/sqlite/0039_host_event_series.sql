@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS host_event_series (
   until_date             TEXT,
   attendees              TEXT,
   status                 TEXT NOT NULL DEFAULT 'active',
+  revision               INTEGER NOT NULL DEFAULT 0,
   materialized_until_ms  INTEGER NOT NULL,
   skipped                TEXT,
   calendar_state         TEXT NOT NULL DEFAULT 'not_connected',

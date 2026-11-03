@@ -131,6 +131,9 @@ describePg('repository (real Postgres — the tested truth)', () => {
       attendees: [],
       anchor: { startDate, startTime: '15:30', durationMinutes: 30, timeZone: 'UTC' },
       rule: { frequency: 'weekly', interval: 1, weekdays: ['wednesday'], count: null, untilDate: null },
+      // Held by a calendar, as a series with no end must be.
+      calendarQueued: true,
+      calendarDestination: 'cal-ext-pg',
     });
     expect(series.ok).toBe(true);
     const { seriesId } = series as { seriesId: string };

@@ -184,8 +184,8 @@ meeting link, `time_zone` and the usual `idempotency_key`.
   check so the event does not block itself. The free/busy read cannot tell one
   event from another, so anything else inside the old time is left out too.
 - **The video link.** `video_link: true` has the host's connected calendar
-  create the meeting (a Google Meet on a Google calendar, a Microsoft Teams
-  meeting on a Microsoft one). A host event has no invitee email to wait for,
+  create the meeting with its own meeting service (ADR 0008: the repo names
+  none). A host event has no invitee email to wait for,
   so its calendar write is due at once; the tool waits a few seconds for it and
   returns the link in `event.meeting_url` with `video: "ready"`, or
   `video: "pending"` when the calendar has not answered yet (`get_booking`
@@ -235,8 +235,9 @@ or `weekly` on `weekdays`), `interval` (every N days or weeks), and `count`
 ### Who is free
 
 `check_attendee_availability` says when the host and a list of people (1 to 20
-emails) are free, through the host's own connected calendar (Google free/busy,
-Microsoft availability). It works in two ways:
+emails) are free, through the host's own connected calendar (the provider's
+free/busy for other people, through the port's `listAttendeeBusy`). It works in
+two ways:
 
 - **Check times.** Give `start` and `duration_minutes`, plus `repeat` for the
   dates of a rule, e.g. `{ "frequency": "weekly", "count": 5 }` for the next five
@@ -251,7 +252,10 @@ off, no such address) is **unknown**, with the reason, and never counted as
 free: `people` names whose calendars could not be seen, so the agent can say
 so. The answer shows busy or free only, never what is on a calendar. Like
 `create_event`, it acts for the signed-in member or, with an API key, the
-workspace owner, and refuses a key held to some event types.
+workspace owner, and refuses a key held to some event types. An API key also
+needs `bookings:write`: it reads other people's busy times through the owner's
+calendar connection, so only a key already trusted to write to that calendar
+may.
 
 ### Requests that wait for the host
 

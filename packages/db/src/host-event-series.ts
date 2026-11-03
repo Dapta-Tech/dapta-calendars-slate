@@ -107,6 +107,8 @@ export interface HostEventSeries {
   calendarCalendarId: string | null;
   meetingUrl: string | null;
   splitFrom: string | null;
+  /** Bumped by every write that changes the series or its dates (see the schema). */
+  revision: number;
   createdAt: number;
 }
 
@@ -136,6 +138,7 @@ interface SeriesRow {
   calendar_calendar_id: string | null;
   meeting_url: string | null;
   split_from: string | null;
+  revision: number | string;
   metadata: unknown;
   created_at: number | string;
 }
@@ -175,6 +178,7 @@ function seriesFromRow(r: SeriesRow): HostEventSeries {
     calendarCalendarId: r.calendar_calendar_id,
     meetingUrl: r.meeting_url,
     splitFrom: r.split_from,
+    revision: Number(r.revision ?? 0),
     createdAt: Number(r.created_at),
   };
 }
@@ -186,9 +190,14 @@ export async function loadHostEventSeries(db: Db, id: string, accountId?: string
   return row ? seriesFromRow(row) : null;
 }
 
+/** The first date of a series, as the rule gives it, or null for a rule left with none. */
+export function firstOccurrenceOrNull(series: Pick<HostEventSeries, 'anchor' | 'rule'>): Occurrence | null {
+  return seriesOccurrences(series.anchor, series.rule, { toMs: NO_END, max: 1 })[0] ?? null;
+}
+
 /** The first date of a series, as the rule gives it. */
 export function firstOccurrence(series: Pick<HostEventSeries, 'anchor' | 'rule'>): Occurrence {
-  const first = seriesOccurrences(series.anchor, series.rule, { toMs: NO_END, max: 1 })[0];
+  const first = firstOccurrenceOrNull(series);
   if (!first) throw new RangeError('a series without dates');
   return first;
 }
@@ -209,22 +218,41 @@ export interface SeriesOccurrenceRow {
   endMs: number;
   /** When the rule put it, before any move of that date alone. */
   occurrenceStartMs: number;
+  /** True for a row replaced by a move (its date lives on in another row, or in a moved series). */
+  rescheduled: boolean;
 }
+
+interface OccurrenceDbRow {
+  id: string;
+  uid: string;
+  status: string;
+  start_ms: number | string;
+  end_ms: number | string;
+  metadata: unknown;
+  rescheduled: number | string | null;
+}
+
+function occurrenceFromRow(r: OccurrenceDbRow): SeriesOccurrenceRow {
+  return {
+    id: r.id,
+    uid: r.uid,
+    status: r.status,
+    startMs: Number(r.start_ms),
+    endMs: Number(r.end_ms),
+    occurrenceStartMs: occurrenceStartOf(r.metadata, r.start_ms),
+    rescheduled: Number(r.rescheduled ?? 0) === 1,
+  };
+}
+
+const live = (r: { status: string }) => r.status === 'accepted' || r.status === 'pending';
 
 /** Every written occurrence of a series (any status), by original start. */
 export async function loadSeriesOccurrences(db: Db, seriesId: string): Promise<SeriesOccurrenceRow[]> {
-  const rows = await db.all<{ id: string; uid: string; status: string; start_ms: number | string; end_ms: number | string; metadata: unknown }>(
-    sql`SELECT id, uid, status, start_ms, end_ms, metadata FROM booking WHERE recurring_event_id = ${seriesId}`,
+  const rows = await db.all<OccurrenceDbRow>(
+    sql`SELECT id, uid, status, start_ms, end_ms, metadata, rescheduled FROM booking WHERE recurring_event_id = ${seriesId}`,
   );
   return rows
-    .map((r) => ({
-      id: r.id,
-      uid: r.uid,
-      status: r.status,
-      startMs: Number(r.start_ms),
-      endMs: Number(r.end_ms),
-      occurrenceStartMs: occurrenceStartOf(r.metadata, r.start_ms),
-    }))
+    .map(occurrenceFromRow)
     .sort((a, b) => a.occurrenceStartMs - b.occurrenceStartMs || a.startMs - b.startMs);
 }
 
@@ -235,25 +263,15 @@ export async function seriesOfBooking(
   accountId?: string,
 ): Promise<{ series: HostEventSeries; occurrence: SeriesOccurrenceRow } | null> {
   const scope = accountId ? sql` AND b.account_id = ${accountId}` : sql``;
-  const b = await db.get<{ id: string; uid: string; status: string; start_ms: number | string; end_ms: number | string; metadata: unknown; recurring_event_id: string | null; event_type_id: string | null }>(
-    sql`SELECT b.id, b.uid, b.status, b.start_ms, b.end_ms, b.metadata, b.recurring_event_id, b.event_type_id
+  const b = await db.get<OccurrenceDbRow & { recurring_event_id: string | null; event_type_id: string | null }>(
+    sql`SELECT b.id, b.uid, b.status, b.start_ms, b.end_ms, b.metadata, b.rescheduled, b.recurring_event_id, b.event_type_id
         FROM booking b WHERE b.uid = ${uid}${scope} LIMIT 1`,
   );
   // Only a host event names a series here: `recurring_event_id` is never written otherwise.
   if (!b?.recurring_event_id || b.event_type_id != null) return null;
   const series = await loadHostEventSeries(db, b.recurring_event_id, accountId);
   if (!series) return null;
-  return {
-    series,
-    occurrence: {
-      id: b.id,
-      uid: b.uid,
-      status: b.status,
-      startMs: Number(b.start_ms),
-      endMs: Number(b.end_ms),
-      occurrenceStartMs: occurrenceStartOf(b.metadata, b.start_ms),
-    },
-  };
+  return { series, occurrence: occurrenceFromRow(b) };
 }
 
 /** The local date of an instant in a zone, YYYY-MM-DD. */
@@ -288,7 +306,7 @@ const overlaps = (a: { startMs: number; endMs: number }, b: { startMs: number; e
 
 // --- The locked write, one body for both dialects --------------------------------
 
-type TxStep = { get: SQL } | { run: SQL };
+type TxStep = { get: SQL } | { all: SQL } | { run: SQL };
 
 /** Thrown inside a locked write to roll it back and answer `result`. */
 class Abort<R> {
@@ -298,7 +316,8 @@ class Abort<R> {
 /**
  * Run `body` under the host's lock, as every guarded booking write does: SQLite
  * takes the write lock at BEGIN, Postgres locks the member row. The body yields
- * the statements; a `get` gets back the first row (or undefined). Throwing an
+ * the statements; a `get` gets back the first row (or undefined), an `all`
+ * every row. Throwing an
  * `Abort` rolls everything back and answers its result.
  */
 async function lockedWrite<R>(db: Db, memberId: string, body: () => Generator<TxStep, R, unknown>): Promise<R> {
@@ -311,6 +330,7 @@ async function lockedWrite<R>(db: Db, memberId: string, body: () => Generator<Tx
         while (!step.done) {
           const s = step.value;
           if ('get' in s) step = g.next(native.drizzle.get(s.get));
+          else if ('all' in s) step = g.next(native.drizzle.all(s.all));
           else {
             native.drizzle.run(s.run);
             step = g.next(undefined);
@@ -328,6 +348,8 @@ async function lockedWrite<R>(db: Db, memberId: string, body: () => Generator<Tx
         if ('get' in s) {
           const rows = (await tx.execute(s.get)) as unknown as unknown[];
           step = g.next(rows[0]);
+        } else if ('all' in s) {
+          step = g.next([...((await tx.execute(s.all)) as unknown as unknown[])]);
         } else {
           await tx.execute(s.run);
           step = g.next(undefined);
@@ -451,6 +473,8 @@ async function planSeries(db: Db, input: PlanInput): Promise<{ ok: true; plan: P
 
 interface OccurrenceSource {
   seriesId: string;
+  /** The series' revision this write makes: part of each date's key. */
+  revision: number;
   accountId: string;
   memberId: string;
   title: string;
@@ -472,7 +496,7 @@ function occurrenceInsert(
 ): { uid: string; key: string; statements: SQL[] } {
   const bookingId = randomUUID();
   const uid = randomUUID();
-  const key = occurrenceKey(s.accountId, s.seriesId, o.startMs);
+  const key = occurrenceKey(s.accountId, s.seriesId, s.revision, o.startMs);
   const metadata = {
     _hostEvent: { by: 'mcp', calendar: s.calendar, calendarChecked: s.calendarChecked, overridden },
     _series: { id: s.seriesId, occurrenceStartMs: o.startMs },
@@ -494,12 +518,13 @@ function occurrenceInsert(
 }
 
 /**
- * The key an occurrence is written under: one per series and date, so the
- * extension job, run by several replicas at once, can never write a date twice
- * (`booking.idempotency_key` is unique).
+ * The key an occurrence is written under: one per series, revision and date
+ * (`booking.idempotency_key` is unique), so one write can never put a date in
+ * twice, while a later revision (a whole series moved onto its own old times)
+ * writes those times again instead of finding the cancelled rows' keys.
  */
-function occurrenceKey(accountId: string, seriesId: string, startMs: number): string {
-  return scopedIdempotencyKey(accountId, `series:${seriesId}:${startMs}`);
+function occurrenceKey(accountId: string, seriesId: string, revision: number, startMs: number): string {
+  return scopedIdempotencyKey(accountId, `series:${seriesId}:${revision}:${startMs}`);
 }
 
 /**
@@ -518,7 +543,11 @@ function* writeOccurrences(
   const skipped: SkippedDate[] = [];
   for (const o of kept) {
     // Already written (a replica extended it first): nothing to do for that date.
-    if (yield { get: sql`SELECT id FROM booking WHERE idempotency_key = ${occurrenceKey(source.accountId, source.seriesId, o.startMs)} LIMIT 1` })
+    if (
+      yield {
+        get: sql`SELECT id FROM booking WHERE idempotency_key = ${occurrenceKey(source.accountId, source.seriesId, source.revision, o.startMs)} LIMIT 1`,
+      }
+    )
       continue;
     if (yield { get: hostOverlapSql(source.memberId, o.startMs, o.endMs) }) {
       if (!opts.skip) throw new Abort({ ok: false as const, reason: 'SLOT_TAKEN' as const, date: o.date });
@@ -685,6 +714,8 @@ export async function createHostEventSeries(
   });
   if (!planned.ok) return refuse(planned);
   const { plan } = planned;
+  if (!args.calendarQueued && !noDatesFrom(args.anchor, rule, plan.materializeToMs))
+    return { ok: false, reason: 'INVALID', message: NEEDS_CALENDAR_TO_REPEAT };
 
   const seriesId = randomUUID();
   const description = args.description?.trim() ? args.description.trim() : null;
@@ -693,6 +724,7 @@ export async function createHostEventSeries(
   const storedKey = key ? scopedIdempotencyKey(args.accountId, key) : null;
   const source: OccurrenceSource = {
     seriesId,
+    revision: 0,
     accountId: args.accountId,
     memberId: member.id,
     title,
@@ -790,21 +822,51 @@ export interface SeriesExtension {
 }
 
 /**
+ * Whether a series' rule has no dates from `fromMs` on. A series no calendar
+ * holds must end within its horizon: past it, nothing would keep its dates
+ * busy until the extension writes them.
+ */
+function noDatesFrom(anchor: SeriesAnchor, rule: RecurrenceRule, fromMs: number): boolean {
+  return seriesOccurrences(anchor, rule, { fromMs, toMs: NO_END, max: 1 }).length === 0;
+}
+
+const NEEDS_CALENDAR_TO_REPEAT =
+  `Without a connected calendar, a repeating event must end within ${SERIES_HORIZON_DAYS} days (give count or until): only the calendar keeps its later dates busy.`;
+
+/** The series' revision under the lock, or null when it changed since `expected` (the caller starts over). */
+function* sameRevision(seriesId: string, expected: number): Generator<TxStep, boolean, unknown> {
+  const fresh = (yield { get: sql`SELECT revision FROM host_event_series WHERE id = ${seriesId} LIMIT 1` }) as
+    | { revision: number | string }
+    | undefined;
+  return !!fresh && Number(fresh.revision) === expected;
+}
+
+/** Thrown inside a locked write that read an older revision: roll back and start over. */
+const STALE = Symbol('stale series');
+
+/**
  * Write the dates that came within the horizon since the series was last
  * extended. Only another dCal booking stops a date now: the host accepted the
  * series when it was made, and the calendar already shows its own future
- * dates as busy, so it is not read. Safe to run on several replicas at once:
- * each date is written under one key, under the host's lock.
+ * dates as busy, so it is not read. Safe on several replicas at once: the
+ * write gives way when the series' revision changed since it was read (another
+ * replica, a cancel, a move), and each date is keyed once per revision.
+ * Nothing is written for a host who is no longer an active member, and no
+ * date already started is written.
  */
 export async function extendHostEventSeries(db: Db, seriesId: string, now: number = Date.now()): Promise<SeriesExtension | null> {
   const series = await loadHostEventSeries(db, seriesId);
   if (!series || series.status !== 'active') return null;
+  const member = await db.get<{ status: string }>(sql`SELECT status FROM member WHERE id = ${series.hostMemberId} LIMIT 1`);
+  if (member?.status !== 'active') return null;
   const targetMs = now + SERIES_HORIZON_MS;
   if (series.materializedUntilMs >= targetMs - SERIES_EXTEND_SLACK_MS) return { seriesId, added: 0, skipped: [], ended: false };
-  const dates = seriesOccurrences(series.anchor, series.rule, { fromMs: series.materializedUntilMs, toMs: targetMs });
-  const more = seriesOccurrences(series.anchor, series.rule, { fromMs: targetMs, toMs: NO_END, max: 1 }).length > 0;
+  const dates = seriesOccurrences(series.anchor, series.rule, { fromMs: Math.max(series.materializedUntilMs, now), toMs: targetMs });
+  const ended = noDatesFrom(series.anchor, series.rule, targetMs);
+  const revision = series.revision + 1;
   const source: OccurrenceSource = {
     seriesId,
+    revision,
     accountId: series.accountId,
     memberId: series.hostMemberId,
     title: series.title,
@@ -816,19 +878,14 @@ export async function extendHostEventSeries(db: Db, seriesId: string, now: numbe
     calendarChecked: true,
   };
   return lockedWrite(db, series.hostMemberId, function* () {
-    // Another replica, or a cancel or a move, got here first.
-    const fresh = (yield {
-      get: sql`SELECT status, materialized_until_ms, skipped FROM host_event_series WHERE id = ${seriesId} LIMIT 1`,
-    }) as { status: string; materialized_until_ms: number | string; skipped: unknown } | undefined;
-    if (!fresh || fresh.status !== 'active' || Number(fresh.materialized_until_ms) !== series.materializedUntilMs)
-      return { seriesId, added: 0, skipped: [], ended: false };
+    // Another replica, or a cancel or a move, got here first: nothing to do now.
+    if (!(yield* sameRevision(seriesId, series.revision))) return { seriesId, added: 0, skipped: [], ended: false };
     // A hold lasts minutes; a date months away is not refused for one.
     const out = yield* writeOccurrences(db, source, dates, { allowConflicts: true, skip: true, now, overridden: [] });
-    const skipped = [...parseJsonColumn<SkippedDate[]>(fresh.skipped, []), ...out.skipped];
-    const ended = !more;
+    const skipped = [...series.skipped, ...out.skipped];
     yield {
       run: sql`UPDATE host_event_series
-          SET materialized_until_ms = ${targetMs}, skipped = ${jsonParam(db, skipped)},
+          SET materialized_until_ms = ${targetMs}, skipped = ${jsonParam(db, skipped)}, revision = ${revision},
               status = ${ended ? 'ended' : 'active'}, updated_at = ${now}
           WHERE id = ${seriesId}`,
     };
@@ -847,89 +904,129 @@ export type SeriesCancelOutcome =
       /** The occurrences cancelled now. */
       cancelled: string[];
       /**
-       * What the calendar must do: `delete` the repeating event (nothing of the
-       * series is left), `trim` it (end it before the first cancelled date),
-       * or `none` (no calendar, or nothing changed).
+       * What the calendar must do with the series' event: `delete` it (nothing
+       * of the series is left), `trim` it (end it before the first cancelled
+       * date), or `none` (no calendar, or nothing changed).
        */
       calendar: 'delete' | 'trim' | 'none';
+      /**
+       * Dates moved on their own to after the cut that the rule's new end
+       * does not reach (their original start is before it): cancelled one by
+       * one on the calendar, by original start.
+       */
+      occurrenceCancels: number[];
       /** True when it was already cancelled that far: nothing changed. */
       alreadyApplied: boolean;
     }
   | { ok: false; reason: 'NOT_FOUND' | 'NOT_A_SERIES' };
 
+/** The date of an instant in the series' zone. */
+const dateIn = (series: HostEventSeries, ms: number) => localDate(ms, series.anchor.timeZone);
+
+/**
+ * Where a change from a date on starts, in the rule's terms. `this_and_following`:
+ * the date's own original start, unless that date has started. `series` (and a
+ * date that has started): the first date of the rule that has not started.
+ * Null when the rule has no such date.
+ */
+function cutFor(series: HostEventSeries, scope: SeriesScope, pivotOriginalMs: number, now: number): number | null {
+  if (scope === 'this_and_following' && pivotOriginalMs > now) return pivotOriginalMs;
+  return seriesOccurrences(series.anchor, series.rule, { fromMs: now + 1, toMs: NO_END, max: 1 })[0]?.startMs ?? null;
+}
+
 /**
  * Cancel the dates of a series from one on: `this_and_following` from the
- * occurrence `uid`, `series` from the first that has not started (dates
- * already past stay as they were). Every written occurrence from there is
- * cancelled, and the rule ends before it, so the extension writes no more and
- * the calendar's repeating event is cut there (or deleted, when nothing of it
- * is left). dCal emails nobody: the calendar tells the attendees.
+ * occurrence `uid`, `series` from the first that has not started. Dates
+ * already started stay as they were, whichever the scope. Every written date
+ * from the cut on is cancelled, and the rule ends before it, so the extension
+ * writes no more and the calendar's repeating event is cut there; when nothing
+ * of the series has started, the series is cancelled whole and its event
+ * deleted. Decided under the host's lock on the series as it is then (a write
+ * that read an older revision starts over). dCal emails nobody: the calendar
+ * tells the attendees.
  */
 export async function cancelHostEventSeries(
   db: Db,
   args: { accountId: string; uid: string; scope: SeriesScope; reason?: string | null; now?: number },
 ): Promise<SeriesCancelOutcome> {
   const now = args.now ?? Date.now();
-  const found = await seriesOfBooking(db, args.uid, args.accountId);
-  if (!found) {
-    const exists = await db.get(sql`SELECT id FROM booking WHERE uid = ${args.uid} AND account_id = ${args.accountId} LIMIT 1`);
-    return { ok: false, reason: exists ? 'NOT_A_SERIES' : 'NOT_FOUND' };
-  }
-  const { series } = found;
-  const rows = await loadSeriesOccurrences(db, series.id);
-  const first = firstOccurrence(series);
-  // Where the cut falls: this date, or the first one of the series not started yet.
-  let cutMs: number;
-  if (args.scope === 'this_and_following') cutMs = found.occurrence.occurrenceStartMs;
-  else {
-    const nextRule = seriesOccurrences(series.anchor, series.rule, { fromMs: now, toMs: NO_END, max: 1 })[0]?.startMs;
-    const nextRow = rows.filter((r) => r.status === 'accepted' && r.startMs > now).map((r) => r.occurrenceStartMs);
-    const candidates = [...nextRow, ...(nextRule !== undefined ? [nextRule] : [])];
-    cutMs = candidates.length ? Math.min(...candidates) : Number.POSITIVE_INFINITY;
-  }
-  const toCancel = rows.filter((r) => (r.status === 'accepted' || r.status === 'pending') && r.occurrenceStartMs >= cutMs);
-  const wholeSeries = cutMs <= first.startMs;
-  const cutDate = Number.isFinite(cutMs) ? localDate(cutMs, series.anchor.timeZone) : null;
-  const newRule = !wholeSeries && cutDate ? endedBefore(series.rule, cutDate) : series.rule;
-  // Nothing left to cut: already cancelled from there, or nothing ahead at all.
-  const ruleUnchanged =
-    wholeSeries
-      ? series.status === 'cancelled'
-      : !cutDate || (series.rule.untilDate !== null && civilDayDiff(series.rule.untilDate, newRule.untilDate!) >= 0);
-  if (toCancel.length === 0 && ruleUnchanged)
-    return { ok: true, seriesId: series.id, cancelled: [], calendar: 'none', alreadyApplied: true };
-
   const reason = args.reason?.trim() ? args.reason.trim() : null;
-  const onCalendar = series.calendarState === 'queued';
-  await lockedWrite(db, series.hostMemberId, function* () {
-    for (const r of toCancel) {
-      yield {
-        run: sql`UPDATE booking SET status = 'cancelled', cancellation_reason = ${reason}, cancelled_by = 'host',
-              updated_at = ${now}
-            WHERE id = ${r.id} AND status IN ('accepted','pending')`,
-      };
+  for (let attempt = 0; ; attempt++) {
+    const found = await seriesOfBooking(db, args.uid, args.accountId);
+    if (!found) {
+      const exists = await db.get(sql`SELECT id FROM booking WHERE uid = ${args.uid} AND account_id = ${args.accountId} LIMIT 1`);
+      return { ok: false, reason: exists ? 'NOT_A_SERIES' : 'NOT_FOUND' };
     }
-    if (wholeSeries) {
-      yield {
-        run: sql`UPDATE host_event_series SET status = 'cancelled', updated_at = ${now} WHERE id = ${series.id}`,
-      };
-    } else if (!ruleUnchanged) {
-      yield {
-        run: sql`UPDATE host_event_series
-            SET occurrence_count = NULL, until_date = ${newRule.untilDate}, updated_at = ${now},
-                status = CASE WHEN materialized_until_ms >= ${cutMs} THEN 'ended' ELSE status END
-            WHERE id = ${series.id}`,
-      };
+    const { series } = found;
+    const done = { ok: true as const, seriesId: series.id, cancelled: [], calendar: 'none' as const, occurrenceCancels: [], alreadyApplied: true };
+    if (series.status === 'cancelled') return done;
+    const first = firstOccurrence(series);
+    const started = first.startMs <= now;
+    const cutMs = cutFor(series, args.scope, found.occurrence.occurrenceStartMs, now);
+    const wholeSeries = !started && (cutMs === null || cutMs <= first.startMs);
+    const cutDate = cutMs === null ? null : dateIn(series, cutMs);
+    const newRule = !wholeSeries && cutDate ? endedBefore(series.rule, cutDate) : series.rule;
+    const ruleChanges =
+      !wholeSeries &&
+      cutDate !== null &&
+      (series.rule.untilDate === null || civilDayDiff(newRule.untilDate!, series.rule.untilDate) > 0) &&
+      // A count that already ends before the cut is not cut again.
+      seriesOccurrences(series.anchor, series.rule, { fromMs: cutMs!, toMs: NO_END, max: 1 }).length > 0;
+    const onCalendar = series.calendarState === 'queued';
+    const result = await lockedWrite<SeriesOccurrenceRow[] | null | typeof STALE>(db, series.hostMemberId, function* () {
+      if (!(yield* sameRevision(series.id, series.revision))) throw new Abort(STALE);
+      const rows = ((yield {
+        all: sql`SELECT id, uid, status, start_ms, end_ms, metadata, rescheduled FROM booking WHERE recurring_event_id = ${series.id}`,
+      }) as OccurrenceDbRow[]).map(occurrenceFromRow);
+      // Never a date that has started, and with `series` every date not started.
+      const toCancel = rows.filter(
+        (r) =>
+          live(r) && r.startMs > now && (wholeSeries || args.scope === 'series' || (cutMs !== null && r.occurrenceStartMs >= cutMs)),
+      );
+      if (toCancel.length === 0 && !ruleChanges && !wholeSeries) return null;
+      for (const r of toCancel) {
+        yield {
+          run: sql`UPDATE booking SET status = 'cancelled', cancellation_reason = ${reason}, cancelled_by = 'host',
+                updated_at = ${now}
+              WHERE id = ${r.id} AND status IN ('accepted','pending')`,
+        };
+      }
+      if (wholeSeries) {
+        yield {
+          run: sql`UPDATE host_event_series SET status = 'cancelled', revision = ${series.revision + 1}, updated_at = ${now}
+              WHERE id = ${series.id}`,
+        };
+      } else if (ruleChanges) {
+        yield {
+          run: sql`UPDATE host_event_series
+              SET occurrence_count = NULL, until_date = ${newRule.untilDate}, revision = ${series.revision + 1}, updated_at = ${now},
+                  status = CASE WHEN materialized_until_ms >= ${cutMs} THEN 'ended' ELSE status END
+              WHERE id = ${series.id}`,
+        };
+      } else {
+        yield { run: sql`UPDATE host_event_series SET revision = ${series.revision + 1}, updated_at = ${now} WHERE id = ${series.id}` };
+      }
+      return toCancel;
+    });
+    if (result === STALE) {
+      if (attempt < 3) continue;
+      throw new Error(`series ${series.id} kept changing while it was cancelled`);
     }
-    return null;
-  });
-  return {
-    ok: true,
-    seriesId: series.id,
-    cancelled: toCancel.map((r) => r.uid),
-    calendar: !onCalendar ? 'none' : wholeSeries ? 'delete' : ruleUnchanged ? 'none' : 'trim',
-    alreadyApplied: false,
-  };
+    if (result === null) return done;
+    const cancelled = result as SeriesOccurrenceRow[];
+    return {
+      ok: true,
+      seriesId: series.id,
+      cancelled: cancelled.map((r) => r.uid),
+      calendar: !onCalendar ? 'none' : wholeSeries ? 'delete' : ruleChanges ? 'trim' : 'none',
+      // A date moved on its own whose original start the new end still covers stays on the calendar unless cancelled alone.
+      occurrenceCancels:
+        onCalendar && !wholeSeries
+          ? cancelled.filter((r) => cutMs === null || r.occurrenceStartMs < cutMs).map((r) => r.occurrenceStartMs)
+          : [],
+      alreadyApplied: false,
+    };
+  }
 }
 
 // --- Move ------------------------------------------------------------------------
@@ -954,7 +1051,7 @@ export type SeriesMoveOutcome =
       /** The series it was split from, when it was; null when the series moved whole. */
       previousSeriesId: string | null;
       firstUid: string;
-      /** True when the series already was there: nothing changed. */
+      /** True when the series already was there (a whole series moved to its own rule): nothing changed. */
       alreadyApplied: boolean;
       cancelled: string[];
       occurrences: number;
@@ -971,11 +1068,14 @@ export type SeriesMoveOutcome =
 /**
  * Move a series from one date on to a new local time (and, with it, a new
  * weekday): `this_and_following` from the occurrence `uid`, `series` from the
- * first date that has not started. When that is the series' first date, the
- * whole series moves and keeps its calendar event (the attendees see it move);
- * otherwise the series is ended before it and the rest continues as a new
- * series (the attendees get the new one as its own invitation). Each new date
- * is checked as on creation.
+ * first date that has not started. Dates that have started stay where they
+ * were. When the move starts at the series' first date and nothing has
+ * started, the whole series moves and keeps its calendar event (the attendees
+ * see it move); otherwise the series ends before it and the rest continues as
+ * a new series (the attendees get it as its own invitation). Each new date is
+ * checked as on creation. `uid` must be a date that is still on: a date moved
+ * or cancelled already answers GONE (a retry of a move is answered by the
+ * caller's idempotency key, never by moving again).
  */
 export async function moveHostEventSeries(
   db: Db,
@@ -983,181 +1083,162 @@ export async function moveHostEventSeries(
   calendar?: CalendarProvider,
 ): Promise<SeriesMoveOutcome> {
   const now = args.now ?? Date.now();
-  const found = await seriesOfBooking(db, args.uid, args.accountId);
-  if (!found) {
-    const exists = await db.get(sql`SELECT id FROM booking WHERE uid = ${args.uid} AND account_id = ${args.accountId} LIMIT 1`);
-    return { ok: false, reason: exists ? 'NOT_A_SERIES' : 'NOT_FOUND' };
-  }
-  const { series } = found;
-  if (series.status === 'cancelled') return { ok: false, reason: 'GONE' };
-  const rows = await loadSeriesOccurrences(db, series.id);
-  const tz = series.anchor.timeZone;
-  // The pivot: this date, or the first not started yet.
-  let pivotMs: number;
-  if (args.scope === 'this_and_following') pivotMs = found.occurrence.occurrenceStartMs;
-  else {
-    const next = rows.filter((r) => r.status === 'accepted' && r.startMs > now).map((r) => r.occurrenceStartMs);
-    const nextRule = seriesOccurrences(series.anchor, series.rule, { fromMs: now, toMs: NO_END, max: 1 })[0]?.startMs;
-    const candidates = [...next, ...(nextRule !== undefined ? [nextRule] : [])];
-    if (candidates.length === 0) return { ok: false, reason: 'GONE' };
-    pivotMs = Math.min(...candidates);
-  }
-  const pivotIndex = seriesOccurrences(series.anchor, series.rule, { toMs: pivotMs }).length;
-  const pivotDate = localDate(pivotMs, tz);
-  const newDate = localDate(args.newStartMs, tz);
-  const newTime = localTime(args.newStartMs, tz);
-  const shift = civilDayDiff(pivotDate, newDate);
-  const anchor: SeriesAnchor = { ...series.anchor, startDate: newDate, startTime: newTime };
-  const rule: RecurrenceRule = {
-    ...remainderRule(series.rule, pivotIndex),
-    weekdays: series.rule.frequency === 'weekly' ? shiftWeekdays(series.rule.weekdays, shift) : [],
-  };
-  if (rule.untilDate !== null && civilDayDiff(newDate, rule.untilDate) < 0)
-    return { ok: false, reason: 'INVALID', message: `The series ends on ${rule.untilDate}, before the new date.` };
-  const problem = seriesProblem(anchor, rule);
-  if (problem) return { ok: false, reason: 'INVALID', message: problem };
-  const whole = pivotIndex === 0;
-
-  // Already there (a retried call): moved whole to this rule, or split into a series that starts here.
-  const sameAs = (s: HostEventSeries) =>
-    s.anchor.startDate === anchor.startDate &&
-    s.anchor.startTime === anchor.startTime &&
-    s.rule.frequency === rule.frequency &&
-    s.rule.interval === rule.interval &&
-    s.rule.weekdays.join(',') === rule.weekdays.join(',');
-  if (whole && sameAs(series)) {
-    const firstRow = rows.find((r) => r.status === 'accepted');
-    return {
-      ok: true,
-      seriesId: series.id,
-      previousSeriesId: null,
-      firstUid: firstRow?.uid ?? found.occurrence.uid,
-      alreadyApplied: true,
-      cancelled: [],
-      occurrences: rows.filter((r) => r.status === 'accepted').length,
-      skipped: series.skipped,
-      overridden: [],
-      calendarChecked: true,
-      calendarQueued: series.calendarState === 'queued',
+  for (let attempt = 0; ; attempt++) {
+    const found = await seriesOfBooking(db, args.uid, args.accountId);
+    if (!found) {
+      const exists = await db.get(sql`SELECT id FROM booking WHERE uid = ${args.uid} AND account_id = ${args.accountId} LIMIT 1`);
+      return { ok: false, reason: exists ? 'NOT_A_SERIES' : 'NOT_FOUND' };
+    }
+    const { series } = found;
+    if (series.status === 'cancelled' || !live(found.occurrence)) return { ok: false, reason: 'GONE' };
+    const tz = series.anchor.timeZone;
+    const first = firstOccurrence(series);
+    const started = first.startMs <= now;
+    const pivotMs = cutFor(series, args.scope, found.occurrence.occurrenceStartMs, now);
+    if (pivotMs === null) return { ok: false, reason: 'GONE' };
+    const pivotIndex = seriesOccurrences(series.anchor, series.rule, { toMs: pivotMs }).length;
+    const pivotDate = localDate(pivotMs, tz);
+    const newDate = localDate(args.newStartMs, tz);
+    const newTime = localTime(args.newStartMs, tz);
+    const shift = civilDayDiff(pivotDate, newDate);
+    const anchor: SeriesAnchor = { ...series.anchor, startDate: newDate, startTime: newTime };
+    const rule: RecurrenceRule = {
+      ...remainderRule(series.rule, pivotIndex),
+      weekdays: series.rule.frequency === 'weekly' ? shiftWeekdays(series.rule.weekdays, shift) : [],
     };
-  }
-  if (!whole) {
-    const child = await db.get<SeriesRow>(
-      sql`SELECT * FROM host_event_series WHERE split_from = ${series.id} AND status <> 'cancelled'
-          ORDER BY created_at DESC LIMIT 1`,
-    );
-    if (child && sameAs(seriesFromRow(child)) && series.rule.untilDate === addCivilDays(pivotDate, -1)) {
-      const kids = await loadSeriesOccurrences(db, child.id);
-      const accepted = kids.filter((r) => r.status === 'accepted');
+    if (rule.untilDate !== null && civilDayDiff(newDate, rule.untilDate) < 0)
+      return { ok: false, reason: 'INVALID', message: `The series ends on ${rule.untilDate}, before the new date.` };
+    const problem = seriesProblem(anchor, rule);
+    if (problem) return { ok: false, reason: 'INVALID', message: problem };
+    // Whole only when nothing has started and the move starts at the first date.
+    const whole = pivotIndex === 0 && !started;
+    const rows = await loadSeriesOccurrences(db, series.id);
+    if (
+      whole &&
+      series.anchor.startDate === anchor.startDate &&
+      series.anchor.startTime === anchor.startTime &&
+      series.rule.weekdays.join(',') === rule.weekdays.join(',')
+    ) {
+      const accepted = rows.filter(live);
       return {
         ok: true,
-        seriesId: child.id,
-        previousSeriesId: series.id,
-        firstUid: accepted[0]?.uid ?? '',
+        seriesId: series.id,
+        previousSeriesId: null,
+        firstUid: accepted[0]?.uid ?? found.occurrence.uid,
         alreadyApplied: true,
         cancelled: [],
         occurrences: accepted.length,
-        skipped: seriesFromRow(child).skipped,
+        skipped: series.skipped,
         overridden: [],
         calendarChecked: true,
-        calendarQueued: child.calendar_state === 'queued',
+        calendarQueued: series.calendarState === 'queued',
       };
     }
-  }
-
-  const replacing = rows.filter((r) => (r.status === 'accepted' || r.status === 'pending') && r.occurrenceStartMs >= pivotMs);
-  const allowConflicts = args.allowConflicts === true;
-  const skip = args.skipConflictingDates === true;
-  const planned = await planSeries(db, {
-    memberId: series.hostMemberId,
-    anchor,
-    rule,
-    now,
-    allowConflicts,
-    skipConflictingDates: skip,
-    calendar,
-    replacing,
-    replacingOnCalendar: !!series.calendarEventId,
-  });
-  if (!planned.ok) return planned;
-  const { plan } = planned;
-  const targetId = whole ? series.id : randomUUID();
-  const source: OccurrenceSource = {
-    seriesId: targetId,
-    accountId: series.accountId,
-    memberId: series.hostMemberId,
-    title: series.title,
-    description: series.description,
-    locationKind: series.locationKind,
-    timeZone: tz,
-    attendees: series.attendees,
-    calendar: series.calendarState === 'queued' ? 'queued' : 'not_connected',
-    calendarChecked: plan.calendarChecked,
-  };
-  type Written =
-    | { ok: true; written: Array<{ uid: string; startMs: number }>; skipped: SkippedDate[] }
-    | { ok: false; reason: 'SLOT_TAKEN' | 'CONFLICT'; date: string };
-  let result: Written;
-  try {
-    result = await lockedWrite<Written>(db, series.hostMemberId, function* () {
-      // The dates being replaced first, so the new ones are checked against the rest.
-      for (const r of replacing) {
-        yield {
-          run: sql`UPDATE booking SET status = 'cancelled', rescheduled = 1, cancelled_by = 'host', updated_at = ${now}
-              WHERE id = ${r.id} AND status IN ('accepted','pending')`,
-        };
-      }
-      const out = yield* writeOccurrences(db, source, plan.kept, { allowConflicts, skip, now, overridden: plan.overridden });
-      if (out.written.length === 0) throw new Abort({ ok: false as const, reason: 'SLOT_TAKEN' as const, date: plan.kept[0]!.date });
-      const skipped = [...plan.skipped, ...out.skipped].sort((a, b) => a.startMs - b.startMs);
-      if (whole) {
-        yield {
-          run: sql`UPDATE host_event_series
-              SET start_date = ${anchor.startDate}, start_time = ${anchor.startTime}, weekdays = ${rule.weekdays.join(',')},
-                  occurrence_count = ${rule.count}, until_date = ${rule.untilDate}, skipped = ${jsonParam(db, skipped)},
-                  materialized_until_ms = ${plan.materializeToMs}, status = 'active', updated_at = ${now}
-              WHERE id = ${series.id}`,
-        };
-      } else {
-        yield {
-          run: sql`UPDATE host_event_series
-              SET occurrence_count = NULL, until_date = ${addCivilDays(pivotDate, -1)}, status = 'ended', updated_at = ${now}
-              WHERE id = ${series.id}`,
-        };
-        yield {
-          run: sql`INSERT INTO host_event_series (id, account_id, host_member_id, title, description, location_kind,
-                time_zone, start_date, start_time, duration_minutes, frequency, interval_count, weekdays,
-                occurrence_count, until_date, attendees, status, materialized_until_ms, skipped, calendar_state,
-                calendar_destination, split_from, metadata, created_at, updated_at)
-              VALUES (${targetId}, ${series.accountId}, ${series.hostMemberId}, ${series.title}, ${series.description},
-                ${series.locationKind}, ${tz}, ${anchor.startDate}, ${anchor.startTime}, ${anchor.durationMinutes},
-                ${rule.frequency}, ${rule.interval}, ${rule.weekdays.join(',')}, ${rule.count}, ${rule.untilDate},
-                ${jsonParam(db, series.attendees)}, 'active', ${plan.materializeToMs}, ${jsonParam(db, skipped)},
-                ${series.calendarState === 'queued' ? 'queued' : 'not_connected'}, ${series.calendarDestination},
-                ${series.id}, ${jsonParam(db, { _created: { firstUid: out.written[0]!.uid, occurrences: out.written.length, skipped, overridden: plan.overridden, calendarChecked: plan.calendarChecked } })},
-                ${now}, ${now})`,
-        };
-      }
-      return { ok: true, written: out.written, skipped };
+    const replacing = rows.filter((r) => live(r) && r.startMs > now && r.occurrenceStartMs >= pivotMs);
+    const allowConflicts = args.allowConflicts === true;
+    const skip = args.skipConflictingDates === true;
+    const planned = await planSeries(db, {
+      memberId: series.hostMemberId,
+      anchor,
+      rule,
+      now,
+      allowConflicts,
+      skipConflictingDates: skip,
+      calendar,
+      replacing,
+      replacingOnCalendar: !!series.calendarEventId,
     });
-  } catch (err) {
-    if (!isExclusionViolation(err)) throw err;
-    result = { ok: false, reason: 'SLOT_TAKEN', date: '' };
+    if (!planned.ok) return planned;
+    const { plan } = planned;
+    if (series.calendarState !== 'queued' && !noDatesFrom(anchor, rule, plan.materializeToMs))
+      return { ok: false, reason: 'INVALID', message: NEEDS_CALENDAR_TO_REPEAT };
+    const targetId = whole ? series.id : randomUUID();
+    const revision = whole ? series.revision + 1 : 0;
+    const source: OccurrenceSource = {
+      seriesId: targetId,
+      revision,
+      accountId: series.accountId,
+      memberId: series.hostMemberId,
+      title: series.title,
+      description: series.description,
+      locationKind: series.locationKind,
+      timeZone: tz,
+      attendees: series.attendees,
+      calendar: series.calendarState === 'queued' ? 'queued' : 'not_connected',
+      calendarChecked: plan.calendarChecked,
+    };
+    type Written =
+      | { ok: true; written: Array<{ uid: string; startMs: number }>; skipped: SkippedDate[] }
+      | { ok: false; reason: 'SLOT_TAKEN' | 'CONFLICT'; date: string }
+      | typeof STALE;
+    let result: Written;
+    try {
+      result = await lockedWrite<Written>(db, series.hostMemberId, function* () {
+        if (!(yield* sameRevision(series.id, series.revision))) throw new Abort(STALE);
+        // The dates being replaced first, so the new ones are checked against the rest.
+        for (const r of replacing) {
+          yield {
+            run: sql`UPDATE booking SET status = 'cancelled', rescheduled = 1, cancelled_by = 'host', updated_at = ${now}
+                WHERE id = ${r.id} AND status IN ('accepted','pending')`,
+          };
+        }
+        const out = yield* writeOccurrences(db, source, plan.kept, { allowConflicts, skip, now, overridden: plan.overridden });
+        if (out.written.length === 0) throw new Abort({ ok: false as const, reason: 'SLOT_TAKEN' as const, date: plan.kept[0]!.date });
+        const skipped = [...plan.skipped, ...out.skipped].sort((a, b) => a.startMs - b.startMs);
+        if (whole) {
+          yield {
+            run: sql`UPDATE host_event_series
+                SET start_date = ${anchor.startDate}, start_time = ${anchor.startTime}, weekdays = ${rule.weekdays.join(',')},
+                    occurrence_count = ${rule.count}, until_date = ${rule.untilDate}, skipped = ${jsonParam(db, skipped)},
+                    materialized_until_ms = ${plan.materializeToMs}, status = 'active', revision = ${revision}, updated_at = ${now}
+                WHERE id = ${series.id}`,
+          };
+        } else {
+          yield {
+            run: sql`UPDATE host_event_series
+                SET occurrence_count = NULL, until_date = ${addCivilDays(pivotDate, -1)}, status = 'ended',
+                    revision = ${series.revision + 1}, updated_at = ${now}
+                WHERE id = ${series.id}`,
+          };
+          yield {
+            run: sql`INSERT INTO host_event_series (id, account_id, host_member_id, title, description, location_kind,
+                  time_zone, start_date, start_time, duration_minutes, frequency, interval_count, weekdays,
+                  occurrence_count, until_date, attendees, status, materialized_until_ms, skipped, calendar_state,
+                  calendar_destination, split_from, metadata, created_at, updated_at)
+                VALUES (${targetId}, ${series.accountId}, ${series.hostMemberId}, ${series.title}, ${series.description},
+                  ${series.locationKind}, ${tz}, ${anchor.startDate}, ${anchor.startTime}, ${anchor.durationMinutes},
+                  ${rule.frequency}, ${rule.interval}, ${rule.weekdays.join(',')}, ${rule.count}, ${rule.untilDate},
+                  ${jsonParam(db, series.attendees)}, 'active', ${plan.materializeToMs}, ${jsonParam(db, skipped)},
+                  ${series.calendarState === 'queued' ? 'queued' : 'not_connected'}, ${series.calendarDestination},
+                  ${series.id}, ${jsonParam(db, { _created: { firstUid: out.written[0]!.uid, occurrences: out.written.length, skipped, overridden: plan.overridden, calendarChecked: plan.calendarChecked } })},
+                  ${now}, ${now})`,
+          };
+        }
+        return { ok: true, written: out.written, skipped };
+      });
+    } catch (err) {
+      if (!isExclusionViolation(err)) throw err;
+      result = { ok: false, reason: 'SLOT_TAKEN', date: '' };
+    }
+    if (result === STALE) {
+      if (attempt < 3) continue;
+      throw new Error(`series ${series.id} kept changing while it was moved`);
+    }
+    if (!result.ok) return { ok: false, reason: result.reason, conflicts: [] };
+    return {
+      ok: true,
+      seriesId: targetId,
+      previousSeriesId: whole ? null : series.id,
+      firstUid: result.written[0]!.uid,
+      alreadyApplied: false,
+      cancelled: replacing.map((r) => r.uid),
+      occurrences: result.written.length,
+      skipped: result.skipped,
+      overridden: plan.overridden,
+      calendarChecked: plan.calendarChecked,
+      calendarQueued: series.calendarState === 'queued',
+    };
   }
-  if (!result.ok) return { ok: false, reason: result.reason, conflicts: [] };
-  return {
-    ok: true,
-    seriesId: targetId,
-    previousSeriesId: whole ? null : series.id,
-    firstUid: result.written[0]!.uid,
-    alreadyApplied: false,
-    cancelled: replacing.map((r) => r.uid),
-    occurrences: result.written.length,
-    skipped: result.skipped,
-    overridden: plan.overridden,
-    calendarChecked: plan.calendarChecked,
-    calendarQueued: series.calendarState === 'queued',
-  };
 }
 
 // --- The calendar event of a series (claimed like a booking's, DH1) ------------

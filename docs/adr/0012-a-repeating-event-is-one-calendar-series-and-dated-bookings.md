@@ -1,6 +1,6 @@
 # A repeating event is one calendar series and dated bookings
 
-A host's agent can now put a repeating event on the host's calendar ("a weekly Dapta Phone on Wednesdays at 15:30 with Fausto, Cele, Daniel and Jonathan, with a video link"), check first when those people are free, and get the video link back. This builds on [ADR 0011](0011-a-host-event-is-a-booking-with-no-event-type.md): a host event is a booking with no event type.
+A host's agent can now put a repeating event on the host's calendar ("a weekly team call on Wednesdays at 15:30 with four colleagues, with a video link"), check first when those people are free, and get the video link back. This builds on [ADR 0011](0011-a-host-event-is-a-booking-with-no-event-type.md): a host event is a booking with no event type.
 
 ## How a series is stored
 
@@ -13,9 +13,9 @@ Dates are bookings so that **every date blocks the host and is guarded like a bo
 
 ## Open-ended series: a rolling horizon
 
-A series with no end cannot be written as rows forever. Dates are written **180 days ahead** (`SERIES_HORIZON_DAYS`). A job (`SeriesExtender` in the API, every hour on every replica) moves each active series' horizon forward and writes the dates that came within it. Each date is written under one key per series and date (`booking.idempotency_key` is unique) and under the host's lock, so replicas running the job at once never write a date twice. A series whose rule has no dates left is marked `ended`.
+A series with no end cannot be written as rows forever. Dates are written **180 days ahead** (`SERIES_HORIZON_DAYS`). A job (`SeriesExtender` in the API, every hour on every replica) moves each active series' horizon forward and writes the dates that came within it. Every write to a series (the job, a cancel, a move) runs under the host's lock and bumps the series' `revision`; a write that read an older revision gives way and starts over, so replicas running the job at once never write a date twice, and a cancel never misses dates the job wrote meanwhile. Each date is keyed by series, revision and date (`booking.idempotency_key` is unique), so a whole series moved onto its own old times writes them again. A series whose rule has no dates left is marked `ended`.
 
-Beyond the horizon, the host is protected by the calendar. The repeating event is on the host's calendar, and every booking reads that calendar fresh and fails closed (ADR 0009), so a time it covers is not offered. A date that still meets a dCal booking when the job reaches it (a series kept only in dCal, or a calendar that could not be seen) is skipped. That date is cancelled on the calendar and recorded on the series. A host event never displaces a booking someone made.
+Beyond the horizon, the host is protected by the calendar. The repeating event is on the host's calendar, and every booking reads that calendar fresh and fails closed (ADR 0009), so a time it covers is not offered. A series no calendar holds (no attendees, no video link, no calendar connected) has nothing protecting it there, so it must end within the horizon. A date that still meets a dCal booking when the job reaches it (a calendar that could not be seen) is skipped. That date is cancelled on the calendar and recorded on the series. A host event never displaces a booking someone made.
 
 ## Conflicts are reported by date
 
@@ -30,11 +30,11 @@ Later dates written by the job are not checked against the calendar. The host ac
 
 ## Wall clock and DST
 
-A series is anchored to a **wall clock in one zone**: the first date, a local start time and a length. The zone is `time_zone` or the host's own. Every date starts at that local time, whatever the UTC offset that day. A weekly 15:30 stays at 15:30 across a DST change, as the calendar that holds it shows it. A local time that a DST change skips is read with the offset from before the gap, as RFC 5545 says and as Google and Microsoft do: 02:30 on a day that jumps from 02:00 to 03:00 becomes 03:30. dCal blocks the instant the calendar shows. The rule is pure code in `@slate/engine` (`recurrence.ts`): the dates, the RRULE, and the checks that a rule is valid. It is unit-tested across DST changes.
+A series is anchored to a **wall clock in one zone**: the first date, a local start time and a length. The zone is `time_zone` or the host's own. Every date starts at that local time, whatever the UTC offset that day. A weekly 15:30 stays at 15:30 across a DST change, as the calendar that holds it shows it. A local time that a DST change skips is read with the offset from before the gap, as RFC 5545 says and as calendar providers do: 02:30 on a day that jumps from 02:00 to 03:00 becomes 03:30. A start the wall clock cannot give back (the second of a time that happens twice when clocks go back) is refused. dCal blocks the instant the calendar shows. The rule is pure code in `@slate/engine` (`recurrence.ts`): the dates, the RRULE, and the checks that a rule is valid. It is unit-tested across DST changes.
 
 ## Idempotency
 
-The series is written under the caller's `idempotency_key`, namespaced by credential like every keyed write. A retry with the same key and arguments answers the same series, with the same dates, skips and overrides as the first call. The same key with other arguments is refused. Moves and cancellations of a series are idempotent by state: moving a series to where it already is, or cancelling from a date it is already cancelled from, changes nothing and says so.
+The series is written under the caller's `idempotency_key`, namespaced by credential like every keyed write. A retry with the same key and arguments answers the same series, with the same dates, skips and overrides as the first call. The same key with other arguments is refused. A move of a series is answered under the caller's key too: a retry returns what the first call did and never moves the series again, and a date already moved or cancelled is refused as gone. A cancellation is idempotent by state: cancelling from a date it is already cancelled from changes nothing and says so.
 
 ## Changing a series: one date, this and following, or the whole series
 
@@ -42,7 +42,7 @@ The series is written under the caller's `idempotency_key`, namespaced by creden
 
 - **`this`** (the default): that date only, exactly as any booking is moved or cancelled. On the calendar, only that occurrence changes. The port's `occurrenceStartUtc` names it by its original start, so a date moved before can still be found.
 - **`this_and_following`**: that date and every later one. A cancel ends the rule the day before: the calendar's event is cut there, and deleted when nothing of it would remain. A move ends the old series the day before and continues as a new series from the new time, which the attendees get as its own invitation. Moving from the series' first date moves the whole series in place instead, and the attendees see it move.
-- **`series`**: every date that has not started. Dates already past stay as they were; nobody wants their history rewritten. With nothing past, this is the same as `this_and_following` from the first date.
+- **`series`**: every date that has not started. Dates already past stay as they were, whichever the scope; nobody wants their history rewritten. With nothing started, this is the whole series: the calendar's event is deleted, or moved whole.
 
 A move shifts each later date the way the chosen date moved, in local time: the new time of day, and the same number of days, so "Wednesdays" moved one day later become "Thursdays".
 
@@ -54,19 +54,19 @@ dCal's calendar code is vendor-neutral (R15); the provider calls live in a backe
 
 ## Video created by the calendar
 
-`video_link: true` already asked the host's connected calendar to create the meeting room (a Google Meet through `conferenceData`, a Microsoft Teams meeting through `isOnlineMeeting`), through the port's `requestConferenceLink`. `create_event` now returns the link. A host event has no invitee email to wait for (ADR 0007), so its calendar write is due at once. The tool waits a few seconds for it and answers `meeting_url`. If the calendar has not answered by then, the link is null with `video: "pending"`, and `get_booking` shows it once written. A series has one room for all its dates.
+`video_link: true` already asked the host's connected calendar to create the meeting room with its own meeting service, through the port's `requestConferenceLink` (ADR 0008: the repo names no conferencing service). `create_event` now returns the link. A host event has no invitee email to wait for (ADR 0007), so its calendar write is due at once. The tool waits a few seconds for it and answers `meeting_url`. If the calendar has not answered by then, the link is null with `video: "pending"`, and `get_booking` shows it once written. A series has one room for all its dates.
 
 ## Attendee availability: a new tool, not `find_team_slots`
 
-The caller can ask when the host and a list of people are all free, with a new read-only tool, `check_attendee_availability`. It works at a given time (once, or on the dates of a repeating rule: "every Wednesday at 15:30 for the next five weeks"), or over a window, where it lists the times everyone it can see is free. It reads through the host's own connection: Google's free/busy query, Microsoft's `getSchedule`, through the port's optional `listAttendeeBusy`. The host's own busy time is dCal's bookings, holds and calendar, read fresh.
+The caller can ask when the host and a list of people are all free, with a new read-only tool, `check_attendee_availability`. It works at a given time (once, or on the dates of a repeating rule: "every Wednesday at 15:30 for the next five weeks"), or over a window, where it lists the times everyone it can see is free. It reads through the host's own connection, with the provider's free/busy for other people, through the port's optional `listAttendeeBusy`. The host's own busy time is dCal's bookings, holds and calendar, read fresh.
 
 A calendar the provider will not show (another organization, sharing off, no such calendar) comes back **unknown**, with the reason, **never free**. The answer says whose calendars could not be seen.
 
-`find_team_slots` was not extended. It answers a team **event type**: its hosts are dCal members, and its times come from the event type's hours, notice, buffers and slot grid. None of that applies to a meeting with arbitrary email addresses, and folding both into one tool would give it two unrelated input shapes. The new tool needs `availability:read`. Like `create_event`, it acts for the signed-in member, or for an API key the workspace owner, and refuses a key held to some event types.
+`find_team_slots` was not extended. It answers a team **event type**: its hosts are dCal members, and its times come from the event type's hours, notice, buffers and slot grid. None of that applies to a meeting with arbitrary email addresses, and folding both into one tool would give it two unrelated input shapes. The new tool needs `availability:read`. Like `create_event`, it acts for the signed-in member, or for an API key the workspace owner, and refuses a key held to some event types. An API key also needs `bookings:write`: it reads other people's busy times through the owner's calendar connection, which only a key already trusted to write to that calendar may do. The host's dCal bookings and holds count even when the host's calendar cannot be read.
 
 ## No new OAuth scope
 
-All of this works under the scopes the connections already ask for (checked 2026-11-03). Google's calendar scope covers RRULE events, `conferenceData` and the free/busy query of other calendars. Microsoft's `Calendars.ReadWrite` covers recurrence patterns, online meetings and `getSchedule`. No user has to reconnect.
+All of this works under the calendar scopes the connections already ask for (checked 2026-11-03 against the private backend's connections): repeating events, the provider's meeting rooms and other people's free/busy need no new scope. No user has to reconnect. The provider-specific notes live with the private overlay, not here (R15).
 
 ## Not in this version
 
