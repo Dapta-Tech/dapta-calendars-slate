@@ -324,6 +324,14 @@ export async function refreshUpstreamSession(session: Session | null): Promise<S
  * must speak for the person rather than for a workspace (the invitation link
  * listing where they may go).
  */
+/**
+ * Marks a call to the API as coming from this web dashboard, so the API can
+ * tell an account created here from one another client provisions through it
+ * (product analytics only; the API grants nothing on it). Every host call the
+ * web makes carries it, `hostHeaders` and the login callback's alike.
+ */
+export const WEB_CLIENT_HEADERS: Readonly<Record<string, string>> = { 'x-slate-client': 'web' };
+
 export async function hostHeaders(opts: { workspace?: boolean } = {}): Promise<Record<string, string>> {
   const s = await getSession();
   const identity: Record<string, string> =
@@ -332,7 +340,9 @@ export async function hostHeaders(opts: { workspace?: boolean } = {}): Promise<R
       : s?.provider === 'local'
         ? { 'x-slate-email': s.email }
         : {};
-  if (opts.workspace === false || !Object.keys(identity).length) return identity;
+  if (!Object.keys(identity).length) return identity;
+  Object.assign(identity, WEB_CLIENT_HEADERS);
+  if (opts.workspace === false) return identity;
   return { ...identity, ...(await workspaceHeader()) };
 }
 

@@ -89,12 +89,12 @@ the deployment prunes it.
 
 | Event | When | Properties |
 |---|---|---|
-| `calendars_signup_completed` | A login creates a member, or adopts an invite | `role`, `is_first_member`, `from_invite`; sets person `email`, `is_internal`. A first member also sets the account's `is_internal` and `created_at` |
+| `calendars_signup_completed` | A login creates a member, or adopts an invite | `role`, `is_first_member`, `from_invite`, `entry` (`web` when the request that created the member came from this web dashboard, which marks its calls with `x-slate-client: web`; `api` for any other caller holding a host token, such as a platform that provisions its user's account through the API); sets person `email`, `is_internal`. A first member also sets the account's `is_internal` and `created_at` |
 | `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`, and `utm_withheld: true` when a tag was withheld. The same tags are set on the account, with `utm_withheld` too (without `has_click_id`). A tag that is not a plain label is withheld, never repaired (a value encoded once too many is decoded and checked again, and the decoded label is what is sent): only letters, marks, digits, the space, currency signs, emoji, dashes, typographic quotes, brackets and a short list of punctuation pass (an allowlist, checked after Unicode folding), and an invisible character (outside an emoji), an address or handle, a URL, path or IP address, a colon not followed by a space, an HTML entity, a phone number (led by `+`, in short digit blocks, or in a national format such as `300 1234567`), or an encoding left twice are refused. An unbroken run of digits without `+` is kept (it cannot be told from a campaign id, so a phone whose `+` was not URL-encoded passes), and so are date-coded names (`launch_20261018_01`), slashed dates and joined ids; a name made mostly of short numbers reads as a phone and is withheld. The exact rules live in `analyticsCampaignValue` (`@slate/shared`) |
 | `calendars_template_chosen` | The wizard creates the first event type from a template | `template` |
 | `calendars_calendar_connected` | A new calendar connection is stored | `provider`, `method` (`connect_flow` or `manual`) |
 | `calendars_hours_set` | A schedule is created with availability rules, or saved with rules that changed (a rename is not) | `rule_count`, `created` |
-| `calendars_event_type_published` | An event type becomes visible on the booking page (created visible, a hidden one made visible, or the wizard's template) | `source` (`dashboard` or `onboarding`), `is_team`, `requires_confirmation` |
+| `calendars_event_type_published` | An event type becomes visible on the booking page (created visible, a hidden one made visible, or the wizard's template) | `source` (`dashboard` or `onboarding` from the web dashboard, `api` from any other caller), `is_team`, `requires_confirmation` |
 | `calendars_branding_changed` | The booking page look or the workspace brand kit changes | `change` (`page_style`, `look_applied`, `brand_kit`, `kit_applied`, `reverted`), `fields` (names of the settings saved, never their values) |
 | `calendars_hide_branding_toggled` | The Dapta branding switch changes (a save that keeps it is not) | `hidden` |
 | `calendars_booking_created` | A booking is created (not on an idempotent replay, nor a seat taken on an existing group booking). About the **host** who received it | `channel` (`booking_page`, `host`, `api`), `status`, `is_team`, `invitee_is_member`, `invitee_is_internal` |
@@ -107,6 +107,7 @@ the deployment prunes it.
 | Event | When | Properties |
 |---|---|---|
 | `$pageview` | Each dashboard navigation | the vendor's own, URLs without query |
+| `$web_vitals` | The dashboard's load and responsiveness, as the vendor measures them | `$web_vitals_LCP_value`, `$web_vitals_INP_value`, `$web_vitals_CLS_value`, `$web_vitals_FCP_value` and the vendor's per-metric detail; timings and the page's path, URLs without query. Network timing stays off. Booking pages send none |
 | `calendars_template_skipped` | "Skip for now" on the template step | none |
 | `calendars_link_copied` | A booking link is copied | `link` (`page`, `event_type`, `one_off`) |
 

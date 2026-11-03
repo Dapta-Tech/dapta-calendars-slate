@@ -37,6 +37,7 @@ import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { OnboardingService } from './onboarding.service';
 import { GrowthService } from './growth.service';
 import { AuthService, type ReqLike } from './auth.service';
+import { requestEntry } from './auth.provider';
 import { assertAdmin } from './permissions';
 import { trackingAllowedFor } from './event-tracking-gate';
 import { ENV } from './tokens';
@@ -192,7 +193,7 @@ export class HostController {
     void this.analytics?.hostEvent('template_chosen', p, { template: parsed.data.templateId });
     // A template creates a visible event type: the host's first publish.
     void this.analytics?.hostEvent('event_type_published', p, {
-      source: 'onboarding',
+      source: requestEntry(req) === 'web' ? 'onboarding' : 'api',
       is_team: false,
       requires_confirmation: false,
     });

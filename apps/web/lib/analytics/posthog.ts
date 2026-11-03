@@ -283,7 +283,8 @@ const EXCEPTION_CAPTURE = {
  * The vendor settings per audience. Everything that could record what a
  * person types or sees is OFF on both: no autocapture (an admin row's text is
  * an invitee's name), no session recording, no heatmaps, no surveys. Only the
- * events this app sends by hand are captured, plus dashboard pageviews and,
+ * events this app sends by hand are captured, plus dashboard pageviews, the
+ * dashboard's web vitals (load and responsiveness timings, numbers only) and,
  * with error tracking on, uncaught errors.
  */
 export function posthogSettings(
@@ -325,6 +326,11 @@ export function posthogSettings(
       // The dashboard is a multi-route app: each navigation is a real page.
       capture_pageview: 'history_change',
       capture_pageleave: true,
+      // How fast the dashboard loads and answers (LCP, INP, CLS, FCP): timings
+      // and the page's path, nothing a person typed or saw. Network timing
+      // (every request URL) stays off. Booking pages send none: a visitor
+      // sends only this app's own events.
+      capture_performance: { web_vitals: true, network_timing: false },
     };
   }
   return {

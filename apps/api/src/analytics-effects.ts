@@ -187,7 +187,7 @@ export class AnalyticsEffects {
       await this.enqueueCapture(
         'signup_completed',
         who,
-        { role: signup.role, is_first_member: signup.isFirstMember, from_invite: signup.fromInvite },
+        { role: signup.role, is_first_member: signup.isFirstMember, from_invite: signup.fromInvite, entry: signup.entry },
         now,
         { email: who.email, is_internal: who.isInternal },
       );

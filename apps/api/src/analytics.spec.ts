@@ -127,7 +127,7 @@ describe('product analytics (API)', () => {
       const spy = vi.spyOn(db, 'get');
       expect(fx.enabled).toBe(false);
       await fx.hostEvent('hours_set', principal, { rule_count: 5 });
-      await fx.signup({ accountId, memberId: alex, role: 'owner', isFirstMember: true, fromInvite: false });
+      await fx.signup({ accountId, memberId: alex, role: 'owner', isFirstMember: true, fromInvite: false, entry: 'web' });
       await fx.attributionCaptured(principal, { utm_source: 'google' });
       await fx.bookingCreated({ uid: 'x', inviteeEmail: 'a@b.c', channel: 'booking_page', isTeam: false });
       expect(spy).not.toHaveBeenCalled();
@@ -210,15 +210,15 @@ describe('product analytics (API)', () => {
     });
 
     it('a first member is a signup and describes the new account; an invite only joins it', async () => {
-      await fx.signup({ accountId, memberId: alex, role: 'owner', isFirstMember: true, fromInvite: false });
-      await fx.signup({ accountId, memberId: jordan, role: 'member', isFirstMember: false, fromInvite: true });
+      await fx.signup({ accountId, memberId: alex, role: 'owner', isFirstMember: true, fromInvite: false, entry: 'web' });
+      await fx.signup({ accountId, memberId: jordan, role: 'member', isFirstMember: false, fromInvite: true, entry: 'web' });
       const all = await payloads();
       // The invite that a login adopted is also an accepted invitation.
       expect(all.map((p) => p.type)).toEqual(['capture', 'account', 'capture', 'capture']);
       expect(all[0]!.capture).toMatchObject({
         event: 'calendars_signup_completed',
         distinctId: 'alex@example.com',
-        properties: { role: 'owner', is_first_member: true, from_invite: false },
+        properties: { role: 'owner', is_first_member: true, from_invite: false, entry: 'web' },
         personSet: { email: 'alex@example.com', is_internal: false },
       });
       expect(all[1]!.update).toMatchObject({ accountKey: 'acme', properties: { is_internal: false, account_code: 'acme' } });
@@ -418,7 +418,7 @@ describe('product analytics (API)', () => {
     it('posts one event to the capture endpoint, with the group and the person set', async () => {
       const { provider, fetchImpl } = posthog();
       const fx = new AnalyticsEffects(db, provider, env(ON));
-      await fx.signup({ accountId, memberId: alex, role: 'owner', isFirstMember: true, fromInvite: false });
+      await fx.signup({ accountId, memberId: alex, role: 'owner', isFirstMember: true, fromInvite: false, entry: 'web' });
       await workerWith(db, fx).drainOnce();
 
       expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -508,6 +508,8 @@ describe('product analytics (API)', () => {
     let fx: AnalyticsEffects;
     let growth: GrowthService;
     const REQ = {} as ReqLike;
+    // The web dashboard marks every call it makes (`hostHeaders` in the web app).
+    const WEB_REQ = { headers: { 'x-slate-client': 'web' } } as unknown as ReqLike;
     const auth = () => ({ resolveHost: async () => principal }) as unknown as AuthService;
     const events = async () => (await captures()).map((c) => [c.event, c.properties] as const);
 
@@ -552,14 +554,19 @@ describe('product analytics (API)', () => {
 
     it('only a visible event type is a publish, and only the save that makes it visible', async () => {
       const base = { title: 'Demo', lengthMinutes: 30 };
-      const hidden = await crud().createEventType(REQ, { ...base, slug: 'demo-hidden', hidden: true });
-      await crud().createEventType(REQ, { ...base, slug: 'demo-visible' });
-      await crud().updateEventType(REQ, (hidden as { id: string }).id, { title: 'Demo, renamed' });
-      await crud().updateEventType(REQ, (hidden as { id: string }).id, { hidden: false });
+      const hidden = await crud().createEventType(WEB_REQ, { ...base, slug: 'demo-hidden', hidden: true });
+      await crud().createEventType(WEB_REQ, { ...base, slug: 'demo-visible' });
+      await crud().updateEventType(WEB_REQ, (hidden as { id: string }).id, { title: 'Demo, renamed' });
+      await crud().updateEventType(WEB_REQ, (hidden as { id: string }).id, { hidden: false });
       expect((await settled()).map((c) => [c.event, c.properties['source']])).toEqual([
         ['calendars_event_type_published', 'dashboard'],
         ['calendars_event_type_published', 'dashboard'],
       ]);
+    });
+
+    it('a publish through the API by another client is source api, not dashboard', async () => {
+      await crud().createEventType(REQ, { title: 'Agent call', lengthMinutes: 30, slug: 'agent-call' });
+      expect((await settled()).map((c) => [c.event, c.properties['source']])).toEqual([['calendars_event_type_published', 'api']]);
     });
 
     it('hours are set when the rules change, not by a rename that resends the same ones', async () => {
@@ -662,6 +669,22 @@ describe('product analytics (API)', () => {
 
       await provider.resolveHost(bearer(mint({ account_id: 'ext_a', sub: 'ext_u2', email: 'second@x.io' })));
       expect(seen[1]).toMatchObject({ role: 'member', isFirstMember: false, fromInvite: false });
+    });
+
+    it('a signup says which client made it: the web dashboard, or any other API caller', async () => {
+      const seen: SignupNotice[] = [];
+      const provider = new WorkOsAuthProvider(db, { JWT_SECRET: SECRET }, (s) => void seen.push(s));
+      const fromWeb: ReqLike = {
+        headers: { authorization: `Bearer ${mint({ account_id: 'ext_w', sub: 'web_u', email: 'web@x.io' })}`, 'x-slate-client': 'web' },
+      };
+      await provider.resolveHost(fromWeb);
+      // A platform that provisions its user's account calls with the token alone.
+      await provider.resolveHost(bearer(mint({ account_id: 'ext_p', sub: 'api_u', email: 'api@x.io' })));
+      // Any other value is not the web dashboard.
+      await provider.resolveHost({
+        headers: { authorization: `Bearer ${mint({ account_id: 'ext_q', sub: 'odd_u', email: 'odd@x.io' })}`, 'x-slate-client': 'cli' },
+      });
+      expect(seen.map((s) => s.entry)).toEqual(['web', 'api', 'api']);
     });
 
     it('the WorkOS provider reports an adopted invite', async () => {

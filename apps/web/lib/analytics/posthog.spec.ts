@@ -73,7 +73,12 @@ describe('posthogSettings', () => {
       capture_pageview: 'history_change',
       autocapture: false,
       disable_session_recording: true,
+      capture_performance: { web_vitals: true, network_timing: false },
     });
+  });
+
+  it('only the dashboard measures web vitals; a visitor measures nothing', () => {
+    expect(posthogSettings(CONFIG, 'visitor', location)['capture_performance']).toBe(false);
   });
 });
 

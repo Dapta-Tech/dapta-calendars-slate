@@ -15,10 +15,12 @@ const cookieJar = {
 vi.mock('next/headers', () => ({ cookies: vi.fn(async () => cookieJar) }));
 const setSession = vi.fn();
 vi.mock('@/lib/auth-session', () => ({
+  WEB_CLIENT_HEADERS: { 'x-slate-client': 'web' },
   setSession: (...a: unknown[]) => setSession(...a),
   workosSessionIdFromJwt: () => 'session_1',
 }));
 
+import { ATTRIBUTION_COOKIE } from '@slate/shared';
 import { GET } from './route';
 
 const ORIGIN = 'https://calendars.example.com';
@@ -42,6 +44,20 @@ describe('GET /api/auth/callback', () => {
     expect(setSession).toHaveBeenCalled();
     expect(res.headers.get('location')).toBe(`${ORIGIN}${PAGE}`);
     expect(cookieJar.set).toHaveBeenCalledWith('slate_return_to', '', expect.objectContaining({ maxAge: 0 }));
+  });
+
+  it("claims the parked signup source as the web dashboard: often the new person's first API call", async () => {
+    jarValues.set(ATTRIBUTION_COOKIE, JSON.stringify({ utm_source: 'dcal' }));
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await GET(callback());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const claim = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([url]) => String(url).endsWith('/v1/me/attribution'));
+    expect(claim).toBeTruthy();
+    expect(claim![1].headers).toMatchObject({ authorization: 'Bearer jwt', 'x-slate-client': 'web' });
   });
 
   it('lands on /admin when the login was started without one', async () => {

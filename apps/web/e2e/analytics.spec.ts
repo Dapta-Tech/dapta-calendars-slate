@@ -207,6 +207,8 @@ test('a new host is identified by email, joins their account, and their signup i
     role: 'owner',
     is_first_member: true,
     from_invite: false,
+    // Created by the web dashboard's own first call (`x-slate-client: web`).
+    entry: 'web',
     is_internal: false,
     $set: { email, is_internal: false },
   });
