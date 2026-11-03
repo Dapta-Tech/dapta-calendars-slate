@@ -25,6 +25,7 @@ export * from './integrations';
 export * from './crm-refs';
 export * from './v2-pilot';
 export * from './host-event';
+export * from './host-event-series';
 export { migrate } from './migrate';
 export { seed, type SeedResult } from './seed';
 export { sqliteSchema } from './schema.sqlite';

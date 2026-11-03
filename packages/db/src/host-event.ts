@@ -141,8 +141,17 @@ export function hostEventAttendees(emails: readonly string[], hostEmail: string 
   return uniqueEmails(emails.map((email) => email.trim())).filter((email) => normalizeAttendeeEmail(email) !== host);
 }
 
-/** The dCal bookings of `memberId` over the window, as conflicts (organizer or co-host). */
-async function bookingConflicts(db: Db, memberId: string, startMs: number, endMs: number): Promise<HostEventConflict[]> {
+/**
+ * The dCal bookings of `memberId` over the window, as conflicts (organizer or
+ * co-host), at most `limit`. @internal Shared with the series writes.
+ */
+export async function bookingConflicts(
+  db: Db,
+  memberId: string,
+  startMs: number,
+  endMs: number,
+  limit: number = MAX_CONFLICTS,
+): Promise<HostEventConflict[]> {
   const rows = await db.all<{
     uid: string;
     status: string;
@@ -159,7 +168,7 @@ async function bookingConflicts(db: Db, memberId: string, startMs: number, endMs
           AND (b.host_member_id = ${memberId}
                OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))
         ORDER BY b.start_ms ASC, b.uid ASC
-        LIMIT ${MAX_CONFLICTS}`,
+        LIMIT ${limit}`,
   );
   return rows.map((r) => ({
     kind: 'booking' as const,
@@ -171,13 +180,20 @@ async function bookingConflicts(db: Db, memberId: string, startMs: number, endMs
   }));
 }
 
-/** Another caller's unexpired holds on the host over the window. */
-async function holdConflicts(db: Db, memberId: string, startMs: number, endMs: number, now: number): Promise<HostEventConflict[]> {
+/** Another caller's unexpired holds on the host over the window, at most `limit`. @internal Shared with the series writes. */
+export async function holdConflicts(
+  db: Db,
+  memberId: string,
+  startMs: number,
+  endMs: number,
+  now: number,
+  limit: number = MAX_CONFLICTS,
+): Promise<HostEventConflict[]> {
   const rows = await db.all<{ slot_start_ms: number | string; slot_end_ms: number | string }>(
     sql`SELECT slot_start_ms, slot_end_ms FROM slot_reservation
         WHERE member_id = ${memberId} AND release_at_ms > ${now}
           AND slot_start_ms < ${endMs} AND slot_end_ms > ${startMs}
-        ORDER BY slot_start_ms ASC LIMIT ${MAX_CONFLICTS}`,
+        ORDER BY slot_start_ms ASC LIMIT ${limit}`,
   );
   return rows.map((r) => ({ kind: 'hold' as const, startMs: Number(r.slot_start_ms), endMs: Number(r.slot_end_ms) }));
 }
@@ -250,7 +266,12 @@ export async function hostEventOwnTime(
   if (!isHostEventRow(booking)) return null;
   const copy = await db.get<{ id: string }>(
     sql`SELECT id FROM booking_reference
-        WHERE booking_id = ${booking.id} AND type = 'calendar_event' AND external_event_id IS NOT NULL LIMIT 1`,
+        WHERE booking_id = ${booking.id} AND type = 'calendar_event' AND external_event_id IS NOT NULL
+        UNION ALL
+        -- An occurrence of a repeating event: its copy is the series' event (ADR 0012).
+        SELECT s.id FROM booking b JOIN host_event_series s ON s.id = b.recurring_event_id
+        WHERE b.id = ${booking.id} AND s.calendar_event_id IS NOT NULL
+        LIMIT 1`,
   );
   return copy ? { startMs: Number(booking.start_ms), endMs: Number(booking.end_ms) } : null;
 }

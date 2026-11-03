@@ -15,3 +15,4 @@ export * from './redirect-url';
 export * from './onboarding';
 export * from './template';
 export * from './template-calendar';
+export * from './recurrence';

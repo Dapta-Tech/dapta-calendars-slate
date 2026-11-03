@@ -524,6 +524,56 @@ export const bookingReference = pgTable('booking_reference', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
+/**
+ * A repeating host event (ADR 0012): the rule, the attendees and the one
+ * repeating event on the host's calendar. Its dated occurrences are `booking`
+ * rows linked by `booking.recurring_event_id`. See migration 0040 (pg).
+ */
+export const hostEventSeries = pgTable('host_event_series', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  hostMemberId: text('host_member_id').notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  locationKind: text('location_kind'),
+  /** The zone the wall clock is kept in. */
+  timeZone: text('time_zone').notNull(),
+  /** First occurrence's date, YYYY-MM-DD in `time_zone`. */
+  startDate: text('start_date').notNull(),
+  /** Local start time, HH:mm, on every date. */
+  startTime: text('start_time').notNull(),
+  durationMinutes: integer('duration_minutes').notNull(),
+  /** 'daily' | 'weekly'. */
+  frequency: text('frequency').notNull(),
+  intervalCount: integer('interval_count').notNull().default(1),
+  /** Weekly: comma-separated days (monday,...). */
+  weekdays: text('weekdays').notNull().default(''),
+  occurrenceCount: integer('occurrence_count'),
+  untilDate: text('until_date'),
+  attendees: jsonb('attendees'),
+  /** 'active' (dates still to write), 'ended' (every date written) or 'cancelled'. */
+  status: text('status').notNull().default('active'),
+  /** Occurrences starting before this are written as bookings (the rolling horizon). */
+  materializedUntilMs: bigint('materialized_until_ms', { mode: 'number' }).notNull(),
+  /** Dates left out because something else was there: [{ startMs, date, reason }]. */
+  skipped: jsonb('skipped'),
+  /** 'queued' | 'not_connected' | 'deleted'. */
+  calendarState: text('calendar_state').notNull().default('not_connected'),
+  calendarDestination: text('calendar_destination'),
+  calendarEventId: text('calendar_event_id'),
+  calendarCalendarId: text('calendar_calendar_id'),
+  /** The write in flight for the calendar event (DH1-style claim), null when none. */
+  calendarClaim: text('calendar_claim'),
+  meetingUrl: text('meeting_url'),
+  /** The series this one continues: a move of "this and following". */
+  splitFrom: text('split_from'),
+  /** Account-scoped like `booking.idempotency_key` (`scopedIdempotencyKey`). */
+  idempotencyKey: text('idempotency_key').unique(),
+  metadata: jsonb('metadata'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 /** B7/DM1: durable side-effect queue (calendar write-out + webhook delivery). */
 export const outbox = pgTable('outbox', {
   id: text('id').primaryKey(),

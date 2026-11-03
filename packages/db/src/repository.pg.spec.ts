@@ -6,6 +6,7 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability, getAccountByCode } from './repository';
 import { createHostEvent } from './host-event';
+import { createHostEventSeries, extendHostEventSeries, loadSeriesOccurrences, moveHostEventSeries } from './host-event-series';
 import {
   addGuestsToBooking,
   claimApiIdempotency,
@@ -111,6 +112,60 @@ describePg('repository (real Postgres — the tested truth)', () => {
       expect(isExclusionViolation(err)).toBe(true);
     }
     expect(threw).toBe(true);
+  });
+
+  it('a repeating host event is held by the same guards on every date, written, extended or moved', async () => {
+    const account = await getAccountByCode(db, 'acme');
+    const host = randomUUID();
+    const now = Date.now();
+    await db.run(sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, created_at)
+      VALUES (${host}, ${account!.id}, ${`pg-series-${run}`}, ${'PG Series Host'}, ${`pg-series-${run}@example.com`}, ${'UTC'}, ${now})`);
+    // A Wednesday 15:30 UTC, at least two weeks out.
+    const d = new Date(now + 14 * 86_400_000);
+    d.setUTCDate(d.getUTCDate() + ((3 - d.getUTCDay() + 7) % 7));
+    const startDate = d.toISOString().slice(0, 10);
+    const series = await createHostEventSeries(db, {
+      accountId: account!.id,
+      memberId: host,
+      title: 'Weekly Phone',
+      attendees: [],
+      anchor: { startDate, startTime: '15:30', durationMinutes: 30, timeZone: 'UTC' },
+      rule: { frequency: 'weekly', interval: 1, weekdays: ['wednesday'], count: null, untilDate: null },
+    });
+    expect(series.ok).toBe(true);
+    const { seriesId } = series as { seriesId: string };
+    const rows = await loadSeriesOccurrences(db, seriesId);
+    expect(rows.length).toBeGreaterThan(20);
+    // Every written date is a booking the EXCLUDE covers: a raw overlap on one is refused by Postgres.
+    const tenth = rows[9]!;
+    let threw = false;
+    try {
+      await db.run(sql`INSERT INTO booking (id, account_id, uid, host_member_id, title, start_ms, end_ms, status, created_at, updated_at)
+        VALUES (${randomUUID()}, ${account!.id}, ${randomUUID()}, ${host}, ${'Direct'}, ${tenth.startMs},
+          ${tenth.endMs}, 'accepted', ${now}, ${now})`);
+    } catch (err) {
+      threw = true;
+      expect(isExclusionViolation(err)).toBe(true);
+    }
+    expect(threw).toBe(true);
+    // The extension runs on several replicas at once: each date is written once.
+    const later = now + 40 * 86_400_000;
+    const [a, b] = await Promise.all([extendHostEventSeries(db, seriesId, later), extendHostEventSeries(db, seriesId, later)]);
+    expect((a?.added ?? 0) + (b?.added ?? 0)).toBeGreaterThan(0);
+    const after = await loadSeriesOccurrences(db, seriesId);
+    expect(new Set(after.map((r) => r.occurrenceStartMs)).size).toBe(after.length);
+    // A move checks every new date under the lock: a booking on one refuses it, nothing changes.
+    await db.run(sql`INSERT INTO booking (id, account_id, uid, host_member_id, title, start_ms, end_ms, status, created_at, updated_at)
+      VALUES (${randomUUID()}, ${account!.id}, ${randomUUID()}, ${host}, ${'Taken'}, ${rows[2]!.startMs + 3_600_000},
+        ${rows[2]!.startMs + 2 * 3_600_000}, 'accepted', ${now}, ${now})`);
+    const moved = await moveHostEventSeries(db, {
+      accountId: account!.id,
+      uid: rows[0]!.uid,
+      scope: 'series',
+      newStartMs: rows[0]!.startMs + 3_600_000,
+    });
+    expect(moved).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    expect((await loadSeriesOccurrences(db, seriesId)).every((r) => r.status === 'accepted')).toBe(true);
   });
 
   it('a host event (no event type) is held by the same guards: app-level and EXCLUDE', async () => {
