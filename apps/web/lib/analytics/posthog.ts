@@ -189,6 +189,15 @@ const CTA_EVENT = 'calendars_cta_clicked';
  * none of its own. The list is wider than what the pinned library collects
  * today (`bfcid` is not in it yet), so a release that adds one is covered.
  */
+/**
+ * The vendor's per-metric web vitals detail (`$web_vitals_LCP_event` and the
+ * like). Each nests the page's FULL url, query included, a navigation url and
+ * attribution (CSS selectors, a resource url) that the top-level URL scrub
+ * never reaches, so it is dropped: the metric's value travels on its own
+ * `$web_vitals_<M>_value`, beside the already scrubbed page url.
+ */
+const WEB_VITALS_DETAIL = /^\$web_vitals_[A-Z]+_event$/;
+
 const CAMPAIGN_KEY = /^(\$initial_|\$session_entry_)?(utm_[a-z_]+|gclid|gclsrc|gad_source|dclid|gbraid|wbraid|bfcid|fbclid|msclkid|twclid|li_fat_id|igshid|ttclid|rdt_cid|irclid|epik|qclid|sccid|mc_cid|oppref|_kx|ph_keyword|\$search_engine|search_engine)$/;
 
 /**
@@ -256,6 +265,7 @@ export function scrubEvent(event: CaptureEvent, surface: AnalyticsSurface, pathn
   }
   for (const bag of [event.properties, event.$set, event.$set_once]) {
     if (!bag) continue;
+    for (const key of Object.keys(bag)) if (WEB_VITALS_DETAIL.test(key)) delete bag[key];
     if (surface === 'host') for (const key of Object.keys(bag)) if (CAMPAIGN_KEY.test(key)) delete bag[key];
     scrubUrls(bag, surface);
   }
@@ -283,7 +293,8 @@ const EXCEPTION_CAPTURE = {
  * The vendor settings per audience. Everything that could record what a
  * person types or sees is OFF on both: no autocapture (an admin row's text is
  * an invitee's name), no session recording, no heatmaps, no surveys. Only the
- * events this app sends by hand are captured, plus dashboard pageviews and,
+ * events this app sends by hand are captured, plus dashboard pageviews, the
+ * dashboard's web vitals (load and responsiveness timings, numbers only) and,
  * with error tracking on, uncaught errors.
  */
 export function posthogSettings(
@@ -325,6 +336,12 @@ export function posthogSettings(
       // The dashboard is a multi-route app: each navigation is a real page.
       capture_pageview: 'history_change',
       capture_pageleave: true,
+      // How fast the dashboard loads and answers (LCP, INP, CLS, FCP): the
+      // four values beside the page url, cut like every other. No attribution
+      // (it names elements and resource urls), and the vendor's nested detail
+      // is dropped in `scrubEvent`. Network timing (every request URL) stays
+      // off. Booking pages send none: a visitor sends only this app's events.
+      capture_performance: { web_vitals: true, web_vitals_attribution: false, network_timing: false },
     };
   }
   return {

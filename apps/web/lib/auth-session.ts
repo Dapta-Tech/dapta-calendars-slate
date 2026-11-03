@@ -317,6 +317,14 @@ export async function refreshUpstreamSession(session: Session | null): Promise<S
 }
 
 /**
+ * Marks a call to the API as coming from this web dashboard, so the API can
+ * tell an account created here from one another client provisions through it
+ * (product analytics only; the API grants nothing on it). Every host call the
+ * web makes carries it, `hostHeaders` and the login callback's alike.
+ */
+export const WEB_CLIENT_HEADERS: Readonly<Record<string, string>> = { 'x-slate-client': 'web' };
+
+/**
  * Identity headers for every host call, admin-api's `req()` included (§1):
  * Bearer for workos, x-slate-email for local, nothing when logged out (→ the
  * API 401s → the gate redirects). Plus the chosen workspace, when there is one
@@ -332,7 +340,9 @@ export async function hostHeaders(opts: { workspace?: boolean } = {}): Promise<R
       : s?.provider === 'local'
         ? { 'x-slate-email': s.email }
         : {};
-  if (opts.workspace === false || !Object.keys(identity).length) return identity;
+  if (!Object.keys(identity).length) return identity;
+  Object.assign(identity, WEB_CLIENT_HEADERS);
+  if (opts.workspace === false) return identity;
   return { ...identity, ...(await workspaceHeader()) };
 }
 

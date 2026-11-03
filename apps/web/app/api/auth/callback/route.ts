@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { ATTRIBUTION_COOKIE } from '@slate/shared';
-import { setSession, workosSessionIdFromJwt } from '@/lib/auth-session';
+import { WEB_CLIENT_HEADERS, setSession, workosSessionIdFromJwt } from '@/lib/auth-session';
 import { requestOrigin } from '@/lib/request-origin';
 import { clearWorkspace } from '@/lib/workspace';
 import { RETURN_TO_COOKIE, safeReturnTo, withReturnTo } from '@/lib/return-to';
@@ -121,7 +121,9 @@ async function claimParkedAttribution(accessToken: string): Promise<void> {
       process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
     await fetch(`${base}/v1/me/attribution`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      // Often the new person's first API call, the one that creates their
+      // account: it says it comes from the web dashboard like every other.
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, ...WEB_CLIENT_HEADERS },
       body: JSON.stringify({ attribution }),
       cache: 'no-store',
       signal: AbortSignal.timeout(3000),

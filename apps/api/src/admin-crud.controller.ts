@@ -74,6 +74,7 @@ import { isCompatible, sourceExists, type MappableField } from '@slate/crm/mappi
 import { ZodError } from 'zod';
 import { AnalyticsEffects } from './analytics-effects';
 import { AuthService, type ReqLike } from './auth.service';
+import { requestEntry } from './auth.provider';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { EmailEffects } from './email-effects';
 import { GrowthService } from './growth.service';
@@ -446,7 +447,7 @@ export class AdminCrudController {
     const created = unwrapCrud(await createEventType(this.db, p.accountId, p.memberId, input));
     if (!created.hidden) {
       void this.analytics?.hostEvent('event_type_published', p, {
-        source: 'dashboard',
+        source: requestEntry(req) === 'web' ? 'dashboard' : 'api',
         is_team: Boolean(created.teamId),
         requires_confirmation: Boolean(input.requiresConfirmation),
       });
@@ -478,7 +479,7 @@ export class AdminCrudController {
     // hidden event type visible counts, so routine edits are not "publishes".
     if (existing.hidden && !updated.hidden) {
       void this.analytics?.hostEvent('event_type_published', p, {
-        source: 'dashboard',
+        source: requestEntry(req) === 'web' ? 'dashboard' : 'api',
         is_team: Boolean(updated.teamId),
         requires_confirmation: Boolean(updated.requiresConfirmation),
       });

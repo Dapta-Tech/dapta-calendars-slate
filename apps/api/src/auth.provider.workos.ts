@@ -34,6 +34,8 @@ import {
   type ResolvedHost,
   type ReqLike,
   type SignupObserver,
+  requestEntry,
+  type RequestEntry,
 } from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
 
@@ -111,7 +113,7 @@ export class WorkOsAuthProvider implements AuthProvider {
     if (!sub) throw unauthenticated('Token missing sub.');
 
     const accountId = await this.resolveAccount(accountExtId, claims);
-    const member = await this.resolveMember(accountId, sub, claims);
+    const member = await this.resolveMember(accountId, sub, claims, requestEntry(req));
     // When the identity service minted this token: the last moment it vouched
     // for this person in this account (never later than now, whatever the
     // clock). A token without `iat` vouches for nothing: it still signs the
@@ -184,7 +186,7 @@ export class WorkOsAuthProvider implements AuthProvider {
   }
 
   /** Find (or JIT-create) the local member projected from the token's sub. */
-  private async resolveMember(accountId: string, sub: string, claims: JwtClaims): Promise<ResolvedMember> {
+  private async resolveMember(accountId: string, sub: string, claims: JwtClaims, entry: RequestEntry): Promise<ResolvedMember> {
     const existing = await this.db.get<{ id: string; idp_subject: string | null }>(
       sql`SELECT id, idp_subject FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
     );
@@ -219,6 +221,7 @@ export class WorkOsAuthProvider implements AuthProvider {
             role: invited.role,
             isFirstMember: false,
             fromInvite: true,
+            entry,
           });
           // An invite never carries a subject: the caller records this login's.
           return { id: invited.id, idpSubject: null };
@@ -264,7 +267,7 @@ export class WorkOsAuthProvider implements AuthProvider {
     // login lost the conflict and selects the winner's row, whose id is not
     // the one generated above.
     if (row.id === id) {
-      notifySignup(this.onSignup, { accountId, memberId: id, role, isFirstMember: !occupied, fromInvite: false });
+      notifySignup(this.onSignup, { accountId, memberId: id, role, isFirstMember: !occupied, fromInvite: false, entry });
     }
     return { id: row.id, idpSubject: row.idp_subject };
   }

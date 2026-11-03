@@ -384,7 +384,7 @@ nothing and makes no request.**
 Set a provider and its project key and the deployment reports how it is used
 to an analytics project you own: hosts' activation steps (signup and its
 source, template, calendar connected, hours, first publish, branding) as server
-events, plus dashboard pageviews; and, anonymously, the booking funnel on public
+events, plus dashboard pageviews and web vitals; and, anonymously, the booking funnel on public
 pages (page viewed, day picked, time picked, booking sent and confirmed, a click
 on the "Made with" badge). The full event list and what is never sent are in
 [`ANALYTICS.md`](ANALYTICS.md).
