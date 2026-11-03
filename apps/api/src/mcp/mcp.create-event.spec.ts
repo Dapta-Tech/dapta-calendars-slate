@@ -225,6 +225,13 @@ describe('create_event', () => {
       // Named by its event type: the booking's own title names the invitee.
       expect(text).not.toContain('Sam Secret');
     }
+    // A key that may write but not read bookings learns the time is taken, not by what.
+    const blind = errorText(
+      await create({ title: 'Focus', start: iso(start), duration_minutes: 240, idempotency_key: idem('event-taken-blind') }, ['bookings:write']),
+    );
+    expect(blind).toMatch(/^SLOT_TAKEN: That time overlaps the host's dCal bookings: a dCal booking /);
+    expect(blind).not.toContain(uid);
+    expect(blind).not.toContain('Intro Call');
   });
 
   it('replays a repeated key, and refuses it with other arguments', async () => {
@@ -238,6 +245,28 @@ describe('create_event', () => {
     expect(hostEvents).toHaveBeenCalledTimes(1);
     expect(await outbox(first.event.uid)).toEqual([{ kind: 'calendar', action: 'create' }]);
     expect(errorText(await c.callTool({ name: 'create_event', arguments: { ...args, title: 'Other' } }))).toMatch(/^IDEMPOTENCY_KEY_REUSED/);
+  });
+
+  it('a retry is answered as the first call was, even after the calendar is gone', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const args = {
+      title: 'Kept',
+      start: iso(sunday(5) + 6 * HOUR),
+      duration_minutes: 30,
+      attendees: ['k@example.org'],
+      time_zone: 'UTC',
+      idempotency_key: idem('event-replay-0002'),
+    };
+    const first = structured<Created>(await c.callTool({ name: 'create_event', arguments: args }));
+    expect(first.calendar).toBe('queued');
+    await h.db.run(sql`UPDATE connected_calendar SET is_destination = 0 WHERE external_id = ${REF}`);
+    try {
+      const again = structured<Created>(await c.callTool({ name: 'create_event', arguments: args }));
+      expect(again).toMatchObject({ already_created: true, calendar: 'queued' });
+      expect(again.event.uid).toBe(first.event.uid);
+    } finally {
+      await h.db.run(sql`UPDATE connected_calendar SET is_destination = 1 WHERE external_id = ${REF}`);
+    }
   });
 
   it('refuses a key held to some event types, a date without a time, and an ambiguous length', async () => {

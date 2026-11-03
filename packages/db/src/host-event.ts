@@ -59,6 +59,12 @@ export interface CreateHostEventArgs {
   /** Create it even when the connected calendar or a hold says the time is busy. */
   allowConflicts?: boolean;
   /**
+   * Whether the caller queues the calendar write for it (the host has a
+   * calendar to write to). Kept on the event, so a replay answers what was
+   * done then, not what the host's calendar is now.
+   */
+  calendarQueued?: boolean;
+  /**
    * Retry-dedupe key, already namespaced by the caller (credential + key); the
    * account namespace is added here (`scopedIdempotencyKey`).
    */
@@ -92,6 +98,8 @@ export type HostEventOutcome =
       overridden: HostEventConflict[];
       /** False when the connected calendar could not be read and `allowConflicts` let it through. */
       calendarChecked: boolean;
+      /** Whether its calendar write was queued (`calendarQueued`), as recorded when it was made. */
+      calendarQueued: boolean;
     }
   | { ok: false; reason: 'NOT_FOUND' }
   | { ok: false; reason: 'INVALID'; message: string }
@@ -173,8 +181,13 @@ async function holdConflicts(db: Db, memberId: string, startMs: number, endMs: n
   return rows.map((r) => ({ kind: 'hold' as const, startMs: Number(r.slot_start_ms), endMs: Number(r.slot_end_ms) }));
 }
 
-/** The stored event behind a repeated key: replayed, or refused when the key came with other arguments. */
-async function replayByKey(
+/**
+ * The event a repeated key already made: replayed, or refused when the key came
+ * with other arguments. Null when the key has made nothing. A caller may ask
+ * before its own checks, so a retry is answered as the first call was, whatever
+ * has changed since (the host's calendar disconnected, the time filled up).
+ */
+export async function replayHostEvent(
   db: Db,
   accountId: string,
   key: string,
@@ -185,9 +198,57 @@ async function replayByKey(
         WHERE account_id = ${accountId} AND idempotency_key = ${scopedIdempotencyKey(accountId, key)} LIMIT 1`,
   );
   if (!row) return null;
-  const stored = parseJsonColumn<{ _idempotency?: { requestHash?: string } }>(row.metadata, {})._idempotency?.requestHash;
-  if (!isHostEventRow(row) || (stored ?? null) !== (requestHash ?? null)) return { ok: false, reason: 'IDEMPOTENCY_KEY_REUSED' };
-  return { ok: true, uid: row.uid, replayed: true, overridden: [], calendarChecked: true };
+  const meta = parseJsonColumn<{ _idempotency?: { requestHash?: string }; _hostEvent?: { calendar?: string } }>(row.metadata, {});
+  if (!isHostEventRow(row) || (meta._idempotency?.requestHash ?? null) !== (requestHash ?? null))
+    return { ok: false, reason: 'IDEMPOTENCY_KEY_REUSED' };
+  return {
+    ok: true,
+    uid: row.uid,
+    replayed: true,
+    overridden: [],
+    calendarChecked: true,
+    calendarQueued: meta._hostEvent?.calendar === 'queued',
+  };
+}
+
+/**
+ * The parts of a busy interval outside `own` (the time a host event being moved
+ * holds now), as [start, end) epoch ms. With no `own`, the whole interval.
+ */
+export function busyOutside(
+  interval: { start: Date; end: Date },
+  own: { startMs: number; endMs: number } | null,
+): Array<[number, number]> {
+  const start = interval.start.getTime();
+  const end = interval.end.getTime();
+  if (!own) return [[start, end]];
+  const parts: Array<[number, number]> = [];
+  if (start < own.startMs) parts.push([start, Math.min(end, own.startMs)]);
+  if (end > own.endMs) parts.push([Math.max(start, own.endMs), end]);
+  return parts;
+}
+
+/**
+ * The time a host event being moved holds on the calendar, when its own copy is
+ * there (a written `booking_reference`): the calendar reports that copy as
+ * busy, and it must not block its own move. Null for a booking, which keeps the
+ * check as it was, and for an event with no copy written yet, whose old time
+ * on the calendar, if busy, is busy with something else.
+ *
+ * The free/busy read cannot tell one event from another, so while a copy
+ * exists anything else at its old time is left out of the check too: a move
+ * that overlaps the old time trusts it the way the host left it.
+ */
+export async function hostEventOwnTime(
+  db: Db,
+  booking: { id: string; event_type_id: string | null; start_ms: number | string; end_ms: number | string },
+): Promise<{ startMs: number; endMs: number } | null> {
+  if (!isHostEventRow(booking)) return null;
+  const copy = await db.get<{ id: string }>(
+    sql`SELECT id FROM booking_reference
+        WHERE booking_id = ${booking.id} AND type = 'calendar_event' AND external_event_id IS NOT NULL LIMIT 1`,
+  );
+  return copy ? { startMs: Number(booking.start_ms), endMs: Number(booking.end_ms) } : null;
 }
 
 /**
@@ -223,10 +284,19 @@ export async function createHostEvent(
   if (attendees.length > HOST_EVENT_MAX_ATTENDEES)
     return { ok: false, reason: 'INVALID', message: `At most ${HOST_EVENT_MAX_ATTENDEES} attendees.` };
 
-  if (args.idempotencyKey) {
-    const prior = await replayByKey(db, args.accountId, args.idempotencyKey, args.requestHash);
+  const key = args.idempotencyKey;
+  const replay = () => (key ? replayHostEvent(db, args.accountId, key, args.requestHash) : Promise.resolve(null));
+  {
+    const prior = await replay();
     if (prior) return prior;
   }
+  /**
+   * A refusal, unless a call with the same key made the event meanwhile: a
+   * retry that raced its first attempt (a timed-out call keeps running while
+   * the caller retries) would otherwise read that attempt's own event as the
+   * conflict. Answered as the replay it is.
+   */
+  const refuse = async (out: HostEventOutcome): Promise<HostEventOutcome> => (await replay()) ?? out;
 
   const { startMs, endMs } = args;
   const now = Date.now();
@@ -249,12 +319,14 @@ export async function createHostEvent(
   } catch {
     // Fail closed: an unreadable calendar is not a free one. Only a host who
     // already said to ignore conflicts goes ahead, and is told it was unchecked.
-    if (!args.allowConflicts) return { ok: false, reason: 'CALENDAR_UNAVAILABLE' };
+    if (!args.allowConflicts) return refuse({ ok: false, reason: 'CALENDAR_UNAVAILABLE' });
     calendarChecked = false;
   }
   const soft = [...holds, ...external];
-  if (booked.length > 0) return { ok: false, reason: 'SLOT_TAKEN', conflicts: [...booked, ...soft].slice(0, MAX_CONFLICTS) };
-  if (soft.length > 0 && !args.allowConflicts) return { ok: false, reason: 'CONFLICT', conflicts: soft.slice(0, MAX_CONFLICTS) };
+  if (booked.length > 0)
+    return refuse({ ok: false, reason: 'SLOT_TAKEN', conflicts: [...booked, ...soft].slice(0, MAX_CONFLICTS) });
+  if (soft.length > 0 && !args.allowConflicts)
+    return refuse({ ok: false, reason: 'CONFLICT', conflicts: soft.slice(0, MAX_CONFLICTS) });
 
   const bookingId = randomUUID();
   const uid = randomUUID();
@@ -264,9 +336,10 @@ export async function createHostEvent(
   // kind with no place would ask for one).
   const locationKind = args.videoLink ? 'conferencing' : 'custom';
   const metadata = {
-    _hostEvent: { by: 'mcp' },
-    ...(args.idempotencyKey ? { _idempotency: { requestHash: args.requestHash ?? null } } : {}),
+    _hostEvent: { by: 'mcp', calendar: args.calendarQueued ? 'queued' : 'not_connected' },
+    ...(key ? { _idempotency: { requestHash: args.requestHash ?? null } } : {}),
   };
+  const storedKey = key ? scopedIdempotencyKey(args.accountId, key) : null;
   // `seated = 1`: the title and body are the host's own and shared with every
   // attendee, so a guest added later keeps them (`markSharedSql` leaves a
   // seated booking's text alone, and would otherwise put "Meeting" in place).
@@ -276,8 +349,7 @@ export async function createHostEvent(
       seated, created_at, updated_at)
     VALUES (${bookingId}, ${args.accountId}, ${uid}, NULL, ${member.id}, ${title}, ${description},
       NULL, ${locationKind}, ${startMs}, ${endMs}, 'accepted', ${jsonParam(db, metadata)}, ${args.timeZone},
-      ${args.idempotencyKey ? scopedIdempotencyKey(args.accountId, args.idempotencyKey) : null},
-      1, ${now}, ${now})`;
+      ${storedKey}, 1, ${now}, ${now})`;
   // One row per attendee, a millisecond apart so their order is the caller's.
   const insertAttendees = attendees.map(
     (email, i) => sql`
@@ -285,13 +357,20 @@ export async function createHostEvent(
       VALUES (${randomUUID()}, ${bookingId}, ${email}, ${email}, ${normalizeAttendeeEmail(email)},
         ${args.timeZone}, ${now + i})`,
   );
+  // The same key already written: checked first under the lock, so a racing
+  // retry sees its first attempt's event as the replay, not as an overlap.
+  const keyTakenSql = storedKey
+    ? sql`SELECT id FROM booking WHERE account_id = ${args.accountId} AND idempotency_key = ${storedKey} LIMIT 1`
+    : null;
   // Holds count only when the host did not choose to ignore them.
   const heldSql = args.allowConflicts ? null : memberHeldSql(member.id, startMs, endMs, now);
 
-  let written: 'ok' | 'booked' | 'held';
+  type Written = 'ok' | 'replay' | 'booked' | 'held';
+  let written: Written;
   try {
     if (db.dialect === 'sqlite') {
-      written = db.sqlite!.txn<'ok' | 'booked' | 'held'>(() => {
+      written = db.sqlite!.txn<Written>(() => {
+        if (keyTakenSql && db.sqlite!.drizzle.get(keyTakenSql)) return 'replay';
         if (db.sqlite!.drizzle.get(hostOverlapSql(member.id, startMs, endMs))) return 'booked';
         if (heldSql && db.sqlite!.drizzle.get(heldSql)) return 'held';
         db.sqlite!.drizzle.run(insertBooking);
@@ -299,30 +378,37 @@ export async function createHostEvent(
         return 'ok';
       }, { immediate: true });
     } else {
-      written = await db.pg!.drizzle.transaction(async (tx) => {
+      written = await db.pg!.drizzle.transaction(async (tx): Promise<Written> => {
         // The host's row first, as every guarded booking write takes it.
         await tx.execute(sql`SELECT id FROM member WHERE id = ${member.id} FOR UPDATE`);
+        if (keyTakenSql && ((await tx.execute(keyTakenSql)) as unknown as unknown[]).length > 0) return 'replay';
         const overlap = (await tx.execute(hostOverlapSql(member.id, startMs, endMs))) as unknown as unknown[];
-        if (overlap.length > 0) return 'booked' as const;
-        if (heldSql && ((await tx.execute(heldSql)) as unknown as unknown[]).length > 0) return 'held' as const;
+        if (overlap.length > 0) return 'booked';
+        if (heldSql && ((await tx.execute(heldSql)) as unknown as unknown[]).length > 0) return 'held';
         await tx.execute(insertBooking);
         for (const insert of insertAttendees) await tx.execute(insert);
-        return 'ok' as const;
+        return 'ok';
       });
     }
   } catch (err) {
     // A concurrent call with the same key won the unique key: answer what it wrote.
-    if (args.idempotencyKey) {
-      const prior = await replayByKey(db, args.accountId, args.idempotencyKey, args.requestHash);
-      if (prior) return prior;
-    }
+    const prior = await replay();
+    if (prior) return prior;
     // The EXCLUDE constraint caught an overlap the check above could not see.
     if (!isExclusionViolation(err)) throw err;
     written = 'booked';
   }
+  if (written === 'replay') return (await replay()) ?? { ok: false, reason: 'IDEMPOTENCY_KEY_REUSED' };
   if (written === 'booked')
-    return { ok: false, reason: 'SLOT_TAKEN', conflicts: await bookingConflicts(db, member.id, startMs, endMs) };
+    return refuse({ ok: false, reason: 'SLOT_TAKEN', conflicts: await bookingConflicts(db, member.id, startMs, endMs) });
   if (written === 'held')
-    return { ok: false, reason: 'CONFLICT', conflicts: await holdConflicts(db, member.id, startMs, endMs, Date.now()) };
-  return { ok: true, uid, replayed: false, overridden: args.allowConflicts ? soft : [], calendarChecked };
+    return refuse({ ok: false, reason: 'CONFLICT', conflicts: await holdConflicts(db, member.id, startMs, endMs, Date.now()) });
+  return {
+    ok: true,
+    uid,
+    replayed: false,
+    overridden: args.allowConflicts ? soft : [],
+    calendarChecked,
+    calendarQueued: args.calendarQueued === true,
+  };
 }

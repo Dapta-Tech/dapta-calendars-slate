@@ -25,7 +25,11 @@ one: `list_bookings` and its `updated_since` feed list it (`kind: event`, its ow
 time with its length, and `cancel_booking` removes it from the calendar, which
 tells its attendees. dCal sends no email about it, no booking webhook and no CRM
 write-out, on any path (MCP, v1, v2, the dashboard). A key held to some event
-types does not see it. Booking results gain `kind` and `title`.
+types does not see it. Booking results gain `kind` and `title`. A retry with
+the same key is answered as the first call was, before anything else is
+checked; a key without `bookings:read` is told a time is taken, not by which
+booking. On `/v2`, `eventTypeId` and `eventType` are null for a host event, and
+the OpenAPI document says so. ADR 0011 records the design.
 
 Fixed on the way, for every booking: the v2 reschedule keeps the booking's
 location kind (a moved booking asked for a video link it had not asked for, or

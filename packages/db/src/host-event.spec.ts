@@ -12,9 +12,10 @@ import {
 import { createDb, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
-import { createHostEvent, hostEventAttendees, isHostEvent, type CreateHostEventArgs } from './host-event';
+import { busyOutside, createHostEvent, hostEventAttendees, isHostEvent, type CreateHostEventArgs } from './host-event';
 import { loadBusyForHost, parseJsonColumn } from './repository';
-import { busyOutside, rescheduleBookingV2 } from './v2-pilot';
+import { rescheduleBookingV2 } from './v2-pilot';
+import { rescheduleBooking } from './parity';
 import { loadBookingForCalendarWrite } from './calendar-refs';
 
 /** Enabled provider whose busy read always fails (an outage, a revoked grant). */
@@ -221,6 +222,29 @@ describe('createHostEvent (SQLite)', () => {
     });
   });
 
+  it('a retry racing its first attempt with the same key gets the replay, never its own event as a conflict', async () => {
+    await connectCalendar();
+    const keyed = args({ idempotencyKey: 'race', requestHash: 'h', calendarQueued: true });
+    const [a, b] = await Promise.all([
+      createHostEvent(db, keyed, new InMemoryCalendarProvider()),
+      createHostEvent(db, keyed, new InMemoryCalendarProvider()),
+    ]);
+    expect(a).toMatchObject({ ok: true });
+    expect(b).toMatchObject({ ok: true, uid: (a as { uid: string }).uid });
+    expect([(a as { replayed: boolean }).replayed, (b as { replayed: boolean }).replayed].sort()).toEqual([false, true]);
+    expect(await db.all(sql`SELECT id FROM booking WHERE event_type_id IS NULL`)).toHaveLength(1);
+  });
+
+  it('a replay answers whether the calendar write was queued then, not what the calendar is now', async () => {
+    const first = await createHostEvent(db, args({ idempotencyKey: 'cal', requestHash: 'h', calendarQueued: true }));
+    expect(first).toMatchObject({ ok: true, calendarQueued: true });
+    expect(await createHostEvent(db, args({ idempotencyKey: 'cal', requestHash: 'h', calendarQueued: false }))).toMatchObject({
+      ok: true,
+      replayed: true,
+      calendarQueued: true,
+    });
+  });
+
   it('replays a repeated key and refuses it with other arguments', async () => {
     const first = await createHostEvent(db, args({ idempotencyKey: 'k1', requestHash: 'h1' }));
     const again = await createHostEvent(db, args({ idempotencyKey: 'k1', requestHash: 'h1' }));
@@ -307,8 +331,17 @@ describe('rescheduleBookingV2 on a host event (SQLite)', () => {
     expect(moved!.location_kind).toBe('conferencing');
   });
 
-  it('does not read its own old time as busy, but still refuses other busy time', async () => {
+  /** The event's copy written on the calendar, as the write-out records it. */
+  async function written(uid: string): Promise<void> {
+    await db.run(
+      sql`INSERT INTO booking_reference (id, booking_id, destination, type, external_event_id, created_at)
+          SELECT ${randomUUID()}, id, ${REF}, 'calendar_event', ${`evt-${uid}`}, ${Date.now()} FROM booking WHERE uid = ${uid}`,
+    );
+  }
+
+  it('does not read its own old time as busy once its copy is on the calendar, but still refuses other busy time', async () => {
     const uid = await hostEvent();
+    await written(uid);
     const calendar = new InMemoryCalendarProvider();
     // The calendar holds the event itself at its old time.
     calendar.seedBusy(REF, [{ startUtc: new Date(start).toISOString(), endUtc: new Date(start + 4 * HOUR).toISOString() }]);
@@ -321,6 +354,34 @@ describe('rescheduleBookingV2 on a host event (SQLite)', () => {
       { startUtc: new Date(start + 5 * HOUR).toISOString(), endUtc: new Date(start + 6 * HOUR).toISOString() },
     ]);
     expect(await rescheduleBookingV2(db, { accountId, uid: movedUid, newStartMs: start + 2 * HOUR }, calendar)).toEqual({
+      ok: false,
+      reason: 'SLOT_TAKEN',
+    });
+  });
+
+  it('with no copy on the calendar yet, busy time at its old time is something else and still refuses the move', async () => {
+    const uid = await hostEvent();
+    const calendar = new InMemoryCalendarProvider();
+    // A meeting the host accepted elsewhere, inside the event's old time.
+    calendar.seedBusy(REF, [{ startUtc: new Date(start + HOUR).toISOString(), endUtc: new Date(start + 1.5 * HOUR).toISOString() }]);
+    expect(await rescheduleBookingV2(db, { accountId, uid, newStartMs: start + HOUR / 2 }, calendar)).toEqual({
+      ok: false,
+      reason: 'SLOT_TAKEN',
+    });
+  });
+
+  it('the v1 move reads the calendar the same way', async () => {
+    const uid = await hostEvent();
+    await written(uid);
+    const calendar = new InMemoryCalendarProvider();
+    calendar.seedBusy(REF, [{ startUtc: new Date(start).toISOString(), endUtc: new Date(start + 4 * HOUR).toISOString() }]);
+    // Any time (no event type), and not blocked by its own copy.
+    expect(await rescheduleBooking(db, { uid, newStartMs: start + HOUR, byHost: true }, calendar)).toMatchObject({ ok: true });
+    calendar.seedBusy(REF, [
+      { startUtc: new Date(start + HOUR).toISOString(), endUtc: new Date(start + 5 * HOUR).toISOString() },
+      { startUtc: new Date(start + 5 * HOUR).toISOString(), endUtc: new Date(start + 6 * HOUR).toISOString() },
+    ]);
+    expect(await rescheduleBooking(db, { uid, newStartMs: start + 2 * HOUR, byHost: true }, calendar)).toMatchObject({
       ok: false,
       reason: 'SLOT_TAKEN',
     });

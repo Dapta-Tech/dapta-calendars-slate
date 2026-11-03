@@ -13,6 +13,7 @@ import {
   hostEventAttendees,
   loadDestinationConnectionRefs,
   normalizeSchedulingMethod,
+  replayHostEvent,
   parseJsonColumn,
   scopedIdempotencyKey,
   sql,
@@ -1883,25 +1884,31 @@ const conflictShape = z.looseObject({
   title: z.string().nullable(),
 });
 
-/** One conflict as an agent reads it, in the call's zone. */
-function conflictOut(c: HostEventConflict, tz: string): z.infer<typeof conflictShape> {
+/**
+ * One conflict as an agent reads it, in the call's zone. Which booking it is
+ * (its uid and name) only for a caller that may read bookings: a key that may
+ * only write learns the time is taken, not by what.
+ */
+function conflictOut(c: HostEventConflict, tz: string, detail: boolean): z.infer<typeof conflictShape> {
   return {
     kind: c.kind,
     start: zonedIso(new Date(c.startMs), tz),
     end: zonedIso(new Date(c.endMs), tz),
-    uid: c.kind === 'booking' ? c.uid : null,
-    title: c.kind === 'booking' ? untrusted(c.title, 120) : null,
+    uid: c.kind === 'booking' && detail ? c.uid : null,
+    title: c.kind === 'booking' && detail ? untrusted(c.title, 120) : null,
   };
 }
 
 /** The conflicts in one line, for the text of a refusal. */
-function conflictLine(conflicts: HostEventConflict[], tz: string): string {
+function conflictLine(conflicts: HostEventConflict[], tz: string, detail: boolean): string {
   return conflicts
     .map((c) => {
-      const out = conflictOut(c, tz);
+      const out = conflictOut(c, tz, detail);
       const what =
         c.kind === 'booking'
-          ? `"${out.title}" (dCal ${c.uid})`
+          ? detail
+            ? `"${out.title}" (dCal ${c.uid})`
+            : 'a dCal booking'
           : c.kind === 'hold'
             ? 'a hold (someone is booking it)'
             : 'busy on the connected calendar';
@@ -1912,7 +1919,8 @@ function conflictLine(conflicts: HostEventConflict[], tz: string): string {
 
 /**
  * The host an event is for: a sign-in's own member, or for an API key (which
- * belongs to the workspace, not to a person) the owner whoami names.
+ * belongs to the workspace, not to a person) its oldest active owner, the one
+ * whoami names.
  */
 async function eventHost(
   db: Db,
@@ -1923,8 +1931,8 @@ async function eventHost(
         sql`SELECT id, time_zone, email FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} LIMIT 1`,
       )
     : await db.get<{ id: string; time_zone: string | null; email: string | null }>(
-        sql`SELECT id, time_zone, email FROM member WHERE account_id = ${p.accountId} AND role = 'owner'
-            ORDER BY created_at ASC LIMIT 1`,
+        sql`SELECT id, time_zone, email FROM member WHERE account_id = ${p.accountId} AND role = 'owner' AND status = 'active'
+            ORDER BY created_at ASC, id ASC LIMIT 1`,
       );
   return row ?? null;
 }
@@ -1976,50 +1984,59 @@ const createEvent: ToolDef = {
     // Who is invited: each address once, the host's own left out (the event is on their calendar).
     const attendees = hostEventAttendees(args.attendees ?? [], host.email);
 
-    // Attendees and a video link need a calendar to write to: dCal invites nobody itself.
-    const connected =
-      deps.calendar.provider.enabled && (await loadDestinationConnectionRefs(deps.db, host.id, null)).length > 0;
-    if (!connected && (attendees.length > 0 || args.video_link))
-      throw new ToolFailure(
-        'NO_CALENDAR',
-        'The host has no connected calendar to write this event to, so its attendees could not be invited and no video link could be added. Nothing was created.',
-        'The host connects a calendar in the web app (Calendars). Without attendees or video_link, the event can still block the time in dCal.',
-      );
-
     // The key is the caller's, namespaced like every keyed write here, and
     // apart from the booking tools' keys, which share the same column.
     const key = `mcp-event:${hashApiValue(`${callerId(call)}:${args.idempotency_key}`)}`;
     // What the key promises: the same event for the same host, at the same instants.
-    const request = {
-      host: host.id,
-      title: args.title,
-      start: start.toISOString(),
-      end: end.toISOString(),
-      attendees,
-      description: args.description ?? null,
-      video_link: args.video_link === true,
-      time_zone: tz,
-      allow_conflicts: args.allow_conflicts === true,
-    };
-    const outcome = await createHostEvent(
-      deps.db,
-      {
-        accountId: p.accountId,
-        memberId: host.id,
+    const requestHash = hashApiValue(
+      stableStringify({
+        host: host.id,
         title: args.title,
-        description: args.description ?? null,
-        videoLink: args.video_link === true,
-        startMs: start.getTime(),
-        endMs: end.getTime(),
+        start: start.toISOString(),
+        end: end.toISOString(),
         attendees,
-        timeZone: tz,
-        allowConflicts: args.allow_conflicts === true,
-        idempotencyKey: key,
-        requestHash: hashApiValue(stableStringify(request)),
-      },
-      // FRESH, never the display cache: this decides (ADR 0009).
-      deps.calendar.provider,
+        description: args.description ?? null,
+        video_link: args.video_link === true,
+        time_zone: tz,
+        allow_conflicts: args.allow_conflicts === true,
+      }),
     );
+    // A retry is answered as its first call was, before anything that may have
+    // changed since (the host's calendar, the time filling up) is looked at.
+    let outcome = await replayHostEvent(deps.db, p.accountId, key, requestHash);
+    if (!outcome) {
+      // Attendees and a video link need a calendar to write to: dCal invites nobody itself.
+      const connected =
+        deps.calendar.provider.enabled && (await loadDestinationConnectionRefs(deps.db, host.id, null)).length > 0;
+      if (!connected && (attendees.length > 0 || args.video_link))
+        throw new ToolFailure(
+          'NO_CALENDAR',
+          'The host has no connected calendar to write this event to, so its attendees could not be invited and no video link could be added. Nothing was created.',
+          'The host connects a calendar in the web app (Calendars). Without attendees or video_link, the event can still block the time in dCal.',
+        );
+      outcome = await createHostEvent(
+        deps.db,
+        {
+          accountId: p.accountId,
+          memberId: host.id,
+          title: args.title,
+          description: args.description ?? null,
+          videoLink: args.video_link === true,
+          startMs: start.getTime(),
+          endMs: end.getTime(),
+          attendees,
+          timeZone: tz,
+          allowConflicts: args.allow_conflicts === true,
+          calendarQueued: connected,
+          idempotencyKey: key,
+          requestHash,
+        },
+        // FRESH, never the display cache: this decides (ADR 0009).
+        deps.calendar.provider,
+      );
+    }
+    // Which booking is in the way, only for a caller that may read bookings.
+    const detail = p.scopes.includes('bookings:read');
     if (!outcome.ok) {
       switch (outcome.reason) {
         case 'NOT_FOUND':
@@ -2037,20 +2054,20 @@ const createEvent: ToolDef = {
         case 'SLOT_TAKEN':
           throw new ToolFailure(
             'SLOT_TAKEN',
-            `That time overlaps the host's dCal bookings: ${conflictLine(outcome.conflicts, tz)}. Nothing was created; a dCal booking is never double-booked, even with allow_conflicts.`,
+            `That time overlaps the host's dCal bookings: ${conflictLine(outcome.conflicts, tz, detail)}. Nothing was created; a dCal booking is never double-booked, even with allow_conflicts.`,
             'Pick another time, or move or cancel that booking first (reschedule_booking, cancel_booking).',
           );
         case 'CONFLICT':
           throw new ToolFailure(
             'CONFLICT',
-            `The host is busy then: ${conflictLine(outcome.conflicts, tz)}. Nothing was created.`,
+            `The host is busy then: ${conflictLine(outcome.conflicts, tz, detail)}. Nothing was created.`,
             'Ask the person whether to create it anyway; if so, call again with allow_conflicts true.',
           );
       }
     }
     if (!outcome.replayed) {
       // The calendar write goes through the outbox (retried), never inline.
-      if (connected) deps.calendar.onBookingAccepted(outcome.uid);
+      if (outcome.calendarQueued) deps.calendar.onBookingAccepted(outcome.uid);
       void deps.analytics?.hostEvent(
         'host_event_created',
         { accountId: p.accountId, memberId: host.id },
@@ -2062,26 +2079,26 @@ const createEvent: ToolDef = {
           video_link: args.video_link === true,
           allow_conflicts: args.allow_conflicts === true,
           conflicts_ignored: outcome.overridden.length,
-          calendar: connected ? 'queued' : 'not_connected',
+          calendar: outcome.calendarQueued ? 'queued' : 'not_connected',
         },
       );
     }
     const b = await deps.calV2.bookingResponse(p.accountId, outcome.uid);
     const event = await summarize(deps, p.accountId, b, tz);
     const invited = b.attendees.map((a) => untrusted(a.email, 254));
-    const ignored = outcome.overridden.map((c) => conflictOut(c, tz));
+    const ignored = outcome.overridden.map((c) => conflictOut(c, tz, detail));
     return {
       data: {
         event,
         attendees: invited,
-        calendar: connected ? 'queued' : 'not_connected',
+        calendar: outcome.calendarQueued ? 'queued' : 'not_connected',
         conflicts_ignored: ignored,
         calendar_checked: outcome.calendarChecked,
         already_created: outcome.replayed,
       },
       summary: `${outcome.replayed ? 'Already created. ' : 'Created. '}${line(event)}${
         invited.length ? ` ${invited.length} attendee(s) invited by the host's calendar.` : ''
-      }${connected ? '' : ' No calendar is connected, so it only blocks the time in dCal.'}${
+      }${outcome.calendarQueued ? '' : ' No calendar is connected, so it only blocks the time in dCal.'}${
         ignored.length ? ` It overlaps ${ignored.length} busy time(s), as asked.` : ''
       }`,
       affected: [outcome.uid],

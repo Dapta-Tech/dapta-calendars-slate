@@ -176,7 +176,12 @@ meeting link, `time_zone` and the usual `idempotency_key`.
   `event_type_id`; `get_booking` reads it (`event_type_id: null`) with its
   attendees; `reschedule_booking` moves it to any time with the same length;
   `cancel_booking` removes it from the calendar. A key held to some event types
-  does not see it. Booking webhooks and the CRM leave it out.
+  does not see it. Booking webhooks and the CRM leave it out. Why it is a booking
+  and rides on `bookings:write`: [ADR 0011](adr/0011-a-host-event-is-a-booking-with-no-event-type.md).
+- **Moving it.** Once its copy is on the calendar, the calendar reports that
+  copy as busy at the old time; a move leaves the old time out of the busy
+  check so the event does not block itself. The free/busy read cannot tell one
+  event from another, so anything else inside the old time is left out too.
 - Not in this version: checking the attendees' own free time, all-day events,
   and a location other than the video link.
 

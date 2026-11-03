@@ -4,6 +4,7 @@ import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
 import { sql } from './client';
 import { loadExternalBusy } from './calendar-refs';
+import { busyOutside, hostEventOwnTime } from './host-event';
 import { applyCalendarTemplates, applySharedFallback, markSharedSql, sharedFallbackTitle } from './calendar-text';
 import { normalizeAttendeeEmail, normalizedEmailSql } from './duplicate-guard';
 import {
@@ -592,23 +593,6 @@ export async function addAttendeeToBooking(
   return { ok: true, added: true };
 }
 
-/**
- * The parts of a busy interval outside `own` (the time a host event being moved
- * holds now), as [start, end) epoch ms. With no `own`, the whole interval.
- */
-export function busyOutside(
-  interval: { start: Date; end: Date },
-  own: { startMs: number; endMs: number } | null,
-): Array<[number, number]> {
-  const start = interval.start.getTime();
-  const end = interval.end.getTime();
-  if (!own) return [[start, end]];
-  const parts: Array<[number, number]> = [];
-  if (start < own.startMs) parts.push([start, Math.min(end, own.startMs)]);
-  if (end > own.endMs) parts.push([Math.max(start, own.endMs), end]);
-  return parts;
-}
-
 interface RescheduleSource {
   id: string;
   account_id: string;
@@ -741,9 +725,9 @@ export async function rescheduleBookingV2(
   const newEndMs = args.newStartMs + duration;
   // A host event moved onto part of its own time (an hour later, a long block)
   // would read itself as busy: its own copy is on the calendar at the old time.
-  // So its old time is left out of what the calendar reports. Bookings keep the
-  // check as it was.
-  const own = source.event_type_id ? null : { startMs: Number(source.start_ms), endMs: Number(source.end_ms) };
+  // So, once that copy is written, its old time is left out of what the
+  // calendar reports (`hostEventOwnTime`). Bookings keep the check as it was.
+  const own = await hostEventOwnTime(db, source);
   for (const hostMemberId of hostIds) {
     try {
       const busy = await loadExternalBusy(
