@@ -50,14 +50,14 @@ describe('the chosen workspace on host calls', () => {
   });
 
   it('sends only the identity when no workspace is chosen (as before workspaces existed)', async () => {
-    expect(await hostHeaders()).toEqual({ 'x-slate-email': 'pablo@acme.test' });
+    expect(await hostHeaders()).toEqual({ 'x-slate-email': 'pablo@acme.test', 'x-slate-client': 'web' });
   });
 
   it('names the chosen workspace, unless the caller asks to speak for the person', async () => {
     await setWorkspace('acct_alejandro');
     expect(cookieJar.set).toHaveBeenCalledWith(WORKSPACE_COOKIE, 'acct_alejandro', expect.objectContaining({ httpOnly: true, sameSite: 'lax', path: '/' }));
-    expect(await hostHeaders()).toEqual({ 'x-slate-email': 'pablo@acme.test', 'x-dcal-workspace': 'acct_alejandro' });
-    expect(await hostHeaders({ workspace: false })).toEqual({ 'x-slate-email': 'pablo@acme.test' });
+    expect(await hostHeaders()).toEqual({ 'x-slate-email': 'pablo@acme.test', 'x-slate-client': 'web', 'x-dcal-workspace': 'acct_alejandro' });
+    expect(await hostHeaders({ workspace: false })).toEqual({ 'x-slate-email': 'pablo@acme.test', 'x-slate-client': 'web' });
   });
 
   it('names no workspace for a signed-out caller', async () => {
