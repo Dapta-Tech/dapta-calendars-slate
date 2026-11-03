@@ -12,7 +12,10 @@ booking always and the rest unless `allowConflicts`, and writes under the host's
 lock with the same overlap check as every booking. A repeated idempotency key
 replays the event, also when a retry races its first attempt (the key is read
 again under the lock and before any refusal); the same key with other
-arguments is refused (`replayHostEvent`). `isHostEvent` and `isHostEventRow`
+arguments is refused (`replayHostEvent`). A replay answers what the first call
+decided, kept on the event: the busy time it was created over, whether the
+calendar could be read, whether its calendar write was queued. Attendees are
+deduplicated with the calendar write's own `uniqueEmails`, now exported. `isHostEvent` and `isHostEventRow`
 tell such a booking apart. `rescheduleBookingV2` and the v1 `rescheduleBooking`
 move a host event to any time (no event type, so no hours), and once its copy
 is on the calendar do not read its old time there as busy (`hostEventOwnTime`,

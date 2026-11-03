@@ -245,6 +245,32 @@ describe('createHostEvent (SQLite)', () => {
     });
   });
 
+  it('a replay answers the busy time the first call ignored and whether the calendar could be read', async () => {
+    await connectCalendar();
+    const calendar = new InMemoryCalendarProvider();
+    calendar.seedBusy(REF, [{ startUtc: new Date(offHours + HOUR).toISOString(), endUtc: new Date(offHours + 2 * HOUR).toISOString() }]);
+    const over = args({ allowConflicts: true, idempotencyKey: 'over', requestHash: 'h' });
+    const first = await createHostEvent(db, over, calendar);
+    const ignored = [{ kind: 'calendar', startMs: offHours + HOUR, endMs: offHours + 2 * HOUR }];
+    expect(first).toMatchObject({ ok: true, replayed: false, overridden: ignored, calendarChecked: true });
+    // The retry finds the calendar unreadable now: it still answers what was decided.
+    expect(await createHostEvent(db, over, new FailingCalendarProvider())).toMatchObject({
+      ok: true,
+      replayed: true,
+      overridden: ignored,
+      calendarChecked: true,
+    });
+
+    const unchecked = args({ allowConflicts: true, idempotencyKey: 'blind', requestHash: 'h', startMs: offHours + 6 * HOUR, endMs: offHours + 7 * HOUR });
+    expect(await createHostEvent(db, unchecked, new FailingCalendarProvider())).toMatchObject({ ok: true, calendarChecked: false });
+    expect(await createHostEvent(db, unchecked, new InMemoryCalendarProvider())).toMatchObject({
+      ok: true,
+      replayed: true,
+      overridden: [],
+      calendarChecked: false,
+    });
+  });
+
   it('replays a repeated key and refuses it with other arguments', async () => {
     const first = await createHostEvent(db, args({ idempotencyKey: 'k1', requestHash: 'h1' }));
     const again = await createHostEvent(db, args({ idempotencyKey: 'k1', requestHash: 'h1' }));

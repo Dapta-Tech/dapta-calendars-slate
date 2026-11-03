@@ -21,7 +21,7 @@ import { sql } from 'drizzle-orm';
 import { isExclusionViolation } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
-import { loadExternalBusy } from './calendar-refs';
+import { loadExternalBusy, uniqueEmails } from './calendar-refs';
 import { normalizeAttendeeEmail } from './duplicate-guard';
 import {
   bookingStartOutOfRange,
@@ -94,7 +94,7 @@ export type HostEventOutcome =
       uid: string;
       /** True when the key had already created this event: nothing was written now. */
       replayed: boolean;
-      /** The busy time the host chose to ignore (`allowConflicts`). Empty on a replay. */
+      /** The busy time the host chose to ignore (`allowConflicts`), as decided when it was made. */
       overridden: HostEventConflict[];
       /** False when the connected calendar could not be read and `allowConflicts` let it through. */
       calendarChecked: boolean;
@@ -109,6 +109,14 @@ export type HostEventOutcome =
   | { ok: false; reason: 'SLOT_TAKEN'; conflicts: HostEventConflict[] }
   /** Busy time the host may choose to ignore, listed so they can decide. */
   | { ok: false; reason: 'CONFLICT'; conflicts: HostEventConflict[] };
+
+/** What a host event keeps of its own creation (`metadata._hostEvent`), for replays. */
+interface StoredHostEvent {
+  by: 'mcp';
+  calendar: 'queued' | 'not_connected';
+  calendarChecked: boolean;
+  overridden: HostEventConflict[];
+}
 
 /** Whether a booking row is a host event (`createHostEvent`): one with no event type. */
 export function isHostEventRow(row: { event_type_id: string | null | undefined } | null | undefined): boolean {
@@ -129,15 +137,8 @@ export async function isHostEvent(db: Db, uid: string): Promise<boolean> {
 /** Each address once, in order, without the host's own. */
 export function hostEventAttendees(emails: readonly string[], hostEmail: string | null | undefined): string[] {
   const host = normalizeAttendeeEmail(hostEmail);
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const email of emails) {
-    const key = normalizeAttendeeEmail(email);
-    if (!key || key === host || seen.has(key)) continue;
-    seen.add(key);
-    out.push(email.trim());
-  }
-  return out;
+  // The calendar write's own dedupe (`uniqueEmails`), so the two never compare addresses differently.
+  return uniqueEmails(emails.map((email) => email.trim())).filter((email) => normalizeAttendeeEmail(email) !== host);
 }
 
 /** The dCal bookings of `memberId` over the window, as conflicts (organizer or co-host). */
@@ -198,16 +199,19 @@ export async function replayHostEvent(
         WHERE account_id = ${accountId} AND idempotency_key = ${scopedIdempotencyKey(accountId, key)} LIMIT 1`,
   );
   if (!row) return null;
-  const meta = parseJsonColumn<{ _idempotency?: { requestHash?: string }; _hostEvent?: { calendar?: string } }>(row.metadata, {});
+  const meta = parseJsonColumn<{ _idempotency?: { requestHash?: string }; _hostEvent?: Partial<StoredHostEvent> }>(row.metadata, {});
   if (!isHostEventRow(row) || (meta._idempotency?.requestHash ?? null) !== (requestHash ?? null))
     return { ok: false, reason: 'IDEMPOTENCY_KEY_REUSED' };
+  // What the first call decided: a retry learns the same, including busy time
+  // the host chose to ignore and a calendar that could not be read then.
+  const made = meta._hostEvent ?? {};
   return {
     ok: true,
     uid: row.uid,
     replayed: true,
-    overridden: [],
-    calendarChecked: true,
-    calendarQueued: meta._hostEvent?.calendar === 'queued',
+    overridden: Array.isArray(made.overridden) ? made.overridden : [],
+    calendarChecked: made.calendarChecked !== false,
+    calendarQueued: made.calendar === 'queued',
   };
 }
 
@@ -335,8 +339,16 @@ export async function createHostEvent(
   // `conferencing` asks for one; `custom` with no place never does (a NULL
   // kind with no place would ask for one).
   const locationKind = args.videoLink ? 'conferencing' : 'custom';
+  const overridden = args.allowConflicts ? soft : [];
+  // What this creation decided, kept so a replay answers exactly that.
+  const stored: StoredHostEvent = {
+    by: 'mcp',
+    calendar: args.calendarQueued ? 'queued' : 'not_connected',
+    calendarChecked,
+    overridden,
+  };
   const metadata = {
-    _hostEvent: { by: 'mcp', calendar: args.calendarQueued ? 'queued' : 'not_connected' },
+    _hostEvent: stored,
     ...(key ? { _idempotency: { requestHash: args.requestHash ?? null } } : {}),
   };
   const storedKey = key ? scopedIdempotencyKey(args.accountId, key) : null;
@@ -407,7 +419,7 @@ export async function createHostEvent(
     ok: true,
     uid,
     replayed: false,
-    overridden: args.allowConflicts ? soft : [],
+    overridden,
     calendarChecked,
     calendarQueued: args.calendarQueued === true,
   };

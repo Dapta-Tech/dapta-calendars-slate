@@ -235,7 +235,7 @@ export function primaryAttendeeKey(rows: Array<{ email: string | null }>, metada
 }
 
 /** Each address once, in first-seen order, compared as the duplicate guard does. */
-function uniqueEmails(emails: Array<string | null | undefined>): string[] {
+export function uniqueEmails(emails: Array<string | null | undefined>): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const email of emails) {

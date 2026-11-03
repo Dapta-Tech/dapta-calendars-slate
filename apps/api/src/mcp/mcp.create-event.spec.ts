@@ -200,12 +200,20 @@ describe('create_event', () => {
     expect(await h.db.get(sql`SELECT id FROM booking WHERE title = 'Deep work'`)).toBeUndefined();
     expect(hostEvents).not.toHaveBeenCalled();
 
-    const out = structured<Created>(await create({ ...args, allow_conflicts: true }));
+    // One connection for the call and its retry: a key is per credential.
+    const c = await h.connect(await h.key(ALL));
+    const overArgs = { ...args, time_zone: 'America/New_York', allow_conflicts: true };
+    const out = structured<Created>(await c.callTool({ name: 'create_event', arguments: overArgs }));
     expect(out.conflicts_ignored).toHaveLength(1);
     expect(out.conflicts_ignored[0]).toMatchObject({ kind: 'calendar', uid: null, title: null });
     expect(new Date(out.conflicts_ignored[0]!.start).getTime()).toBe(start + HOUR);
     expect(new Date(out.conflicts_ignored[0]!.end).getTime()).toBe(start + 2 * HOUR);
     expect(hostEvents.mock.calls[0]![2]).toMatchObject({ allow_conflicts: true, conflicts_ignored: 1 });
+    // A retry is told the same: what it was created over, even once that time is free.
+    calendar.seedBusy(REF, []);
+    const again = structured<Created>(await c.callTool({ name: 'create_event', arguments: overArgs }));
+    expect(again).toMatchObject({ already_created: true, calendar_checked: true });
+    expect(again.conflicts_ignored).toEqual(out.conflicts_ignored);
   });
 
   it('never overlaps a dCal booking, even when told to ignore conflicts', async () => {
