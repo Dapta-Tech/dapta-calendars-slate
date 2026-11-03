@@ -19,5 +19,5 @@ busy when it leaves a group event's own bookings out. `hostOverlapSql` is
 exported for the guarded writes.
 
 `@slate/shared`: the server analytics event `host_event_created`, and the copy
-for `create_event` on the Tools page and in the key scopes (English and
+for `create_event` on the Tools page and the API docs page (English and
 Spanish).

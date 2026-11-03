@@ -30,4 +30,4 @@ types does not see it. Booking results gain `kind` and `title`.
 Fixed on the way, for every booking: the v2 reschedule keeps the booking's
 location kind (a moved booking asked for a video link it had not asked for, or
 stopped asking), and a group event's availability counts a host event as busy.
-The web Tools page and the key scopes list the new tool, in English and Spanish.
+The web Tools page lists the new tool, in English and Spanish.
