@@ -544,7 +544,8 @@ describe('product analytics (API)', () => {
 
     it("the wizard's publish through the API by another client is source api", async () => {
       await host().submitSetup(REQ, { templateId: '30min' });
-      expect((await events()).find(([e]) => e === 'calendars_event_type_published')![1]).toMatchObject({ source: 'api' });
+      const publish = (await settled()).find((c) => c.event === 'calendars_event_type_published');
+      expect(publish?.properties).toMatchObject({ source: 'api' });
     });
 
     it('a claimed signup source is recorded; a refused claim is not', async () => {
