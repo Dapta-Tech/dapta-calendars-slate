@@ -107,7 +107,7 @@ the deployment prunes it.
 | Event | When | Properties |
 |---|---|---|
 | `$pageview` | Each dashboard navigation | the vendor's own, URLs without query |
-| `$web_vitals` | The dashboard's load and responsiveness, as the vendor measures them | `$web_vitals_LCP_value`, `$web_vitals_INP_value`, `$web_vitals_CLS_value`, `$web_vitals_FCP_value` and the vendor's per-metric detail; timings and the page's path, URLs without query. Network timing stays off. Booking pages send none |
+| `$web_vitals` | The dashboard's load and responsiveness, as the vendor measures them | `$web_vitals_LCP_value`, `$web_vitals_INP_value`, `$web_vitals_CLS_value`, `$web_vitals_FCP_value` and the page url without query. No attribution (it would name elements and resource URLs), and the vendor's nested per-metric detail (`$web_vitals_*_event`, which repeats the full URL) is dropped before sending. Network timing stays off. Booking pages send none |
 | `calendars_template_skipped` | "Skip for now" on the template step | none |
 | `calendars_link_copied` | A booking link is copied | `link` (`page`, `event_type`, `one_off`) |
 

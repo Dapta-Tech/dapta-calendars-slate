@@ -317,14 +317,6 @@ export async function refreshUpstreamSession(session: Session | null): Promise<S
 }
 
 /**
- * Identity headers for every host call, admin-api's `req()` included (§1):
- * Bearer for workos, x-slate-email for local, nothing when logged out (→ the
- * API 401s → the gate redirects). Plus the chosen workspace, when there is one
- * (`lib/workspace.ts`); `workspace: false` leaves it out, for the one call that
- * must speak for the person rather than for a workspace (the invitation link
- * listing where they may go).
- */
-/**
  * Marks a call to the API as coming from this web dashboard, so the API can
  * tell an account created here from one another client provisions through it
  * (product analytics only; the API grants nothing on it). Every host call the
@@ -332,6 +324,14 @@ export async function refreshUpstreamSession(session: Session | null): Promise<S
  */
 export const WEB_CLIENT_HEADERS: Readonly<Record<string, string>> = { 'x-slate-client': 'web' };
 
+/**
+ * Identity headers for every host call, admin-api's `req()` included (§1):
+ * Bearer for workos, x-slate-email for local, nothing when logged out (→ the
+ * API 401s → the gate redirects). Plus the chosen workspace, when there is one
+ * (`lib/workspace.ts`); `workspace: false` leaves it out, for the one call that
+ * must speak for the person rather than for a workspace (the invitation link
+ * listing where they may go).
+ */
 export async function hostHeaders(opts: { workspace?: boolean } = {}): Promise<Record<string, string>> {
   const s = await getSession();
   const identity: Record<string, string> =

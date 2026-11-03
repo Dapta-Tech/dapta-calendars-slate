@@ -535,10 +535,16 @@ describe('product analytics (API)', () => {
     const crud = () => new AdminCrudController(db, auth(), growth, undefined, fx);
 
     it('choosing a template is the template and the first publish', async () => {
-      await host().submitSetup(REQ, { templateId: '30min' });
+      await host().submitSetup(WEB_REQ, { templateId: '30min' });
       const names = (await settled()).map((c) => c.event);
       expect(names).toEqual(['calendars_template_chosen', 'calendars_event_type_published']);
       expect((await events())[0]![1]).toMatchObject({ template: '30min' });
+      expect((await events())[1]![1]).toMatchObject({ source: 'onboarding' });
+    });
+
+    it("the wizard's publish through the API by another client is source api", async () => {
+      await host().submitSetup(REQ, { templateId: '30min' });
+      expect((await events()).find(([e]) => e === 'calendars_event_type_published')![1]).toMatchObject({ source: 'api' });
     });
 
     it('a claimed signup source is recorded; a refused claim is not', async () => {
