@@ -49,6 +49,8 @@ export const SERVER_ANALYTICS_EVENTS = [
   'branding_changed',
   'hide_branding_toggled',
   'booking_created',
+  // An event a host put on their own calendar through the MCP (`create_event`).
+  'host_event_created',
   'invite_sent',
   'invite_accepted',
 ] as const;

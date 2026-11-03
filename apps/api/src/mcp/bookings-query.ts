@@ -3,7 +3,8 @@ import { sql } from '@slate/db';
 import { ToolFailure } from './support';
 
 /**
- * The booking list behind `list_bookings`.
+ * The booking list behind `list_bookings`, host events (`create_event`)
+ * included: they are bookings with no event type.
  *
  * Its own query rather than `listBookings` from `@slate/db`, for three reasons
  * the tool depends on: it must return the event type (the booking `title` holds
@@ -19,8 +20,11 @@ export interface BookingListRow {
   status: string;
   startMs: number;
   endMs: number;
-  eventTypeId: string;
+  /** Null for a host's own event (`create_event`), which has no event type. */
+  eventTypeId: string | null;
   eventTypeTitle: string;
+  /** A host event's own title (the host wrote it); null for a booking, whose title may name the invitee. */
+  hostEventTitle: string | null;
   primaryEmail: string | null;
   attendeeCount: number;
   /** The booking this one replaced (a move made as cancel + new booking), or null. */
@@ -96,8 +100,9 @@ export async function queryBookings(
     status: string;
     start_ms: number;
     end_ms: number;
-    event_type_id: string;
+    event_type_id: string | null;
     event_title: string;
+    host_event_title: string | null;
     primary_email: string | null;
     attendee_count: number | string;
     rescheduled_from_uid: string | null;
@@ -105,8 +110,10 @@ export async function queryBookings(
   }>(
     // LEFT JOIN: an event type can be deleted while its bookings stay, and a
     // later change to one of them (a cancellation) must still reach the
-    // updated_since feed. Such a row lists with an empty event title.
+    // updated_since feed. Such a row lists with an empty event title. A host's
+    // own event has no event type at all and lists with its own title.
     sql`SELECT b.uid, b.status, b.start_ms, b.end_ms, b.event_type_id, COALESCE(et.title, '') AS event_title,
+               CASE WHEN b.event_type_id IS NULL THEN b.title ELSE NULL END AS host_event_title,
                b.rescheduled_from_uid, b.rescheduled_to_uid,
                (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
                   ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS primary_email,
@@ -125,8 +132,9 @@ export async function queryBookings(
       status: r.status,
       startMs: Number(r.start_ms),
       endMs: Number(r.end_ms),
-      eventTypeId: r.event_type_id,
+      eventTypeId: r.event_type_id ?? null,
       eventTypeTitle: r.event_title,
+      hostEventTitle: r.host_event_title ?? null,
       primaryEmail: r.primary_email,
       attendeeCount: Number(r.attendee_count),
       rescheduledFromUid: r.rescheduled_from_uid ?? null,

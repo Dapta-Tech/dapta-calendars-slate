@@ -187,6 +187,7 @@ export const MCP_TOOLS: readonly ToolInfo[] = [
   { name: 'confirm_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
   { name: 'decline_booking', kind: 'destructive', scope: 'bookings:write', publicOk: false },
   { name: 'cancel_booking', kind: 'destructive', scope: 'bookings:cancel', publicOk: false },
+  { name: 'create_event', kind: 'write', scope: 'bookings:write', publicOk: false },
 ];
 
 // --- Key list ---------------------------------------------------------------

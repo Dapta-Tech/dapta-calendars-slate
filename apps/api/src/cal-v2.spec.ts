@@ -299,7 +299,7 @@ describe("Cal-compatible v2 R1 contract", () => {
     );
     expect(response.data.uid).toBeTruthy();
     expect(response.data.hosts).toHaveLength(1);
-    expect(response.data.eventType.slug).toBe("team-demo");
+    expect(response.data.eventType?.slug).toBe("team-demo");
   });
 
   it("replays a team booking on a repeated idempotency key", async () => {

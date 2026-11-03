@@ -592,11 +592,29 @@ export async function addAttendeeToBooking(
   return { ok: true, added: true };
 }
 
+/**
+ * The parts of a busy interval outside `own` (the time a host event being moved
+ * holds now), as [start, end) epoch ms. With no `own`, the whole interval.
+ */
+export function busyOutside(
+  interval: { start: Date; end: Date },
+  own: { startMs: number; endMs: number } | null,
+): Array<[number, number]> {
+  const start = interval.start.getTime();
+  const end = interval.end.getTime();
+  if (!own) return [[start, end]];
+  const parts: Array<[number, number]> = [];
+  if (start < own.startMs) parts.push([start, Math.min(end, own.startMs)]);
+  if (end > own.endMs) parts.push([Math.max(start, own.endMs), end]);
+  return parts;
+}
+
 interface RescheduleSource {
   id: string;
   account_id: string;
   uid: string;
-  event_type_id: string;
+  /** Null for a host's own event (`createHostEvent`): no event type, so no hours to check. */
+  event_type_id: string | null;
   host_member_id: string | null;
   team_id: string | null;
   title: string;
@@ -604,6 +622,8 @@ interface RescheduleSource {
   end_ms: number;
   status: string;
   location: string | null;
+  /** The snapshotted location kind; carried, so a moved event asks for a video link exactly when it did. */
+  location_kind: string | null;
   meeting_url: string | null;
   attendee_time_zone: string | null;
   /** The language the invitee booked in; carried to the new row, NULL included. */
@@ -669,7 +689,7 @@ export async function rescheduleBookingV2(
 
   const source = await db.get<RescheduleSource>(
     sql`SELECT id, account_id, uid, event_type_id, host_member_id, team_id, title,
-               start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
+               start_ms, end_ms, status, location, location_kind, meeting_url, attendee_time_zone, locale,
                calendar_description, responses, metadata, recurring_event_id
         FROM booking
         WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
@@ -701,19 +721,29 @@ export async function rescheduleBookingV2(
     ))
       hostScheduleIds.set(row.member_id, row.schedule_id);
 
-  for (const hostMemberId of hostIds) {
-    const bookable = await isSlotBookable(db, {
-      eventTypeId: source.event_type_id,
-      hostMemberId,
-      hostScheduleId: hostScheduleIds.get(hostMemberId),
-      startMs: args.newStartMs,
-      excludeBookingId: source.id,
-    });
-    if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+  // A host's own event has no event type, so no hours, notice or slot grid:
+  // like its creation, it may move to any time. The overlap check below and
+  // the calendar's busy times still apply.
+  if (source.event_type_id) {
+    for (const hostMemberId of hostIds) {
+      const bookable = await isSlotBookable(db, {
+        eventTypeId: source.event_type_id,
+        hostMemberId,
+        hostScheduleId: hostScheduleIds.get(hostMemberId),
+        startMs: args.newStartMs,
+        excludeBookingId: source.id,
+      });
+      if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+    }
   }
 
   const duration = Number(source.end_ms) - Number(source.start_ms);
   const newEndMs = args.newStartMs + duration;
+  // A host event moved onto part of its own time (an hour later, a long block)
+  // would read itself as busy: its own copy is on the calendar at the old time.
+  // So its old time is left out of what the calendar reports. Bookings keep the
+  // check as it was.
+  const own = source.event_type_id ? null : { startMs: Number(source.start_ms), endMs: Number(source.end_ms) };
   for (const hostMemberId of hostIds) {
     try {
       const busy = await loadExternalBusy(
@@ -725,8 +755,8 @@ export async function rescheduleBookingV2(
         source.event_type_id,
       );
       if (
-        busy.some(
-          (interval) => interval.start.getTime() < newEndMs && interval.end.getTime() > args.newStartMs,
+        busy.some((interval) =>
+          busyOutside(interval, own).some(([start, end]) => start < newEndMs && end > args.newStartMs),
         )
       )
         return { ok: false, reason: 'SLOT_TAKEN' };
@@ -773,14 +803,14 @@ export async function rescheduleBookingV2(
     WHERE id = ${source.id}`;
   const insertNew = sql`INSERT INTO booking
     (id, account_id, uid, event_type_id, host_member_id, team_id, title,
-     start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
+     start_ms, end_ms, status, location, location_kind, meeting_url, attendee_time_zone, locale,
      calendar_description, seated, responses, metadata, cancellation_reason, cancelled_by, rescheduled,
      from_reschedule, rescheduled_from_uid, rescheduled_to_uid,
      rescheduling_reason, rescheduled_by_email, recurring_event_id,
      idempotency_key, utm, created_at, updated_at)
     VALUES (${newId}, ${source.account_id}, ${newUid}, ${source.event_type_id},
       ${source.host_member_id}, ${source.team_id}, ${source.title},
-      ${args.newStartMs}, ${newEndMs}, ${source.status}, ${source.location},
+      ${args.newStartMs}, ${newEndMs}, ${source.status}, ${source.location}, ${source.location_kind ?? null},
       ${source.meeting_url}, ${source.attendee_time_zone}, ${source.locale ?? null},
       ${source.calendar_description ?? null},
       (SELECT seated FROM booking WHERE id = ${source.id}), ${responsesExpr},
