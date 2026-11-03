@@ -73,7 +73,12 @@ describe('posthogSettings', () => {
       capture_pageview: 'history_change',
       autocapture: false,
       disable_session_recording: true,
+      capture_performance: { web_vitals: true, web_vitals_attribution: false, network_timing: false },
     });
+  });
+
+  it('only the dashboard measures web vitals; a visitor measures nothing', () => {
+    expect(posthogSettings(CONFIG, 'visitor', location)['capture_performance']).toBe(false);
   });
 });
 
@@ -96,6 +101,29 @@ describe('scrubEvent', () => {
       some_new_vendor_property: 'anything',
     } as Record<string, unknown>,
     $set_once: { $initial_current_url: 'https://cal.example.test/acme/ana?token=secret', $initial_utm_source: 'x' },
+  });
+
+  it("a dashboard web vitals event keeps the values and drops the vendor's nested detail, whose urls keep their query", () => {
+    const vitals = {
+      event: '$web_vitals',
+      properties: {
+        $current_url: 'https://app.example.test/admin/connections/connected?error=denied&errorData=%7B%7D',
+        $web_vitals_FCP_value: 812,
+        $web_vitals_FCP_event: {
+          name: 'FCP',
+          value: 812,
+          $current_url: 'https://app.example.test/admin/connections/connected?error=denied&errorData=%7B%7D',
+          navigationURL: 'https://app.example.test/admin?ph_id=landing-1&utm_source=x',
+          attribution: { target: 'div.row > button', url: 'https://cdn.example.test/a.png?sig=1' },
+        },
+      } as Record<string, unknown>,
+    };
+    const out = scrubEvent(vitals, 'host', '/admin/connections/connected')!;
+    expect(out.properties).toEqual({
+      $current_url: 'https://app.example.test/admin/connections/connected',
+      $web_vitals_FCP_value: 812,
+    });
+    expect(JSON.stringify(out)).not.toMatch(/error=|ph_id|utm_|sig=|div\.row/);
   });
 
   it('a visitor event keeps only the allowlist, with every query cut and the referrer cut to its origin', () => {

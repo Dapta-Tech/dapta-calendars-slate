@@ -14,6 +14,9 @@
 //   GET  /static/[<version>/]exception-autocapture.js
 //                          the library's error capture extension, from the same
 //                          package (it asks for it when error tracking is on)
+//   GET  /static/[<version>/]web-vitals[-<variant>].js
+//                          its web vitals extension, from the same package (the
+//                          dashboard asks for it)
 //   POST /e/ (and the vendor's other event paths)
 //                          the browser's batches, decoded (gzip or base64) and
 //                          recorded one event at a time
@@ -44,7 +47,7 @@ function library(file = 'array.js') {
 }
 
 /** The library's own files this host serves: the library and its error capture extension, any version path. */
-const STATIC_FILE = /^\/static\/(?:[\w.-]+\/)?(array\.js|exception-autocapture\.js)$/;
+const STATIC_FILE = /^\/static\/(?:[\w.-]+\/)?(array\.js|exception-autocapture\.js|web-vitals(?:-[\w-]+)?\.js)$/;
 
 /** The browser's event paths, across the vendor's versions. */
 const EVENT_PATHS = new Set(['/e/', '/i/v0/e/', '/batch/', '/track/', '/engage/']);

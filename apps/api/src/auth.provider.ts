@@ -69,6 +69,13 @@ export interface SignupNotice {
   isFirstMember: boolean;
   /** An invite row was adopted rather than a new member created. */
   fromInvite: boolean;
+  /**
+   * Which client made the request that created the member: `web` for this
+   * app's own web dashboard, `api` for any other caller holding a host token
+   * (a platform that provisions the account for its user through the API).
+   * See `requestEntry`.
+   */
+  entry: RequestEntry;
 }
 
 /**
@@ -83,6 +90,22 @@ export type SignupObserver = (signup: SignupNotice) => void;
 export function header(req: ReqLike, name: string): string | undefined {
   const v = req.headers[name];
   return Array.isArray(v) ? v[0] : v;
+}
+
+/**
+ * The header this app's web dashboard sets on every API call it makes for a
+ * host (`hostHeaders` in the web app). A label for product analytics only:
+ * nothing is allowed or refused on it, so a caller that sets it can only
+ * misfile its own events.
+ */
+export const WEB_CLIENT_HEADER = 'x-slate-client';
+
+/** Who made a host request: the web dashboard, or any other API caller. */
+export type RequestEntry = 'web' | 'api';
+
+export function requestEntry(req: ReqLike): RequestEntry {
+  const v = req.headers?.[WEB_CLIENT_HEADER];
+  return (Array.isArray(v) ? v[0] : v) === 'web' ? 'web' : 'api';
 }
 
 /** The port every host-auth backend implements. */
@@ -143,7 +166,7 @@ export class LocalAuthProvider implements AuthProvider {
 
       // 2. Email-aware dev login (header wins over the env default).
       const email = header(req, 'x-slate-email') ?? this.env.DEV_LOGIN_EMAIL;
-      if (email) return this.resolveByEmail(email);
+      if (email) return this.resolveByEmail(email, requestEntry(req));
     }
 
     // 3. Strict mode: no identity provided → no session (enables logout in dev).
@@ -162,7 +185,7 @@ export class LocalAuthProvider implements AuthProvider {
   }
 
   /** Resolve (or JIT-create) the member with this email. Dev/test only. */
-  private async resolveByEmail(email: string): Promise<ResolvedHost> {
+  private async resolveByEmail(email: string, entry: RequestEntry): Promise<ResolvedHost> {
     const existing = await this.db.get<{ account_id: string; member_id: string }>(
       sql`SELECT account_id, id AS member_id FROM member
           WHERE email = ${email} ORDER BY created_at ASC LIMIT 1`,
@@ -211,6 +234,7 @@ export class LocalAuthProvider implements AuthProvider {
       role,
       isFirstMember: role === 'owner',
       fromInvite: false,
+      entry,
     });
     return { accountId: account.id, memberId, email: email.trim().toLowerCase() };
   }
