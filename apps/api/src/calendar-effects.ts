@@ -1,10 +1,23 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import type { CalendarProvider } from '@slate/calendar';
+import { calendarFeatures, type CalendarProvider, type EventRecurrence } from '@slate/calendar';
+import { rruleFor } from '@slate/engine';
 import type { ServerEnv } from '@slate/config/env';
 import { getMessages } from '@slate/shared';
 import {
   claimBookingDestination,
+  claimSeriesCalendar,
   DEFAULT_MAX_ATTEMPTS,
+  fillSeriesCalendar,
+  firstOccurrence,
+  loadDestinationConnectionRefs,
+  loadHostEventSeries,
+  loadSeriesOccurrences,
+  markSeriesCalendarDeleted,
+  releaseSeriesCalendar,
+  seriesDates,
+  seriesOfBooking,
+  setSeriesMeetingUrl,
+  type HostEventSeries,
   deleteBookingReferences,
   enqueueOutbox,
   fillBookingReference,
@@ -35,7 +48,41 @@ import { CALENDAR, DB, EMAIL, ENV } from './tokens';
  * without the provider's invitation and the invitee email it counted on never
  * went out (`EmailEffects.afterGaveUp`).
  */
-export type CalendarAction = 'create' | 'delete' | 'reschedule' | 'reinvite';
+export type CalendarAction =
+  | 'create'
+  | 'delete'
+  | 'reschedule'
+  | 'reinvite'
+  /** A repeating host event (ADR 0012): write its one repeating event. */
+  | 'series-create'
+  /** Its rule changed (ended early, or moved whole): update the repeating event. */
+  | 'series-update'
+  /** Cancelled whole: delete the repeating event. */
+  | 'series-delete'
+  /** One date left out after the fact (the extension met a booking): cancel that occurrence. */
+  | 'occurrence-cancel';
+
+/** What a series job carries in its outbox payload. */
+interface SeriesJob {
+  id: string;
+  /** For `occurrence-cancel`: the date's original start. */
+  occurrenceStartMs?: number;
+}
+
+function readSeriesJob(payload: string | null): SeriesJob | null {
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload) as { series?: Partial<SeriesJob> } | null;
+    const series = parsed?.series;
+    if (!series || typeof series.id !== 'string' || !series.id) return null;
+    return {
+      id: series.id,
+      ...(typeof series.occurrenceStartMs === 'number' ? { occurrenceStartMs: series.occurrenceStartMs } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
 
 /** The outbox row a calendar job runs for: its id, how many times it has already failed, and its mark. */
 export interface CalendarJobRow {
@@ -230,6 +277,49 @@ export class CalendarEffects {
   }
 
   /**
+   * A repeating host event was written (ADR 0012): queue its ONE repeating
+   * event on the host's calendar. `anchorUid` is one of its dates (the row the
+   * outbox files the job under); the job reads the series itself.
+   */
+  onSeriesCreated(seriesId: string, anchorUid: string): void {
+    this.enqueueSeries('series-create', seriesId, anchorUid);
+  }
+
+  /** A series' rule changed (ended before a date, or moved whole): queue the update of its event. */
+  onSeriesChanged(seriesId: string, anchorUid: string): void {
+    this.enqueueSeries('series-update', seriesId, anchorUid);
+  }
+
+  /** A series was cancelled whole: queue the delete of its event (the calendar tells the attendees). */
+  onSeriesDeleted(seriesId: string, anchorUid: string): void {
+    this.enqueueSeries('series-delete', seriesId, anchorUid);
+  }
+
+  /** Dates of a series left out after it was written: cancel each on the calendar. */
+  onSeriesDatesSkipped(seriesId: string, anchorUid: string, startsMs: readonly number[]): void {
+    for (const startMs of startsMs) this.enqueueSeries('occurrence-cancel', seriesId, anchorUid, startMs);
+  }
+
+  /**
+   * A series job. Due at once (a host event has no invitee email to wait for),
+   * and ordered with every other calendar change of the same series, so a date
+   * cancelled right after the series was made never runs before its create.
+   */
+  private enqueueSeries(action: CalendarAction, seriesId: string, anchorUid: string, occurrenceStartMs?: number): void {
+    if (!this.calendar.enabled) return;
+    this.forgetBusy(anchorUid);
+    void enqueueOutbox(this.db, {
+      kind: 'calendar',
+      action,
+      bookingUid: anchorUid,
+      orderKey: `series:${seriesId}`,
+      payload: JSON.stringify({ series: { id: seriesId, ...(occurrenceStartMs !== undefined ? { occurrenceStartMs } : {}) } }),
+    }).catch((err) => {
+      this.log.error(`failed to enqueue calendar ${action} for series ${seriesId}: ${String(err)}`);
+    });
+  }
+
+  /**
    * Clear this process's cached busy reads for the calendars of a booking's
    * hosts. Never throws and never blocks the caller: the cache only feeds what
    * a page shows, and a stale display costs at most one TTL.
@@ -250,18 +340,28 @@ export class CalendarEffects {
    */
   private enqueue(action: CalendarAction, uid: string): void {
     if (!this.calendar.enabled) return;
-    void enqueueOutbox(this.db, {
-      kind: 'calendar',
-      action,
-      bookingUid: uid,
-      // A short head start for the invitee's email, which the same request
-      // queues right after and which marks this row (`providerInvites`). Well
-      // inside the grace a conferencing email waits for this write's link, so
-      // the link still comes first.
-      nextAttemptAt: Date.now() + INVITEE_EMAIL_GRACE_MS,
-      // A delete may wait for its cancellation email; the wait has its own budget.
-      ...(action === 'delete' ? { maxAttempts: DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_MAX_LOOKS } : {}),
-    }).catch((err) => {
+    void (async () => {
+      // A host event (ADR 0011) has no invitee email to wait for, so its write
+      // is due at once (the tool that made it waits for the video link). A
+      // date of a series is ordered with its series' jobs (ADR 0012).
+      const row = await this.db.get<{ event_type_id: string | null; recurring_event_id: string | null }>(
+        sql`SELECT event_type_id, recurring_event_id FROM booking WHERE uid = ${uid} LIMIT 1`,
+      );
+      const hostEvent = !!row && row.event_type_id == null;
+      await enqueueOutbox(this.db, {
+        kind: 'calendar',
+        action,
+        bookingUid: uid,
+        // A short head start for the invitee's email, which the same request
+        // queues right after and which marks this row (`providerInvites`). Well
+        // inside the grace a conferencing email waits for this write's link, so
+        // the link still comes first.
+        nextAttemptAt: hostEvent ? Date.now() : Date.now() + INVITEE_EMAIL_GRACE_MS,
+        ...(hostEvent && row.recurring_event_id ? { orderKey: `series:${row.recurring_event_id}` } : {}),
+        // A delete may wait for its cancellation email; the wait has its own budget.
+        ...(action === 'delete' ? { maxAttempts: DEFAULT_MAX_ATTEMPTS + INVITEE_EMAIL_MAX_LOOKS } : {}),
+      });
+    })().catch((err) => {
       this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
     });
   }
@@ -278,6 +378,21 @@ export class CalendarEffects {
     job?: CalendarJobRow,
   ): Promise<void> {
     if (!this.calendar.enabled) return;
+    // A repeating host event (ADR 0012): its jobs, and the per-date changes of its occurrences.
+    const seriesJob = readSeriesJob(payload);
+    if (seriesJob) {
+      await this.runSeriesJob(action, seriesJob);
+      this.forgetBusy(uid);
+      return;
+    }
+    if (action !== 'reinvite') {
+      const occurrence = await seriesOfBooking(this.db, uid);
+      if (occurrence) {
+        await this.runOccurrenceJob(action, uid, occurrence.series, occurrence.occurrence.occurrenceStartMs);
+        this.forgetBusy(uid);
+        return;
+      }
+    }
     // The invitee email queued for this very change, when there is one.
     const mark = readCalendarChangeMark(payload);
     const inviteeEmailId = mark?.inviteeEmailId;
@@ -571,6 +686,201 @@ export class CalendarEffects {
     // Only the calendar's rows: the CRM's reference points at a meeting that
     // is PATCHed to cancelled, not deleted, and is still needed to do that.
     await deleteBookingReferences(this.db, ctx.bookingId, 'calendar_event');
+  }
+
+  /**
+   * A series job (ADR 0012). The series is read fresh, so a job that waited
+   * writes what the series is now: a create after a cut writes the cut rule,
+   * and an update before the create has run finds nothing to update.
+   */
+  private async runSeriesJob(action: CalendarAction, job: SeriesJob): Promise<void> {
+    const series = await loadHostEventSeries(this.db, job.id);
+    if (!series || series.calendarState === 'not_connected') return;
+    if (action === 'series-create' || action === 'create') {
+      if (series.status === 'cancelled') return;
+      await this.writeSeries(series);
+      return;
+    }
+    if (!series.calendarEventId || !series.calendarDestination) return;
+    if (action === 'series-delete') {
+      await this.calendar.deleteEvent({
+        connectionRef: series.calendarDestination,
+        externalEventId: series.calendarEventId,
+        sendInvitations: true,
+      });
+      await markSeriesCalendarDeleted(this.db, series.id);
+      return;
+    }
+    if (series.calendarState === 'deleted') return;
+    if (action === 'occurrence-cancel') {
+      if (job.occurrenceStartMs === undefined) return;
+      this.requireRecurrence(series.calendarDestination);
+      await this.calendar.deleteEvent({
+        connectionRef: series.calendarDestination,
+        externalEventId: series.calendarEventId,
+        occurrenceStartUtc: new Date(job.occurrenceStartMs).toISOString(),
+        sendInvitations: true,
+      });
+      return;
+    }
+    if (action === 'series-update') {
+      this.requireRecurrence(series.calendarDestination);
+      const ctx = await this.seriesContext(series);
+      const first = firstOccurrence(series);
+      const updated = await this.calendar.updateEvent({
+        connectionRef: series.calendarDestination,
+        calendarId: series.calendarCalendarId ?? ctx.calendarId,
+        externalEventId: series.calendarEventId,
+        title: series.title,
+        ...(series.description !== null ? { description: series.description } : {}),
+        startUtc: new Date(first.startMs).toISOString(),
+        endUtc: new Date(first.endMs).toISOString(),
+        attendeeEmails: ctx.attendees,
+        organizerEmail: ctx.organizerEmail,
+        requestConferenceLink: wantsConferencingLink(series.locationKind, null) && !series.meetingUrl,
+        timeZone: series.anchor.timeZone,
+        sendInvitations: true,
+        recurrence: await this.recurrenceOf(series),
+      });
+      if (updated.meetingUrl) await setSeriesMeetingUrl(this.db, series.id, updated.meetingUrl);
+    }
+  }
+
+  /**
+   * A change made to ONE date of a series through the booking paths: a date
+   * cancelled or moved on its own (`cancel_booking` / `reschedule_booking`
+   * with scope `this`, the dashboard's cancel). Only that occurrence of the
+   * series' event changes, found by its original start.
+   */
+  private async runOccurrenceJob(action: CalendarAction, uid: string, series: HostEventSeries, occurrenceStartMs: number): Promise<void> {
+    if (action === 'create') {
+      await this.runSeriesJob('series-create', { id: series.id });
+      return;
+    }
+    if (series.calendarState !== 'queued' || !series.calendarEventId || !series.calendarDestination) return;
+    if (action === 'delete') {
+      await this.runSeriesJob('occurrence-cancel', { id: series.id, occurrenceStartMs });
+      return;
+    }
+    if (action === 'reschedule') {
+      const b = await this.db.get<{ status: string; start_ms: number | string; end_ms: number | string }>(
+        sql`SELECT status, start_ms, end_ms FROM booking WHERE uid = ${uid} LIMIT 1`,
+      );
+      if (b?.status !== 'accepted') throw new OutboxSkipError(`calendar move for ${uid} skipped: the date is ${b?.status ?? 'gone'}`);
+      this.requireRecurrence(series.calendarDestination);
+      const ctx = await this.seriesContext(series);
+      await this.calendar.updateEvent({
+        connectionRef: series.calendarDestination,
+        calendarId: series.calendarCalendarId ?? ctx.calendarId,
+        externalEventId: series.calendarEventId,
+        occurrenceStartUtc: new Date(occurrenceStartMs).toISOString(),
+        title: series.title,
+        startUtc: new Date(Number(b.start_ms)).toISOString(),
+        endUtc: new Date(Number(b.end_ms)).toISOString(),
+        attendeeEmails: ctx.attendees,
+        organizerEmail: ctx.organizerEmail,
+        timeZone: series.anchor.timeZone,
+        sendInvitations: true,
+      });
+    }
+  }
+
+  /** Write a series' one repeating event, once (claimed like a booking's destination, DH1). */
+  private async writeSeries(series: HostEventSeries): Promise<void> {
+    const destination =
+      series.calendarDestination ?? (await loadDestinationConnectionRefs(this.db, series.hostMemberId, null))[0] ?? null;
+    if (!destination) return;
+    this.requireRecurrence(destination);
+    const token = await claimSeriesCalendar(this.db, series.id);
+    if (!token) return; // already written, or being written by another attempt
+    const ctx = await this.seriesContext(series);
+    const first = firstOccurrence(series);
+    let created;
+    try {
+      created = await this.calendar.createEvent({
+        connectionRef: destination,
+        calendarId: ctx.calendarId,
+        title: series.title,
+        description: series.description,
+        startUtc: new Date(first.startMs).toISOString(),
+        endUtc: new Date(first.endMs).toISOString(),
+        attendeeEmails: ctx.attendees,
+        organizerEmail: ctx.organizerEmail,
+        requestConferenceLink: wantsConferencingLink(series.locationKind, null),
+        timeZone: series.anchor.timeZone,
+        // dCal emails nobody about a host event: the calendar invites the attendees, once for the series.
+        sendInvitations: true,
+        recurrence: await this.recurrenceOf(series),
+      });
+    } catch (err) {
+      await releaseSeriesCalendar(this.db, series.id, token);
+      throw err;
+    }
+    await fillSeriesCalendar(this.db, series.id, token, {
+      externalEventId: created.externalEventId,
+      externalCalendarId: created.externalCalendarId ?? ctx.calendarId ?? null,
+      meetingUrl: created.meetingUrl ?? null,
+      destination,
+    });
+  }
+
+  /**
+   * Never write a series as one lone event: a connection whose backend cannot
+   * hold a repeating event (an overlay older than ADR 0012) skips the job.
+   */
+  private requireRecurrence(connectionRef: string): void {
+    if (!calendarFeatures(this.calendar, connectionRef).recurrence) {
+      throw new OutboxSkipError('the connected calendar cannot hold a repeating event, so the series was not written to it');
+    }
+  }
+
+  /** Who is on a series' event (the host first) and where it is written. */
+  private async seriesContext(
+    series: HostEventSeries,
+  ): Promise<{ attendees: string[]; organizerEmail: string | null; calendarId: string | undefined }> {
+    const host = await this.db.get<{ email: string | null }>(
+      sql`SELECT email FROM member WHERE id = ${series.hostMemberId} LIMIT 1`,
+    );
+    const organizerEmail = host?.email ?? null;
+    const seen = new Set<string>();
+    const attendees = [organizerEmail, ...series.attendees]
+      .filter((e): e is string => !!e)
+      .filter((e) => {
+        const k = normalizeAttendeeEmail(e);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    // A host event names no calendar beneath the connection: the connection ref is the destination.
+    return { attendees, organizerEmail, calendarId: undefined };
+  }
+
+  /**
+   * The series' rule for the calendar, with the dates it must not have: those
+   * skipped because something else was there, and those cancelled one by one
+   * (and not moved), among the dates written so far.
+   */
+  private async recurrenceOf(series: HostEventSeries): Promise<EventRecurrence> {
+    const first = firstOccurrence(series);
+    const written = new Set(seriesDates(series, first.startMs, Math.max(series.materializedUntilMs, first.startMs + 1)).map((o) => o.startMs));
+    const rows = await loadSeriesOccurrences(this.db, series.id);
+    const live = new Set(rows.filter((r) => r.status === 'accepted' || r.status === 'pending').map((r) => r.occurrenceStartMs));
+    const excluded = new Set<number>(series.skipped.map((d) => d.startMs));
+    for (const r of rows) if (r.status === 'cancelled' && !live.has(r.occurrenceStartMs)) excluded.add(r.occurrenceStartMs);
+    return {
+      rrule: rruleFor(series.anchor, series.rule),
+      frequency: series.rule.frequency,
+      interval: series.rule.interval,
+      weekdays: series.rule.weekdays,
+      count: series.rule.count,
+      untilDate: series.rule.untilDate,
+      startDate: series.anchor.startDate,
+      timeZone: series.anchor.timeZone,
+      excludedStartsUtc: [...excluded]
+        .filter((ms) => written.has(ms))
+        .sort((a, b) => a - b)
+        .map((ms) => new Date(ms).toISOString()),
+    };
   }
 
   /**

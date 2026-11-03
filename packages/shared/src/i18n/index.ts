@@ -895,6 +895,24 @@ export interface BookingMessages {
       decline: string;
       cancel: string;
       cancelPrompt: string;
+      /**
+       * A date of a repeating event (ADR 0012): the list's pill, the detail
+       * page's rule line, and the three ways to cancel it. `{days}` is the
+       * weekdays in the reader's language, `{time}` HH:mm, `{n}` the interval.
+       */
+      repeats: string;
+      repeatsLabel: string;
+      repeatsWeekly: string;
+      repeatsEveryWeeks: string;
+      repeatsDaily: string;
+      repeatsEveryDays: string;
+      repeatsNoEnd: string;
+      repeatsUntil: string;
+      repeatsCount: string;
+      cancelWhich: string;
+      cancelThisDate: string;
+      cancelFollowing: string;
+      cancelWholeSeries: string;
       yes: string;
       no: string;
       confirmedToast: string;
@@ -2603,6 +2621,19 @@ export const en: BookingMessages = {
       decline: 'Decline',
       cancel: 'Cancel',
       cancelPrompt: 'Cancel?',
+      repeats: 'Repeats',
+      repeatsLabel: 'Repeats',
+      repeatsWeekly: 'Every {days} at {time}',
+      repeatsEveryWeeks: 'Every {n} weeks on {days} at {time}',
+      repeatsDaily: 'Every day at {time}',
+      repeatsEveryDays: 'Every {n} days at {time}',
+      repeatsNoEnd: 'no end date',
+      repeatsUntil: 'until {date}',
+      repeatsCount: '{count} times',
+      cancelWhich: 'Cancel which dates?',
+      cancelThisDate: 'Only this date',
+      cancelFollowing: 'This and later dates',
+      cancelWholeSeries: 'Every date not yet started',
       yes: 'Yes',
       no: 'No',
       confirmedToast: 'Booking confirmed.',
@@ -3062,8 +3093,9 @@ export const en: BookingMessages = {
         reschedule_booking: 'Move a booking to another time. The original is replaced and the invitee is told. Safe to retry.',
         confirm_booking: 'Accept a booking request and tell the invitee.',
         decline_booking: 'Turn down a booking request and tell the invitee.',
-        cancel_booking: 'Cancel a booking and tell the invitee.',
-        create_event: 'Put an event of your own on your calendar, with or without guests. Safe to retry.',
+        cancel_booking: 'Cancel a booking and tell the invitee. A repeating event can be cancelled by date or from a date on.',
+        create_event: 'Put an event of your own on your calendar, with or without guests, once or repeating. Safe to retry.',
+        check_attendee_availability: 'See when you and the people you name are free, from your calendar.',
       },
       scopeLabels: {
         'event-types:read': 'See event types',
@@ -3381,7 +3413,7 @@ export const en: BookingMessages = {
       count: '{n} tools',
       connectCta: 'Connect your agent',
       groups: {
-        availability: { title: 'Open times', body: 'Find free times on your event types and with a team, the same times your booking page offers.' },
+        availability: { title: 'Open times', body: 'Find free times on your event types and with a team, the same times your booking page offers, and see when other people are free.' },
         booking: { title: 'Booking', body: 'Book meetings on your event types, on public booking pages and with a team. The invitee gets the confirmation email.' },
         holds: { title: 'Holds', body: 'Keep a time for a few minutes while the person decides, so nobody else takes it.' },
         bookings: { title: 'Your bookings', body: 'Put events of your own on your calendar, see your meetings, read their details, move them to another time or cancel them.' },
@@ -3400,8 +3432,12 @@ export const en: BookingMessages = {
         reschedule_booking: { what: 'Move a meeting to another time. The invitee is told.', ask: 'Move my call with Sarah to Friday at 11:00' },
         cancel_booking: { what: 'Cancel a meeting and tell the invitee.', ask: 'Cancel my 4:00 call on Friday and tell them I am traveling' },
         create_event: {
-          what: 'Put an event of your own on your calendar: any title, time and length, alone or with up to 10 guests. Your calendar invites them.',
-          ask: 'Put a one-hour call called Planning with Sarah and Tom on my calendar tomorrow at 3 pm',
+          what: 'Put an event of your own on your calendar: any title, time and length, alone or with up to 10 guests, once or every week. Your calendar invites them and can add a video link.',
+          ask: 'Put a weekly call called Planning with Sarah and Tom on Wednesdays at 3 pm, with a video link',
+        },
+        check_attendee_availability: {
+          what: 'See when you and other people are free before you put a meeting on the calendar. Calendars you cannot see are named, never taken as free.',
+          ask: 'Are Sarah and Tom free on Wednesdays at 3 pm for the next five weeks?',
         },
         list_pending_bookings: { what: 'See the booking requests waiting for your answer.', ask: 'Which booking requests are waiting for me?' },
         confirm_booking: { what: 'Accept a booking request and tell the invitee.', ask: 'Accept the request for Thursday' },
@@ -4360,6 +4396,19 @@ export const es: BookingMessages = {
       decline: 'Rechazar',
       cancel: 'Cancelar',
       cancelPrompt: '¿Cancelar?',
+      repeats: 'Se repite',
+      repeatsLabel: 'Se repite',
+      repeatsWeekly: 'Cada {days} a las {time}',
+      repeatsEveryWeeks: 'Cada {n} semanas los {days} a las {time}',
+      repeatsDaily: 'Todos los días a las {time}',
+      repeatsEveryDays: 'Cada {n} días a las {time}',
+      repeatsNoEnd: 'sin fecha de fin',
+      repeatsUntil: 'hasta el {date}',
+      repeatsCount: '{count} veces',
+      cancelWhich: '¿Qué fechas cancelar?',
+      cancelThisDate: 'Solo esta fecha',
+      cancelFollowing: 'Esta y las siguientes',
+      cancelWholeSeries: 'Todas las que no han empezado',
       yes: 'Sí',
       no: 'No',
       confirmedToast: 'Reserva confirmada.',
@@ -4817,8 +4866,9 @@ export const es: BookingMessages = {
         reschedule_booking: 'Mueve una reserva a otro horario. La original se reemplaza y se avisa al invitado. Se puede reintentar sin riesgo.',
         confirm_booking: 'Acepta una solicitud de reserva y avisa al invitado.',
         decline_booking: 'Rechaza una solicitud de reserva y avisa al invitado.',
-        cancel_booking: 'Cancela una reserva y avisa al invitado.',
-        create_event: 'Pone un evento propio en tu calendario, con o sin invitados. Se puede reintentar sin riesgo.',
+        cancel_booking: 'Cancela una reserva y avisa al invitado. Un evento que se repite se cancela por fecha o desde una fecha.',
+        create_event: 'Pone un evento propio en tu calendario, con o sin invitados, una vez o que se repita. Se puede reintentar sin riesgo.',
+        check_attendee_availability: 'Mira cuándo están libres tú y las personas que nombres, desde tu calendario.',
       },
       scopeLabels: {
         'event-types:read': 'Ver tipos de evento',
@@ -5136,7 +5186,7 @@ export const es: BookingMessages = {
       count: '{n} herramientas',
       connectCta: 'Conecta tu agente',
       groups: {
-        availability: { title: 'Horarios libres', body: 'Busca horarios libres en tus tipos de evento y con un equipo, los mismos que ofrece tu página de reservas.' },
+        availability: { title: 'Horarios libres', body: 'Busca horarios libres en tus tipos de evento y con un equipo, los mismos que ofrece tu página de reservas, y mira cuándo están libres otras personas.' },
         booking: { title: 'Reservas nuevas', body: 'Agenda reuniones en tus tipos de evento, en páginas públicas de reserva y con un equipo. El invitado recibe el correo de confirmación.' },
         holds: { title: 'Horarios apartados', body: 'Aparta un horario unos minutos mientras la persona decide, para que nadie más lo tome.' },
         bookings: { title: 'Tus reservas', body: 'Pon eventos propios en tu calendario, mira tus reuniones, lee sus detalles, muévelas a otro horario o cancélalas.' },
@@ -5155,8 +5205,12 @@ export const es: BookingMessages = {
         reschedule_booking: { what: 'Mueve una reunión a otro horario. Se le avisa al invitado.', ask: 'Mueve mi llamada con Sarah al viernes a las 11:00' },
         cancel_booking: { what: 'Cancela una reunión y avísale al invitado.', ask: 'Cancela mi llamada del viernes a las 4:00 y dile que estoy de viaje' },
         create_event: {
-          what: 'Pon un evento propio en tu calendario: cualquier título, hora y duración, solo o con hasta 10 invitados. Tu calendario los invita.',
-          ask: 'Pon en mi calendario una llamada de una hora llamada Planeación con Sarah y Tom mañana a las 3 p. m.',
+          what: 'Pon un evento propio en tu calendario: cualquier título, hora y duración, solo o con hasta 10 invitados, una vez o cada semana. Tu calendario los invita y puede agregar un enlace de video.',
+          ask: 'Pon una llamada semanal llamada Planeación con Sarah y Tom los miércoles a las 3 p. m., con enlace de video',
+        },
+        check_attendee_availability: {
+          what: 'Mira cuándo están libres tú y otras personas antes de poner una reunión en el calendario. Los calendarios que no puedes ver se nombran, nunca se dan por libres.',
+          ask: '¿Sarah y Tom están libres los miércoles a las 3 p. m. las próximas cinco semanas?',
         },
         list_pending_bookings: { what: 'Mira las solicitudes de reserva que esperan tu respuesta.', ask: '¿Qué solicitudes de reserva me están esperando?' },
         confirm_booking: { what: 'Acepta una solicitud de reserva y avísale al invitado.', ask: 'Acepta la solicitud del jueves' },

@@ -489,12 +489,22 @@ export class HostController {
 
   @Post('host/bookings/:uid/cancel')
   @HttpCode(200)
-  async hostCancel(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { reason?: string }) {
+  async hostCancel(
+    @Req() req: ReqLike,
+    @Param('uid') uid: string,
+    @Body() body: { reason?: string; scope?: string },
+  ) {
     const p = await this.auth.resolveHost(req);
+    // A date of a repeating event can be cancelled with the dates after it, or
+    // the whole series not yet started (ADR 0012); anything else is one booking.
+    const scope = body?.scope === 'this_and_following' || body?.scope === 'series' ? body.scope : 'this';
+    if (body?.scope !== undefined && body.scope !== scope && body.scope !== 'this')
+      return unwrap({ error: 'INVALID', message: 'scope is this, this_and_following or series.', status: 400 });
+    const out = await this.admin.hostCancel(p, uid, body?.reason, scope);
+    if (!out.ok && 'reason' in out && out.reason === 'NOT_A_SERIES')
+      return unwrap({ error: 'INVALID', message: 'This booking is not a date of a repeating event.', status: 400 });
     return unwrap(
-      (await this.admin.hostCancel(p, uid, body?.reason)).ok
-        ? { uid, status: 'cancelled' }
-        : { error: 'NOT_FOUND', message: 'Booking not found.', status: 404 },
+      out.ok ? { uid, status: 'cancelled' } : { error: 'NOT_FOUND', message: 'Booking not found.', status: 404 },
     );
   }
 

@@ -22,7 +22,9 @@ const notFound = vi.fn(() => {
 vi.mock('next/navigation', () => ({ notFound: () => notFound() }));
 vi.mock('../booking-actions', () => ({
   PendingActions: ({ uid }: { uid: string }) => <div data-testid="pending-actions" data-uid={uid} />,
-  CancelAction: ({ uid }: { uid: string }) => <div data-testid="cancel-action" data-uid={uid} />,
+  CancelAction: ({ uid, repeating }: { uid: string; repeating?: boolean }) => (
+    <div data-testid="cancel-action" data-uid={uid} data-repeating={repeating ? 'yes' : 'no'} />
+  ),
 }));
 
 import { ApiError } from '@/lib/admin-api';
@@ -43,7 +45,14 @@ const GUEST: Guest = {
   ],
 };
 const booking = (
-  over: Partial<{ status: string; startUtc: string; utm: Record<string, string> | null; guest: Guest | null }> = {},
+  over: Partial<{
+    status: string;
+    startUtc: string;
+    utm: Record<string, string> | null;
+    guest: Guest | null;
+    title: string;
+    repeats: Record<string, unknown> | null;
+  }> = {},
 ) => ({
   uid: UID,
   status: 'pending',
@@ -227,5 +236,31 @@ describe('the booking page the request email opens', () => {
 
     await expect(render()).rejects.toMatchObject({ status: 503 });
     expect(notFound).not.toHaveBeenCalled();
+  });
+  it('a date of a repeating event says how it repeats and asks which dates to cancel', async () => {
+    admin.getBooking.mockResolvedValue(
+      booking({
+        status: 'accepted',
+        title: 'Weekly Dapta Phone',
+        repeats: {
+          seriesId: 's1',
+          frequency: 'weekly',
+          interval: 1,
+          weekdays: ['wednesday'],
+          count: null,
+          untilDate: null,
+          startTime: '15:30',
+          timeZone: 'America/Bogota',
+          status: 'active',
+        },
+      }),
+    );
+    const html = await render();
+    expect(html).toContain('Repeats: </span>Every Wednesday at 15:30, no end date (America/Bogota)');
+    expect(html).toContain('data-repeating="yes"');
+    admin.getBooking.mockResolvedValue(booking({ status: 'accepted' }));
+    const single = await render();
+    expect(single).toContain('data-repeating="no"');
+    expect(single).not.toContain('Repeats:');
   });
 });

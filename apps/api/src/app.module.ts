@@ -34,6 +34,7 @@ import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
 import { GrowthService } from './growth.service';
 import { OutboxWorker } from './outbox.worker';
+import { SeriesExtender } from './series-extender';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProviderAsync } from './calendar.provider';
 import { resolveEntitlementsProvider } from './entitlements.provider';
@@ -248,6 +249,8 @@ import { ExternalOAuthService } from './oauth/external.service';
     // Drains the durable outbox (calendar write-out + CRM write-out + webhook
     // delivery + booking emails) with retry+backoff — no silent loss on a provider outage (B1/B7/DM1).
     OutboxWorker,
+    // Writes the dates of repeating host events as their horizon moves (ADR 0012).
+    SeriesExtender,
   ],
 })
 export class AppModule {}

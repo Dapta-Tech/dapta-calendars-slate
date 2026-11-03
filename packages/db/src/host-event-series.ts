@@ -1213,3 +1213,45 @@ export async function markSeriesCalendarDeleted(db: Db, seriesId: string): Promi
 export function seriesDates(series: Pick<HostEventSeries, 'anchor' | 'rule'>, fromMs: number, toMs: number, max = 500): Occurrence[] {
   return seriesOccurrences(series.anchor, series.rule, { fromMs, toMs, max });
 }
+
+/** How a date of a series repeats, for the dashboard (its own words come from its catalog). */
+export interface SeriesRepeats {
+  seriesId: string;
+  frequency: 'daily' | 'weekly';
+  interval: number;
+  weekdays: RecurrenceWeekday[];
+  count: number | null;
+  untilDate: string | null;
+  startTime: string;
+  timeZone: string;
+  status: SeriesStatus;
+}
+
+/**
+ * Which of these bookings are dates of a series, with how it repeats, within
+ * the account. One read for a page of the dashboard's list.
+ */
+export async function loadSeriesRepeats(db: Db, accountId: string, uids: readonly string[]): Promise<Map<string, SeriesRepeats>> {
+  const out = new Map<string, SeriesRepeats>();
+  if (uids.length === 0) return out;
+  const list = uids.map((u) => sql`${u}`).reduce((acc, cur) => sql`${acc}, ${cur}`);
+  const rows = await db.all<SeriesRow & { booking_uid: string }>(
+    sql`SELECT s.*, b.uid AS booking_uid FROM booking b JOIN host_event_series s ON s.id = b.recurring_event_id
+        WHERE b.account_id = ${accountId} AND b.event_type_id IS NULL AND b.uid IN (${list})`,
+  );
+  for (const r of rows) {
+    const series = seriesFromRow(r);
+    out.set(r.booking_uid, {
+      seriesId: series.id,
+      frequency: series.rule.frequency,
+      interval: series.rule.interval,
+      weekdays: series.rule.weekdays,
+      count: series.rule.count,
+      untilDate: series.rule.untilDate,
+      startTime: series.anchor.startTime,
+      timeZone: series.anchor.timeZone,
+      status: series.status,
+    });
+  }
+  return out;
+}

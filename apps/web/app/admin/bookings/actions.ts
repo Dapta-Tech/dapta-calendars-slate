@@ -7,12 +7,12 @@ import { hostFetch } from '@/lib/auth-session';
 
 export type ActionResult = { ok: boolean; message?: string };
 
-async function post(uid: string, action: 'confirm' | 'decline' | 'cancel'): Promise<ActionResult> {
+async function post(uid: string, action: 'confirm' | 'decline' | 'cancel', body: Record<string, string> = {}): Promise<ActionResult> {
   try {
     const res = await hostFetch(`/v1/host/bookings/${encodeURIComponent(uid)}/${action}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       // Surface the failure instead of pretending it worked (was: no res.ok check).
@@ -36,6 +36,9 @@ export async function confirmBookingAction(uid: string): Promise<ActionResult> {
 export async function declineBookingAction(uid: string): Promise<ActionResult> {
   return post(uid, 'decline');
 }
-export async function cancelBookingAction(uid: string): Promise<ActionResult> {
-  return post(uid, 'cancel');
+/** The dates of a repeating event to cancel (ADR 0012): this one only (the default), it and the later ones, or every one not started. */
+export type CancelScope = 'this' | 'this_and_following' | 'series';
+
+export async function cancelBookingAction(uid: string, scope: CancelScope = 'this'): Promise<ActionResult> {
+  return post(uid, 'cancel', scope === 'this' ? {} : { scope });
 }

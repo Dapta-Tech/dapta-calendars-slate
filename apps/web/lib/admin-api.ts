@@ -478,6 +478,21 @@ export interface BookingItem {
    *  the one-booking read, and only for the booking's host and co-hosts: null
    *  for anyone else in the account and for a booking without an invitee. */
   guest?: BookingGuestDetails | null;
+  /** For a date of a repeating event (ADR 0012): how it repeats. Null for any
+   *  other booking; absent from an API older than repeating events. */
+  repeats?: BookingRepeats | null;
+}
+/** How a date of a repeating event repeats, for the list's pill and the booking's page. */
+export interface BookingRepeats {
+  seriesId: string;
+  frequency: 'daily' | 'weekly';
+  interval: number;
+  weekdays: string[];
+  count: number | null;
+  untilDate: string | null;
+  startTime: string;
+  timeZone: string;
+  status: string;
 }
 /** The host email's "Guest details" and "Their answers": visitor input, plain text. */
 export interface BookingGuestDetails {

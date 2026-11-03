@@ -1,4 +1,5 @@
-import type { BookingMessages, Locale } from '@slate/shared';
+import { t, type BookingMessages, type Locale } from '@slate/shared';
+import type { BookingRepeats } from '@/lib/admin-api';
 
 /**
  * What the bookings list and a booking's own page both say about a booking,
@@ -6,7 +7,7 @@ import type { BookingMessages, Locale } from '@slate/shared';
  * in (and so which action it offers), its status word and pill, and its start.
  */
 export type BookingsMessages = BookingMessages['admin']['bookings'];
-export type BookingRowData = { uid: string; status: string; title: string; startUtc: string };
+export type BookingRowData = { uid: string; status: string; title: string; startUtc: string; repeats?: BookingRepeats | null };
 
 /** The list's three parts. `pending` offers Confirm/Decline, `upcoming` Cancel. */
 export type BookingSection = 'pending' | 'upcoming' | 'past';
@@ -79,6 +80,42 @@ export function BookingStatusPill({ status, m }: { status: string; m: BookingsMe
       }`}
     >
       {statusLabel(status, m)}
+    </span>
+  );
+}
+
+/** A weekday's name in the reader's language ('wednesday' → "Wednesday" / "miércoles"). */
+function weekdayName(day: string, locale: Locale): string {
+  const order = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const i = order.indexOf(day);
+  if (i < 0) return day;
+  // 2024-01-01 was a Monday.
+  return new Intl.DateTimeFormat(dateLocale(locale), { weekday: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, 1 + i)));
+}
+
+/** "Every Wednesday at 15:30, no end date": how a date of a repeating event repeats, in the reader's language. */
+export function repeatsText(r: BookingRepeats, m: BookingsMessages, locale: Locale = 'en'): string {
+  const days = new Intl.ListFormat(dateLocale(locale), { style: 'long', type: 'conjunction' }).format(
+    r.weekdays.map((d) => weekdayName(d, locale)),
+  );
+  const every =
+    r.frequency === 'daily'
+      ? r.interval === 1
+        ? t(m.repeatsDaily, { time: r.startTime })
+        : t(m.repeatsEveryDays, { n: String(r.interval), time: r.startTime })
+      : r.interval === 1
+        ? t(m.repeatsWeekly, { days, time: r.startTime })
+        : t(m.repeatsEveryWeeks, { n: String(r.interval), days, time: r.startTime });
+  const end =
+    r.count !== null ? t(m.repeatsCount, { count: String(r.count) }) : r.untilDate ? t(m.repeatsUntil, { date: r.untilDate }) : m.repeatsNoEnd;
+  return `${every}, ${end} (${r.timeZone.replaceAll('_', ' ')})`;
+}
+
+/** The list's mark on a date of a repeating event: a soft tint like the status pill, never a button. */
+export function RepeatsPill({ repeats, m, locale = 'en' }: { repeats: BookingRepeats; m: BookingsMessages; locale?: Locale }) {
+  return (
+    <span className="rounded-sm bg-muted px-inline py-tight text-xs font-medium text-muted-foreground" title={repeatsText(repeats, m, locale)}>
+      {m.repeats}
     </span>
   );
 }

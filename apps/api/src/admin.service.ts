@@ -60,6 +60,8 @@ import {
   updateMemberSettings,
   updateSchedule,
   cancelBooking,
+  cancelHostEventSeries,
+  loadSeriesRepeats,
   getBrandingSwitch,
   setHideBranding,
   setVanitySlug,
@@ -271,8 +273,8 @@ export class AdminService {
   }
 
   // Host bookings (R29): the on-behalf path with the singular-attendee shape.
-  listBookings(p: HostPrincipal, q: { from?: string; to?: string; status?: string; limit?: number }) {
-    return listBookings(this.db, {
+  async listBookings(p: HostPrincipal, q: { from?: string; to?: string; status?: string; limit?: number }) {
+    const page = await listBookings(this.db, {
       accountId: p.accountId,
       memberId: p.memberId,
       from: q.from ? new Date(q.from).getTime() : undefined,
@@ -280,6 +282,9 @@ export class AdminService {
       status: q.status,
       limit: q.limit,
     });
+    // A date of a repeating event reads as one (ADR 0012); every other booking has `repeats: null`.
+    const repeats = await loadSeriesRepeats(this.db, p.accountId, page.items.map((b) => b.uid));
+    return { ...page, items: page.items.map((b) => ({ ...b, repeats: repeats.get(b.uid) ?? null })) };
   }
 
   /**
@@ -302,7 +307,8 @@ export class AdminService {
     // null when none. Read only for a booking the account owns.
     const utm = await getBookingUtm(this.db, booking.uid);
     const guest = (await this.hostsBooking(p, booking)) ? await this.guestDetails(p, booking.uid, locale) : null;
-    return { ...booking, utm, guest };
+    const repeats = (await loadSeriesRepeats(this.db, p.accountId, [booking.uid])).get(booking.uid) ?? null;
+    return { ...booking, utm, guest, repeats };
   }
 
   /** Whether the caller is the booking's host or one of its assigned co-hosts. */
@@ -405,7 +411,23 @@ export class AdminService {
     return outcome;
   }
 
-  async hostCancel(p: HostPrincipal, uid: string, reason?: string) {
+  async hostCancel(
+    p: HostPrincipal,
+    uid: string,
+    reason?: string,
+    /** For a date of a repeating host event (ADR 0012): that date only, it and the later ones, or every date not started. */
+    scope: 'this' | 'this_and_following' | 'series' = 'this',
+  ) {
+    if (scope !== 'this') {
+      // The same code as the MCP's cancel_booking with that scope: the series' dates
+      // are cancelled and its one calendar event cut or deleted (the calendar tells the attendees).
+      const series = await cancelHostEventSeries(this.db, { accountId: p.accountId, uid, scope, reason: reason ?? null });
+      if (!series.ok) return series;
+      if (series.calendar === 'delete') this.calendar.onSeriesDeleted(series.seriesId, uid);
+      else if (series.calendar === 'trim') this.calendar.onSeriesChanged(series.seriesId, uid);
+      for (const cancelled of series.cancelled) this.calendar.onBookingChanged(cancelled);
+      return { ok: true as const, alreadyApplied: series.alreadyApplied };
+    }
     const out = await cancelBooking(this.db, { uid, reason, byHost: true, accountId: p.accountId });
     // B2: the host-dashboard cancel bypassed BookingService and sent NOTHING.
     // Now it deletes the remote event, emails the attendee (+ host), and fires
