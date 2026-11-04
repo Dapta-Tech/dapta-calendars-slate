@@ -2687,7 +2687,7 @@ const checkAvailabilityInput = z.object({
         .int()
         .min(1)
         .max(26)
-        .describe(`How many dates to check, the first included (1 to 26), within ${180} days of the first.`),
+        .describe(`How many dates to check, the first included (1 to 26), within ${MAX_CHECK_SPAN_DAYS} days of the first.`),
     })
     .optional()
     .describe('With start: check the dates of a repeating rule, e.g. every Wednesday at that time for the next 5 weeks.'),
@@ -2721,7 +2721,7 @@ const checkAttendeeAvailability: ToolDef = {
   name: 'check_attendee_availability',
   title: 'Check when people are free',
   description:
-    'When the host and a list of people are free, read through the host\'s connected calendar (its free/busy for other people), before create_event. Two ways: check given times (start, and with repeat the dates of a rule, e.g. every Wednesday at 15:30 for the next 5 weeks: each date says who is busy), or find times (from and to, between day_start and day_end) when everyone it can see is free. A calendar the provider will not show (another organization, sharing off) is reported as unknown, not as free: people lists whose calendars could not be seen, so the person can be told. Shows only busy or free, never what is there. Read-only. Needs scope availability:read (an API key also bookings:write) and a key with no event-type limit; signed in it is the signed-in person\'s view, with an API key the workspace owner\'s.',
+    'When the host and a list of people are free, read through the host\'s connected calendar (its free/busy for other people), before create_event. Two ways: check given times (start, and with repeat the dates of a rule, e.g. every Wednesday at 15:30 for the next 5 weeks: each date says who is busy), or find times (from and to, between day_start and day_end) when nobody it can see is busy, those with every calendar seen (all_free) first; none while the host\'s own calendar cannot be read. A calendar the provider will not show (another organization, sharing off) is reported as unknown, not as free: people lists whose calendars could not be seen, so the person can be told. Shows only busy or free, never what is there. Read-only. Needs scope availability:read (an API key also bookings:write) and a key with no event-type limit; signed in it is the signed-in person\'s view, with an API key the workspace owner\'s.',
   scope: 'availability:read',
   write: false,
   // Like find_available_slots: it reads calendars and changes nothing, so not open world.
@@ -2742,7 +2742,7 @@ const checkAttendeeAvailability: ToolDef = {
         unknown: z.array(z.string()).describe('Whose calendar could not be seen (not free, not busy: unknown).'),
       }),
     ),
-    truncated: z.boolean().describe('Find times: more free times exist than were returned.'),
+    truncated: z.boolean().describe('Find times: more such times exist than were returned.'),
   }),
   async run(args: z.infer<typeof checkAvailabilityInput>, call, deps) {
     // An API key acts for the workspace owner's calendar connection, through
@@ -2906,7 +2906,15 @@ const checkAttendeeAvailability: ToolDef = {
       };
     });
     const max = args.max_results ?? 10;
-    const free = evaluated.filter((t) => t.busy.length === 0);
+    // Find: never a time while the host's own calendar is unknown (nothing says
+    // the host is free then), and never one somebody is busy. Times with every
+    // calendar seen (`all_free`) come first; a time where only someone outside
+    // the host's organization is unknown follows, naming them in `unknown`.
+    const free = hostUnknown
+      ? []
+      : evaluated
+          .filter((t) => t.busy.length === 0)
+          .sort((a, b) => Number(b.all_free) - Number(a.all_free) || a.start_utc.localeCompare(b.start_utc));
     const times = mode === 'check' ? evaluated : free.slice(0, max);
     const truncated = mode === 'find' && free.length > max;
     const peopleOut = [
@@ -2922,7 +2930,9 @@ const checkAttendeeAvailability: ToolDef = {
         ? `${evaluated.filter((t) => t.busy.length === 0).length} of ${evaluated.length} time(s) free for everyone whose calendar could be seen${
             evaluated.some((t) => t.busy.length) ? `; busy: ${evaluated.filter((t) => t.busy.length).map((t) => `${t.start} (${t.busy.join(', ')})`).join('; ')}` : ''
           }.`
-        : `${times.length}${truncated ? '+' : ''} free time(s) for everyone whose calendar could be seen.`;
+        : hostUnknown
+          ? `No times offered: the host's own calendar could not be read (${hostUnknown}).`
+          : `${times.length}${truncated ? '+' : ''} time(s) when nobody whose calendar could be seen is busy, those with every calendar seen first.`;
     return {
       data: { mode, time_zone: tz, people: peopleOut, times, truncated },
       summary: `${summary}${notSeen.length ? ` Not seen, so unknown (not free): ${notSeen.join(', ')}.` : ' Every calendar was seen.'}`,

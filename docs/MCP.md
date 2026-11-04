@@ -244,7 +244,9 @@ two ways:
   Wednesdays. Each time lists who is busy and whose calendar is unknown.
 - **Find times.** Give `from` and `to` (at most 14 days), `day_start` and
   `day_end` (default 08:00 to 18:00), and optionally `include_weekends`. It
-  returns the times when everyone it can see is free.
+  returns the times when nobody it can see is busy, those with every calendar
+  seen (`all_free`) first, and none while the host's own calendar cannot be
+  read.
 
 The host's own busy time is their dCal bookings, holds and calendar, read
 fresh. A calendar the provider will not show (another organization, sharing

@@ -337,6 +337,7 @@ describe('repeating events through create_event', () => {
     );
     expect(out.mode).toBe('find');
     // 08:00 to 18:00 in Bogota is 13:00 to 23:00 UTC; busy is busy until 22:00 UTC (17:00 there).
+    // ghost@ is never seen, so no time is all_free; they come in time order.
     expect(out.times.map((t) => t.start.slice(11, 16))).toEqual(['17:00', '17:30']);
     expect(out.times.every((t) => !t.all_free && t.unknown.includes('ghost@example.com'))).toBe(true);
     expect(out.people.find((p) => p.email === 'ghost@example.com')!.reason).toBe('not_found');
@@ -458,6 +459,11 @@ describe('repeating events through create_event', () => {
       );
       expect(out.people[0]).toMatchObject({ role: 'host', calendar: 'unknown', reason: 'no_calendar' });
       expect(out.times[0]).toMatchObject({ all_free: false, unknown: ['alex@example.com'] });
+      // Finding times offers none while the host's own calendar is unknown.
+      const find = structured<{ times: unknown[]; truncated: boolean }>(
+        await call('check_attendee_availability', { attendees: ['ana@example.com'], duration_minutes: 30, from: wednesday(8), to: wednesday(8), time_zone: BOGOTA }),
+      );
+      expect(find).toMatchObject({ times: [], truncated: false });
     } finally {
       await h.db.run(sql`UPDATE connected_calendar SET check_conflicts = 1 WHERE member_id = ${ownerId}`);
     }
