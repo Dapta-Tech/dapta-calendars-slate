@@ -10,7 +10,7 @@
  * 3.3.5), the reading calendar providers use, so dCal blocks the same
  * instant the calendar shows; a time that happens twice is its first reading.
  */
-import { tzOffsetMs, zonedWallClockToUtc } from './tz.util';
+import { civilDateString, tzOffsetMs, zonedWallClockToUtc } from './tz.util';
 
 export type RecurrenceFrequency = 'daily' | 'weekly';
 
@@ -90,9 +90,6 @@ function fromDayNumber(n: number): Civil {
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }
 
-function dateString(c: Civil): string {
-  return `${c.year}-${String(c.month).padStart(2, '0')}-${String(c.day).padStart(2, '0')}`;
-}
 
 /** 0 = Monday .. 6 = Sunday. */
 function isoWeekdayIndex(dayNum: number): number {
@@ -119,7 +116,7 @@ export function civilDayDiff(a: string, b: string): number {
 export function addCivilDays(date: string, days: number): string {
   const c = parseDate(date);
   if (!c) throw new RangeError(`not a date: ${date}`);
-  return dateString(fromDayNumber(dayNumber(c) + days));
+  return civilDateString(fromDayNumber(dayNumber(c) + days));
 }
 
 /** The weekdays moved by `days` (a series moved from Wednesday to Thursday moves every day it falls on). */
@@ -239,7 +236,7 @@ export function seriesOccurrences(
     const thisIndex = index++;
     if (startMs >= window.toMs) break;
     if (startMs < fromMs) continue;
-    out.push({ index: thisIndex, date: dateString(c), startMs, endMs: startMs + anchor.durationMinutes * 60_000 });
+    out.push({ index: thisIndex, date: civilDateString(c), startMs, endMs: startMs + anchor.durationMinutes * 60_000 });
     if (out.length >= max) break;
   }
   return out;

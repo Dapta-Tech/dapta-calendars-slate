@@ -3,7 +3,7 @@
 "@slate/calendar": minor
 "@slate/db": minor
 "@slate/config": minor
-"@slate/shared": minor
+"@slate/shared": major
 ---
 
 Repeating host events, a video link the calendar creates, and other people's
@@ -37,4 +37,5 @@ REST calendar backend can do beyond single events (`recurrence`,
 
 `@slate/shared`: the copy for `check_attendee_availability`, for repeating
 events on the Tools page and in the dashboard's bookings (the "Repeats" mark,
-the rule, and which dates to cancel), in English and Spanish.
+the rule, and which dates to cancel), in English and Spanish (required
+`BookingMessages` members, hence major).

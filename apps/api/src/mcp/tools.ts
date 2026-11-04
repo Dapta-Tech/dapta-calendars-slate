@@ -7,6 +7,7 @@ import {
   SERIES_MAX_COUNT,
   bookingConflicts,
   cancelHostEventSeries,
+  loadConflictConnectionRefs,
   canonicalPublicCode,
   createHostEventSeries,
   holdConflicts,
@@ -2658,6 +2659,9 @@ const createEvent: ToolDef = {
 // --- Attendee availability (ADR 0012) ------------------------------------------
 
 const MAX_FIND_RANGE_MS = 14 * 86_400_000;
+/** The furthest the dates of a check may run from the first: the busy read covers the whole span. */
+const MAX_CHECK_SPAN_DAYS = 180;
+const MAX_CHECK_SPAN_MS = MAX_CHECK_SPAN_DAYS * 86_400_000;
 const FIND_STEP_MS = 30 * 60_000;
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -2678,7 +2682,12 @@ const checkAvailabilityInput = z.object({
       frequency: z.enum(['daily', 'weekly']),
       interval: z.number().int().min(1).max(12).optional().describe('Every N days or weeks (default 1).'),
       weekdays: z.array(z.enum(RECURRENCE_WEEKDAYS)).min(1).max(7).optional().describe('Weekly: the days; defaults to the weekday of start.'),
-      count: z.number().int().min(1).max(26).describe('How many dates to check, the first included (1 to 26).'),
+      count: z
+        .number()
+        .int()
+        .min(1)
+        .max(26)
+        .describe(`How many dates to check, the first included (1 to 26), within ${180} days of the first.`),
     })
     .optional()
     .describe('With start: check the dates of a repeating rule, e.g. every Wednesday at that time for the next 5 weeks.'),
@@ -2729,7 +2738,7 @@ const checkAttendeeAvailability: ToolDef = {
         start_utc: z.string(),
         end_utc: z.string(),
         all_free: z.boolean().describe('True only when nobody is busy AND every calendar was seen.'),
-        busy: z.array(z.string()).describe('Who is busy then (emails; the host by their email).'),
+        busy: z.array(z.string()).describe('Who is busy then: emails, the host by theirs ("host" for a host with no email).'),
         unknown: z.array(z.string()).describe('Whose calendar could not be seen (not free, not busy: unknown).'),
       }),
     ),
@@ -2773,10 +2782,18 @@ const checkAttendeeAvailability: ToolDef = {
         );
         const problem = recurrenceProblem(anchor, rule);
         if (problem) throw new ToolFailure('INVALID_ARGUMENT', problem);
-        candidates = seriesOccurrences(anchor, rule, { toMs: start.getTime() + 400 * 86_400_000, max: args.repeat.count }).map((o) => ({
+        // Exactly the dates asked for: the count bounds the walk, not a fixed window.
+        candidates = seriesOccurrences(anchor, rule, { toMs: Number.MAX_SAFE_INTEGER, max: args.repeat.count }).map((o) => ({
           startMs: o.startMs,
           endMs: o.endMs,
         }));
+        const last = candidates[candidates.length - 1];
+        if (last && last.startMs - start.getTime() > MAX_CHECK_SPAN_MS)
+          throw new ToolFailure(
+            'INVALID_ARGUMENT',
+            `Those ${args.repeat.count} dates run past ${MAX_CHECK_SPAN_DAYS} days from the first.`,
+            'Check fewer dates, or a shorter interval.',
+          );
       } else candidates = [{ startMs: start.getTime(), endMs: start.getTime() + durMs }];
     } else {
       if (args.repeat) throw new ToolFailure('INVALID_ARGUMENT', 'repeat goes with start (checking given times).');
@@ -2817,12 +2834,16 @@ const checkAttendeeAvailability: ToolDef = {
       ...(await bookingConflicts(deps.db, host.id, fromMs, toMs, 5000)),
       ...(await holdConflicts(deps.db, host.id, fromMs, toMs, now, 5000)),
     ];
-    let hostUnknown: Unknown = null;
-    try {
-      for (const b of await loadExternalBusy(deps.db, deps.calendar.provider, host.id, fromMs, toMs, null))
-        hostBusy.push({ startMs: b.start.getTime(), endMs: b.end.getTime() });
-    } catch {
-      hostUnknown = 'unreadable';
+    // With no calendar read for conflicts, the host's own calendar is unknown, not free.
+    let hostUnknown: Unknown =
+      deps.calendar.provider.enabled && (await loadConflictConnectionRefs(deps.db, host.id, null)).length > 0 ? null : 'no_calendar';
+    if (!hostUnknown) {
+      try {
+        for (const b of await loadExternalBusy(deps.db, deps.calendar.provider, host.id, fromMs, toMs, null))
+          hostBusy.push({ startMs: b.start.getTime(), endMs: b.end.getTime() });
+      } catch {
+        hostUnknown = 'unreadable';
+      }
     }
 
     // The attendees, through the host's own connection. Unknown is never free.

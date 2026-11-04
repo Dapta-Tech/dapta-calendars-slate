@@ -427,4 +427,39 @@ describe('repeating events through create_event', () => {
     );
     expect(text).toMatch(/happens twice/);
   });
+  it('checks exactly the dates asked for, within 180 days, and a host with no calendar is unknown, not free', async () => {
+    const far = errorText(
+      await call('check_attendee_availability', {
+        attendees: ['ana@example.com'],
+        start: bogota(wednesday(7), '09:00'),
+        duration_minutes: 30,
+        repeat: { frequency: 'weekly', interval: 12, count: 26 },
+        time_zone: BOGOTA,
+      }),
+    );
+    expect(far).toMatch(/INVALID_ARGUMENT/);
+    expect(far).toMatch(/180 days/);
+    const ok = structured<{ times: unknown[] }>(
+      await call('check_attendee_availability', {
+        attendees: ['ana@example.com'],
+        start: bogota(wednesday(7), '09:00'),
+        duration_minutes: 30,
+        repeat: { frequency: 'weekly', interval: 4, count: 6 },
+        time_zone: BOGOTA,
+      }),
+    );
+    expect(ok.times).toHaveLength(6);
+
+    // The host's calendar is not read for conflicts at all: unknown (no_calendar), never free.
+    await h.db.run(sql`UPDATE connected_calendar SET check_conflicts = 0 WHERE member_id = ${ownerId}`);
+    try {
+      const out = structured<{ people: { role: string; calendar: string; reason: string | null }[]; times: { all_free: boolean; unknown: string[] }[] }>(
+        await call('check_attendee_availability', { attendees: ['ana@example.com'], start: bogota(wednesday(8), '09:00'), duration_minutes: 30, time_zone: BOGOTA }),
+      );
+      expect(out.people[0]).toMatchObject({ role: 'host', calendar: 'unknown', reason: 'no_calendar' });
+      expect(out.times[0]).toMatchObject({ all_free: false, unknown: ['alex@example.com'] });
+    } finally {
+      await h.db.run(sql`UPDATE connected_calendar SET check_conflicts = 1 WHERE member_id = ${ownerId}`);
+    }
+  });
 });

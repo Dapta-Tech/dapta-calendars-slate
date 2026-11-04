@@ -415,7 +415,12 @@ export class CalendarEffects {
       this.forgetBusy(uid);
       return;
     }
-    if (action !== 'reinvite') {
+    // One read of the booking: whether it is a date of a series (only a host
+    // event can be) and, for a write or a move, whether it is still on.
+    const row = await this.db.get<{ status: string; event_type_id: string | null; recurring_event_id: string | null }>(
+      sql`SELECT status, event_type_id, recurring_event_id FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    if (action !== 'reinvite' && row && row.event_type_id == null && row.recurring_event_id) {
       const occurrence = await seriesOfBooking(this.db, uid);
       if (occurrence) {
         await this.runOccurrenceJob(action, uid, occurrence.series, occurrence.occurrence.occurrenceStartMs);
@@ -432,9 +437,6 @@ export class CalendarEffects {
       // or declined while this row waited (a retry can wait hours) must not
       // put an event back on the host's calendar: nothing would ever delete
       // it. Skipped, not retried; the delete queued behind it runs next.
-      const row = await this.db.get<{ status: string }>(
-        sql`SELECT status FROM booking WHERE uid = ${uid} LIMIT 1`,
-      );
       if (row && row.status !== 'accepted') {
         throw new OutboxSkipError(`calendar ${action} for ${uid} skipped: the booking is ${row.status}`);
       }
