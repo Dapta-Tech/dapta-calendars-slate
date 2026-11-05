@@ -13,7 +13,7 @@ import { WorkspaceSync } from '@/components/workspace-sync';
 import { chosenWorkspace } from '@/lib/workspace';
 import { currentReturnTo, getSession } from '@/lib/auth-session';
 import { withReturnTo } from '@/lib/return-to';
-import { currentAccountId, listWorkspaces, mayPickAccount } from '@/lib/iam';
+import { accountName, currentAccountId, listWorkspaces, mayPickAccount } from '@/lib/iam';
 import { docsNavHref } from '@/lib/docs-url';
 import { apiDocsNavHref } from '@/lib/admin-nav';
 import { resolveMcpConfig } from '@/lib/mcp-config';
@@ -95,6 +95,19 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // The staff picker marks the account the TOKEN names; while another
   // workspace is open that mark would point at the wrong row, so it marks none.
   const inHome = workspaces.length === 0 || workspaces.some((w) => w.current && w.home);
+  const pickedAccountId =
+    session?.provider === 'workos' && inHome ? currentAccountId(session.accessToken) : null;
+
+  // The picker's label names the current account from the rows it was handed,
+  // and those are only the first page — so the client an implementer just
+  // switched to (found by search, usually far down the list) would read as its
+  // raw account code. Look its name up in that case only: one extra upstream
+  // call, and only on an operator login.
+  const pickedAccountName =
+    canPick && session.provider === 'workos' && pickedAccountId &&
+    !accounts.items.some((a) => a.accountId === pickedAccountId)
+      ? await accountName(session.accessToken, pickedAccountId)
+      : null;
 
   // Product analytics, read at request time (never inlined at build): null
   // when the deployment configures none, and then nothing loads.
@@ -125,9 +138,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         user={{ displayName: me.displayName, email: me.email, handle: me.handle, accountCode: me.accountCode }}
         accounts={accounts.items}
         accountsHasMore={accounts.hasMore}
-        currentAccountId={
-          session?.provider === 'workos' && inHome ? currentAccountId(session.accessToken) : null
-        }
+        currentAccountId={pickedAccountId}
+        currentAccountName={pickedAccountName}
         workspaces={workspaces}
       >
         {children}
