@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { currentAccountId, listWorkspaces, mayPickAccount } from './iam';
+import { accountName, currentAccountId, listWorkspaces, mayPickAccount } from './iam';
 
 /** An unsigned token body — these readers never verify, by design. */
 function token(payload: Record<string, unknown>): string {
@@ -126,5 +126,38 @@ describe('currentAccountId — which account the session names', () => {
     expect(currentAccountId(token({ account_id: 'acct_1' }))).toBe('acct_1');
     expect(currentAccountId(token({}))).toBeNull();
     expect(currentAccountId('garbage')).toBeNull();
+  });
+});
+
+describe('accountName — the picker label for an account off the first page', () => {
+  it('searches upstream by the account id and names its own workspace', async () => {
+    const calls = stubIam({
+      data: [
+        { id: 'ws_child', account_id: 'acct_1', name: 'Acme — Sales' },
+        { id: 'acct_1', account_id: 'acct_1', name: 'Acme' },
+        { id: 'acct_9', account_id: 'acct_9', name: 'Unrelated match' },
+      ],
+    });
+
+    expect(await accountName('tok', 'acct_1')).toBe('Acme');
+    expect(calls[0]).toBe('https://iam.example/iam/workspace/search-light?page=1&limit=100&query=acct_1');
+  });
+
+  it('falls back to another named workspace of the same account', async () => {
+    stubIam({ data: [{ id: 'ws_child', account_id: 'acct_1', name: 'Acme — Sales' }] });
+    expect(await accountName('tok', 'acct_1')).toBe('Acme — Sales');
+  });
+
+  // A nameless row is labelled with its id by listWorkspaces — the very thing
+  // the picker must not show — so it is no answer at all.
+  it('answers null for a nameless match, no match, or a refusal', async () => {
+    stubIam({ data: [{ id: 'acct_1', account_id: 'acct_1' }] });
+    expect(await accountName('tok', 'acct_1')).toBeNull();
+
+    stubIam({ data: [{ id: 'acct_2', account_id: 'acct_2', name: 'Other' }] });
+    expect(await accountName('tok', 'acct_1')).toBeNull();
+
+    stubIam({ data: [] }, { ok: false });
+    expect(await accountName('tok', 'acct_1')).toBeNull();
   });
 });

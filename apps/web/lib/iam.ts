@@ -103,6 +103,26 @@ export async function listWorkspaces(
 }
 
 /**
+ * The name of one account, for the picker's label when that account is not on
+ * the first page it was handed (the usual case once the customer base is
+ * longer than a page, and always right after switching to a client found by
+ * search).
+ *
+ * Asks the same `search-light` with the account id as the query — upstream
+ * matches ids — and takes the row whose account is this one, preferring the
+ * account's own (parent) workspace, whose id IS the account id. A row with no
+ * name of its own does not count: `listWorkspaces` labels those with their id,
+ * which is exactly what this exists to avoid.
+ *
+ * `null` on any miss or failure; the caller then falls back as before.
+ */
+export async function accountName(accessToken: string, accountId: string): Promise<string | null> {
+  const { items } = await listWorkspaces(accessToken, { query: accountId, limit: 100 });
+  const named = items.filter((w) => w.accountId === accountId && w.name !== w.id);
+  return (named.find((w) => w.id === accountId) ?? named[0])?.name ?? null;
+}
+
+/**
  * The two claims this app reads off its own session token.
  *
  * Read without verifying the signature, and that is safe here because nothing

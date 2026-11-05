@@ -469,6 +469,7 @@ export function AdminShell({
   accounts = [],
   accountsHasMore = false,
   currentAccountId = null,
+  currentAccountName = null,
   workspaces = [],
   messages,
   initialCollapsed = false,
@@ -484,6 +485,8 @@ export function AdminShell({
   accounts?: AccountOption[];
   accountsHasMore?: boolean;
   currentAccountId?: string | null;
+  /** The current account's name when it is not on the picker's first page. */
+  currentAccountName?: string | null;
   /** The person's own workspaces; the switcher shows from two. */
   workspaces?: WorkspaceView[];
   /** Active-locale admin catalog (F8) — nav + common labels. */
@@ -587,6 +590,7 @@ export function AdminShell({
         accounts={accounts}
         hasMore={accountsHasMore}
         currentAccountId={currentAccountId}
+        currentAccountName={currentAccountName}
         fallbackLabel={user?.accountCode}
         collapsed={accountCollapsed}
         messages={c.accountSwitcher}
