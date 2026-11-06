@@ -152,8 +152,10 @@ set** boots on the zero-infra path.
 from that domain lands in a customer's account as `admin` instead of `member` —
 otherwise they see an empty account and cannot help — and gets an account picker
 in the admin sidebar so they can reach that customer without signing out. The
-identity service still decides every switch, so this only changes what is
-offered. Unset, nobody is special; set it only if your identity service cannot
+picker shows the organization name returned by the identity service, including
+when the current account is outside its first page of results. A missing name
+falls back to the account code or default picker label. The identity service still decides every
+switch, so this only changes what is offered. Unset, nobody is special; set it only if your identity service cannot
 mint a token for an address at that domain you do not control.
 
 ### Calendar (external free-busy + event write-out)
@@ -168,6 +170,7 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
 | `CALENDAR_BUSY_WINDOW_DAYS` | `14` | optional; longest span of one busy request, 1 to 90 days. Raise it above 14 ONLY when your calendar adapter reads busy times from a free/busy query. With an events listing, a long window comes back short on a full calendar and offers times that are taken | no |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
+| `CALENDAR_BACKEND_FEATURES` | — | optional; comma-separated features your generic REST backend implements: `recurrence` (repeating events, see "Repeating events and other people's busy times" below) and `attendee-free-busy`. Unset ⇒ neither: dCal refuses a repeating event instead of writing one lone event, and reports every attendee's calendar as unknown | no |
 | `CALENDAR_BUSY_CACHE_TTL_MS` | `30000` | optional; how long one busy read answers every visitor of the same calendar on the booking, team and manage pages (0 turns the cache off). Holds, bookings, reschedules and confirmations always read the calendar fresh (ADR 0009) | no |
 | `CALENDAR_BUSY_CACHE_MAX_STALE_MS` | `300000` | optional; when a fresh read fails or is slow, how old the last good read may be and still stand in. Older, the page says the calendar can't be read right now and offers nothing | no |
 | `CALENDAR_BUSY_CACHE_MAX_ENTRIES` | `1000` | optional; read windows held per API process, least recently used out first | no |
@@ -870,6 +873,44 @@ as text.
 - On `PATCH`, absent means leave the body as it is, a string replaces it, and an
   empty string clears it (the host removed the template that wrote it). A booking
   without a description template never sends one.
+
+#### Repeating events and other people's busy times
+
+Both are optional, and dCal uses them only when you say your backend has them in
+`CALENDAR_BACKEND_FEATURES` (see
+`docs/adr/0012-a-repeating-event-is-one-calendar-series-and-dated-bookings.md`).
+Without `recurrence`, a request for a repeating event is refused: a backend that
+ignored the rule would write one lone event, and the attendees would be invited
+to one date.
+
+With `recurrence`:
+
+- `POST /v1/events` may carry `recurrence`:
+  `{ rrule, frequency, interval, weekdays, count, untilDate, startDate, timeZone, excludedStartsUtc }`.
+  Create ONE repeating event, so the attendees get one invitation for the series.
+  `startUtc`/`endUtc` are its first occurrence. Every occurrence keeps that
+  occurrence's local time in `recurrence.timeZone`, so pass the zone to your
+  calendar, not only UTC instants. `rrule` is the same rule in RFC 5545 form
+  (`FREQ=WEEKLY;INTERVAL=1;WKST=MO;BYDAY=WE`, with `COUNT` or `UTC UNTIL`). Leave
+  out the occurrences whose original starts are in `excludedStartsUtc`.
+- `PATCH /v1/events/:id` with `occurrenceStartUtc` moves ONE occurrence, the one
+  that originally started at that instant, to `startUtc`/`endUtc`. With
+  `recurrence`, it replaces the series' rule (dCal sends an earlier `untilDate` to
+  end a series, and a new rule to move a series that has not started).
+- `DELETE /v1/connections/:ref/events/:id?occurrenceStartUtc=<ISO>` cancels ONE
+  occurrence. Without the parameter, delete the whole event, every occurrence.
+
+With `attendee-free-busy`:
+
+```
+POST /v1/free-busy/attendees { connectionRef, calendarId?, emails, fromUtc, toUtc }
+  → { calendars: [{ email, busy?: [{ startUtc, endUtc }], unknown?: 'not_shared' | 'not_found' | 'error' }] }
+```
+
+Answer one entry per email. A calendar your provider will not show to this
+connection is `unknown`, never an empty `busy` list: an empty list means free,
+and dCal would offer a time the person is busy. The window follows the same
+14-day split as `POST /v1/free-busy`.
 
 ### The ESM module contract (advanced)
 

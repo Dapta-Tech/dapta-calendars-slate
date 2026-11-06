@@ -54,10 +54,34 @@
  *   GET    /v1/connections/:ref                          → { ok, detail }
  *   POST   /v1/connect                                   → { connectUrl }
  *
+ * REPEATING EVENTS (ADR 0012), only once the deployment says the backend does
+ * them (CALENDAR_BACKEND_FEATURES=recurrence): a backend that ignored these
+ * fields would write one lone event where the host asked for a series.
+ *   - POST /v1/events with `recurrence` ({ rrule, frequency, interval,
+ *     weekdays, count, untilDate, startDate, timeZone, excludedStartsUtc })
+ *     creates ONE repeating event whose first occurrence is startUtc/endUtc.
+ *     Its occurrences keep the first one's local time in `recurrence.timeZone`;
+ *     the dates in `excludedStartsUtc` (original starts) are left out.
+ *   - PATCH /v1/events/:id with `occurrenceStartUtc` moves ONE occurrence (the
+ *     one that originally started then) to startUtc/endUtc; with `recurrence`
+ *     it replaces the series' rule (an earlier end, or a whole series moved),
+ *     startUtc/endUtc being its new first occurrence.
+ *   - DELETE ...?occurrenceStartUtc=<ISO> cancels ONE occurrence; without it
+ *     the whole event, every occurrence, is deleted.
+ *
+ * OTHER PEOPLE'S BUSY TIMES (CALENDAR_BACKEND_FEATURES=attendee-free-busy):
+ *   POST /v1/free-busy/attendees { connectionRef, calendarId?, emails, fromUtc, toUtc }
+ *     → { calendars: [{ email, busy?: [{startUtc,endUtc}], unknown?: 'not_shared'|'not_found'|'error' }] }
+ *   One entry per email asked. A calendar the provider will not show is
+ *   `unknown`, never an empty busy list: an empty list means free.
+ *
  * `connectionRef` is opaque: the contract only ever echoes it back.
  */
 import type {
+  AttendeeBusy,
+  AttendeeBusyInput,
   BusyInterval,
+  CalendarFeatures,
   CalendarSummary,
   ConnectionHealth,
   CreateEventInput,
@@ -78,6 +102,14 @@ function enc(ref: string): string {
   return encodeURIComponent(ref);
 }
 
+/** `?a=1&b=2` from the values given, or '' when there are none. */
+function query(params: Record<string, string | null>): string {
+  const parts = Object.entries(params)
+    .filter((e): e is [string, string] => e[1] !== null)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+  return parts.length ? `?${parts.join('&')}` : '';
+}
+
 /** A 200 whose body is not the contract's shape. Not retried: the same backend
  *  gives the same answer, and the read must fail closed now. */
 export class CalendarBodyError extends Error {
@@ -88,7 +120,66 @@ function asRecord(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
 }
 
+/** The features a deployment says its generic backend has (CALENDAR_BACKEND_FEATURES). */
+export function genericBackendFeatures(raw: string | undefined | null): Partial<CalendarFeatures> {
+  const said = new Set(
+    (raw ?? '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return { recurrence: said.has('recurrence'), attendeeFreeBusy: said.has('attendee-free-busy') };
+}
+
 export class GenericRestWire implements CalendarWire {
+  constructor(private readonly declared: Partial<CalendarFeatures> = {}) {}
+
+  features(): Partial<CalendarFeatures> {
+    return this.declared;
+  }
+
+  listAttendeeBusy(input: AttendeeBusyInput): WireRequest {
+    return {
+      method: 'POST',
+      path: '/v1/free-busy/attendees',
+      scope: 'tenant',
+      subject: input.connectionRef,
+      body: {
+        connectionRef: input.connectionRef,
+        ...(input.calendarId ? { calendarId: input.calendarId } : {}),
+        emails: input.emails,
+        fromUtc: input.fromUtc,
+        toUtc: input.toUtc,
+      },
+    };
+  }
+
+  /**
+   * Each email asked comes back, FAIL-CLOSED per person: an entry missing, or
+   * one whose busy list cannot be read, is unknown. A body that is not the
+   * contract's shape throws, and the caller reports everyone as unknown.
+   */
+  parseAttendeeBusy(raw: unknown, input: AttendeeBusyInput): AttendeeBusy[] {
+    const cals = asRecord(raw)['calendars'];
+    if (!Array.isArray(cals)) throw new CalendarBodyError('no calendars list');
+    const byEmail = new Map<string, Record<string, unknown>>();
+    for (const c of cals.map(asRecord)) {
+      if (typeof c['email'] === 'string') byEmail.set(c['email'].trim().toLowerCase(), c);
+    }
+    return input.emails.map((email): AttendeeBusy => {
+      const c = byEmail.get(email.trim().toLowerCase());
+      if (!c) return { email, busy: null, unknown: 'error' };
+      const unknown = c['unknown'];
+      if (unknown === 'not_shared' || unknown === 'not_found' || unknown === 'error') return { email, busy: null, unknown };
+      if (unknown != null || !Array.isArray(c['busy'])) return { email, busy: null, unknown: 'error' };
+      try {
+        return { email, busy: this.parseBusy({ busy: c['busy'] }) };
+      } catch {
+        return { email, busy: null, unknown: 'error' };
+      }
+    });
+  }
+
   listBusy(input: ListBusyInput): WireRequest {
     return {
       method: 'POST',
@@ -167,7 +258,10 @@ export class GenericRestWire implements CalendarWire {
       method: 'DELETE',
       path:
         `/v1/connections/${enc(input.connectionRef)}/events/${enc(input.externalEventId)}` +
-        (typeof input.sendInvitations === 'boolean' ? `?sendInvitations=${input.sendInvitations}` : ''),
+        query({
+          sendInvitations: typeof input.sendInvitations === 'boolean' ? String(input.sendInvitations) : null,
+          occurrenceStartUtc: input.occurrenceStartUtc ?? null,
+        }),
       scope: 'tenant',
       subject: input.connectionRef,
     };

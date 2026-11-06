@@ -21,7 +21,7 @@
  */
 import { DisabledCalendarProvider, type CalendarProvider } from '@slate/calendar';
 import type { ServerEnv } from '@slate/config/env';
-import { GenericRestWire, StaticTokenSource } from './calendar.backend.generic';
+import { GenericRestWire, StaticTokenSource, genericBackendFeatures } from './calendar.backend.generic';
 import {
   ExternalCalendarProvider,
   type CalendarTokenSource,
@@ -84,7 +84,7 @@ export function createCalendarProvider(env: ServerEnv): CalendarProvider {
         return new ExternalCalendarProvider({
           baseUrl: env.CALENDAR_API_BASE_URL,
           tokenSource: new StaticTokenSource(env.CALENDAR_API_TOKEN),
-          wire: new GenericRestWire(),
+          wire: new GenericRestWire(genericBackendFeatures(env.CALENDAR_BACKEND_FEATURES)),
           busyWindowMs: busyWindowMsFrom(env),
           timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
           busyRequestsPerSecond: env.CALENDAR_BUSY_REQUESTS_PER_SECOND,

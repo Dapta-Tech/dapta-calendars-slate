@@ -6,7 +6,7 @@ import { adminApi, ApiError, type BookingGuestDetails } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { FormHeader } from '@/components/ui/page-header';
 import { CancelAction, PendingActions } from '../booking-actions';
-import { BookingStatusPill, bookingSection, formatBookingStart, type BookingsMessages } from '../booking-parts';
+import { BookingStatusPill, bookingSection, formatBookingStart, repeatsText, type BookingsMessages } from '../booking-parts';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +51,7 @@ export default async function BookingPage({ params }: { params: Promise<{ uid: s
           section === 'pending' ? (
             <PendingActions uid={booking.uid} m={m} />
           ) : section === 'upcoming' ? (
-            <CancelAction uid={booking.uid} m={m} />
+            <CancelAction uid={booking.uid} m={m} repeating={!!booking.repeats} />
           ) : undefined
         }
       />
@@ -63,6 +63,13 @@ export default async function BookingPage({ params }: { params: Promise<{ uid: s
         <span className="font-medium">{formatBookingStart(booking.startUtc, tz, locale)}</span>
         <BookingStatusPill status={booking.status} m={m} />
       </section>
+      {/* A date of a repeating event: how the series repeats (ADR 0012). */}
+      {booking.repeats ? (
+        <p className="mt-field text-sm">
+          <span className="text-muted-foreground">{m.repeatsLabel}: </span>
+          {repeatsText(booking.repeats, m, locale)}
+        </p>
+      ) : null}
       {/* Which zone the short "MST"-style label above refers to (QA2 fix 8c). */}
       <p className="mt-field text-sm text-muted-foreground">{t(m.timesShownIn, { tz: tz.replaceAll('_', ' ') })}</p>
       <Guest guest={booking.guest} m={m} />

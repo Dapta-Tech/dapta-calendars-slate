@@ -99,6 +99,8 @@ describe('one booking for the dashboard page the request email opens', () => {
       utm: null,
       // No invitee row on this one either (booking-detail-guest.spec.ts reads one).
       guest: null,
+      // Not a date of a repeating event (mcp.recurring-events.spec.ts reads one).
+      repeats: null,
     });
   });
 

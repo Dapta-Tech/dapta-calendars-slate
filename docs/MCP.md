@@ -1,6 +1,6 @@
 # MCP endpoint
 
-Calendars serves a remote [Model Context Protocol](https://modelcontextprotocol.io)
+dCal serves a remote [Model Context Protocol](https://modelcontextprotocol.io)
 endpoint, so an agent can find a free slot, book, reschedule and cancel meetings
 without a custom integration.
 
@@ -31,6 +31,10 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 
 ## Tools
 
+The `develop` branch exposes 19 tools. Use `tools/list` on your deployed endpoint
+to see its actual catalog: a deployment stays on its released version until
+upgraded.
+
 | Tool | Needs | Kind | What it does |
 |---|---|---|---|
 | `find_available_slots` | public page link, or `availability:read` (by `event_type_id`) | read | Open times for one event, grouped by local date, each with its offset in the `time_zone` you ask for plus UTC. Range capped at 31 days. |
@@ -46,11 +50,12 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
 | `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
-| `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. |
+| `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. For a date of a repeating event, `scope` moves that date, it and the later ones, or every date not started. |
 | `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
 | `decline_booking` | `bookings:write` | **destructive**, emails the invitee | Declines a pending request and frees its time. Never touches an accepted booking. |
-| `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. |
-| `create_event` | `bookings:write`, a key with no event-type allowlist | write, writes to the host's calendar | Puts an event of the host's own on their calendar: any title, start and length, 0 to 10 attendees. See [Host events](#host-events). |
+| `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. For a date of a repeating event, `scope` cancels that date, it and the later ones, or every date not started ([Repeating events](#repeating-events)). |
+| `create_event` | `bookings:write`, a key with no event-type allowlist | write, writes to the host's calendar | Puts an event of the host's own on their calendar: any title, start and length, 0 to 10 attendees, once or repeating, with a video link the calendar creates. See [Host events](#host-events). |
+| `check_attendee_availability` | `availability:read`; an API key also needs `bookings:write` and no event-type allowlist | read | When the host and up to 20 people are free, through the host's connected calendar: given times (once, or the dates of a repeating rule), or free times found in a range. A calendar it cannot see is unknown, never free. See [Who is free](#who-is-free). |
 
 Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint`, an input schema, and an output schema with `structuredContent`
@@ -182,8 +187,132 @@ meeting link, `time_zone` and the usual `idempotency_key`.
   copy as busy at the old time; a move leaves the old time out of the busy
   check so the event does not block itself. The free/busy read cannot tell one
   event from another, so anything else inside the old time is left out too.
-- Not in this version: checking the attendees' own free time, all-day events,
-  and a location other than the video link.
+- **The video link.** `video_link: true` has the host's connected calendar
+  create the meeting with its own meeting service (ADR 0008: the repo names
+  none). A host event has no invitee email to wait for,
+  so its calendar write is due at once; the tool waits a few seconds for it and
+  returns the link in `event.meeting_url` with `video: "ready"`, or
+  `video: "pending"` when the calendar has not answered yet (`get_booking`
+  shows it then). A connection whose backend cannot create one answers
+  `VIDEO_UNSUPPORTED` and creates nothing.
+- Not in this version: all-day events, and a location other than the video link.
+
+### Repeating events
+
+`create_event` with `recurrence` makes a repeating event: `frequency` (`daily`,
+or `weekly` on `weekdays`), `interval` (every N days or weeks), and `count`
+(how many dates), `until` (the last date) or neither (no end date). For example
+`{ "frequency": "weekly" }` with a Wednesday 15:30 `start` is "every Wednesday at
+15:30". How it is stored and kept correct: [ADR 0012](adr/0012-a-repeating-event-is-one-calendar-series-and-dated-bookings.md).
+
+- **One series on the calendar.** The host's calendar gets one repeating event,
+  so the attendees get one invitation for the series, with one video link.
+- **Every date blocks the host.** Each date over the next 180 days is a dCal
+  booking (listed with a `series_id`; `get_booking` returns the `series`, its
+  rule in words and which date it is). Later dates are written as time passes,
+  by a job that runs every hour.
+- **Without a connected calendar.** A series with no attendees and no video
+  link can block time in dCal only if all its dates start within the materialized
+  horizon, 180 days after the later of now and the first start. An open-ended
+  or longer series needs a calendar: beyond the horizon, that calendar is what
+  protects its time.
+- **The wall clock.** Every date keeps the local time of `start` in `time_zone`
+  (or the host's zone) across DST changes, as the calendar shows it.
+- **Conflicts by date.** Every date is checked like a single event. Another dCal
+  booking on a date answers `SLOT_TAKEN`, naming the dates. Busy time on the
+  calendar or a hold answers `CONFLICT`, naming the dates and what is there.
+  `allow_conflicts` writes the series over busy time, and
+  `skip_conflicting_dates` leaves those dates out, on the calendar too
+  (`skipped_dates`).
+- **Changing it.** `cancel_booking` and `reschedule_booking` take `scope` for a
+  date of a series:
+  - `this` (the default) changes that date only.
+  - `this_and_following` changes it and every later date. A cancel ends the
+    series before it. A move continues from the new time as a new series, which
+    the attendees get as a new invitation.
+  - `series` changes every date that has not started.
+  A move keeps the spacing in local time: moved from Wednesday to Thursday, the
+  series falls on Thursdays. The dashboard's Cancel on a date of a series asks
+  the same three questions.
+- **A calendar that cannot hold a series.** A connection whose backend does not
+  declare repeating events (`CALENDAR_BACKEND_FEATURES`, see SELF-HOSTING.md)
+  answers `RECURRENCE_UNSUPPORTED` and writes nothing. dCal never writes a
+  series as one lone event.
+- Not in this version: monthly and yearly rules, and changing a series'
+  attendees, title or length after it is made.
+
+### Who is free
+
+`check_attendee_availability` says when the host and a list of people (1 to 20
+emails) are free, through the host's own connected calendar (the provider's
+free/busy for other people, through the port's `listAttendeeBusy`). It works in
+two ways:
+
+- **Check times.** Give `start` and `duration_minutes`, plus `repeat` for the
+  dates of a rule, e.g. `{ "frequency": "weekly", "count": 5 }` for the next five
+  Wednesdays. Each time lists who is busy and whose calendar is unknown.
+- **Find times.** Give `from` and `to` (at most 14 days), `day_start` and
+  `day_end` (default 08:00 to 18:00), and optionally `include_weekends`. It
+  returns the times when nobody it can see is busy, those with every calendar
+  seen (`all_free`) first, and none while the host's own calendar cannot be
+  read.
+
+The host's own busy time is their dCal bookings, holds and calendar, read
+fresh. A calendar the provider will not show (another organization, sharing
+off, no such address) is **unknown**, with the reason, and never counted as
+free: `people` names whose calendars could not be seen, so the agent can say
+so. The answer shows busy or free only, never what is on a calendar. Like
+`create_event`, it acts for the signed-in member or, with an API key, the
+workspace owner, and refuses a key held to some event types. An API key also
+needs `bookings:write`: it reads other people's busy times through the owner's
+calendar connection, so only a key already trusted to write to that calendar
+may.
+
+### Example: check a weekly call, then create it
+
+These are tool argument objects, passed as `arguments` in `tools/call`. Use a
+future start in the host's time zone and a new idempotency key for each action.
+If the connection reaches more than one workspace, include the `account_id`
+returned by `list_my_accounts` in both calls.
+
+First call `check_attendee_availability`:
+
+```json
+{
+  "attendees": ["sam@example.com"],
+  "start": "2027-01-06T15:30:00-05:00",
+  "duration_minutes": 30,
+  "time_zone": "America/Bogota",
+  "repeat": { "frequency": "weekly", "count": 5 }
+}
+```
+
+Check `people` and each time's `busy` and `unknown` lists. An unknown calendar
+is not confirmation that the person is free. After the person agrees, call
+`create_event` (this tool calls the rule `recurrence`, not `repeat`):
+
+```json
+{
+  "title": "Weekly planning",
+  "start": "2027-01-06T15:30:00-05:00",
+  "duration_minutes": 30,
+  "time_zone": "America/Bogota",
+  "attendees": ["sam@example.com"],
+  "video_link": true,
+  "recurrence": { "frequency": "weekly", "count": 5 },
+  "idempotency_key": "planning-001"
+}
+```
+
+The availability check reserves nothing. Creation checks the host again and
+can still refuse a conflict. Reuse that key only to retry this same creation.
+Read `event.meeting_url` when `video` is `ready`; when it is `pending`, read the
+returned `event.uid` with `get_booking` later.
+
+To cancel this date and the later ones, call `cancel_booking` with
+`booking_uid` set to the returned uid and `scope: "this_and_following"`. For a
+move, call `reschedule_booking` with `booking_uid` set to that uid, the new
+`start`, a new `idempotency_key`, and the desired scope.
 
 ### Requests that wait for the host
 

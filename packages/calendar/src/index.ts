@@ -21,6 +21,39 @@ export interface ListBusyInput {
   toUtc: string;
 }
 
+/** Days of the week a repeating event falls on, Monday first. */
+export type CalendarWeekday = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
+/**
+ * How a repeating event repeats (ADR 0012). The same rule twice: as fields, for
+ * a backend whose provider takes a pattern (frequency, interval, days, range),
+ * and as an RFC 5545 RRULE, for one that takes that. Every occurrence starts at
+ * the first one's LOCAL time in `timeZone` on its own date, so the provider must
+ * be given that zone with the event, never only UTC instants.
+ */
+export interface EventRecurrence {
+  /** RFC 5545 RRULE value without the `RRULE:` prefix, e.g. `FREQ=WEEKLY;INTERVAL=1;WKST=MO;BYDAY=WE`. */
+  rrule: string;
+  frequency: 'daily' | 'weekly';
+  /** Every `interval` days or weeks. */
+  interval: number;
+  /** Weekly: the days it falls on, Monday first. Daily: empty. */
+  weekdays: CalendarWeekday[];
+  /** Occurrences in all, the first one included; null for no count. */
+  count: number | null;
+  /** The last date it may fall on, YYYY-MM-DD in `timeZone`, inclusive; null for none. */
+  untilDate: string | null;
+  /** The first occurrence's date, YYYY-MM-DD in `timeZone`. */
+  startDate: string;
+  /** IANA zone the series' wall clock is kept in. */
+  timeZone: string;
+  /**
+   * Original starts (ISO-8601 UTC) of occurrences the series must NOT have:
+   * dates dCal skipped because something else was there. Empty for none.
+   */
+  excludedStartsUtc: string[];
+}
+
 export interface CreateEventInput {
   connectionRef: string;
   /** Optional provider-calendar target discovered beneath the connection. */
@@ -47,6 +80,12 @@ export interface CreateEventInput {
    * not invited twice. Absent: the backend's own default.
    */
   sendInvitations?: boolean;
+  /**
+   * Present: create ONE repeating event, not one per date. `startUtc`/`endUtc`
+   * are its first occurrence. Sent only to a connection whose `features` say
+   * `recurrence`: a backend that ignored it would write one lone event.
+   */
+  recurrence?: EventRecurrence | null;
 }
 
 export interface CreatedEvent {
@@ -65,6 +104,13 @@ export interface DeleteEventInput {
    * not invited twice. Absent: the backend's own default.
    */
   sendInvitations?: boolean;
+  /**
+   * Present: cancel ONE occurrence of the repeating event `externalEventId`,
+   * the one that ORIGINALLY started at this instant (ISO-8601 UTC), even if it
+   * was moved since. The rest of the series stays. Absent: delete the event,
+   * every occurrence of a series included.
+   */
+  occurrenceStartUtc?: string | null;
 }
 
 /**
@@ -104,6 +150,72 @@ export interface UpdateEventInput {
    * not invited twice. Absent: the backend's own default.
    */
   sendInvitations?: boolean;
+  /**
+   * Present: move ONE occurrence of the repeating event `externalEventId`, the
+   * one that ORIGINALLY started at this instant (ISO-8601 UTC), to
+   * `startUtc`/`endUtc`. The rest of the series stays where it is.
+   */
+  occurrenceStartUtc?: string | null;
+  /**
+   * Present: replace the series' rule. `startUtc`/`endUtc` are then its first
+   * occurrence. Used to end a series early (an `untilDate`) and to move a whole
+   * series that has not started. Never sent with `occurrenceStartUtc`.
+   */
+  recurrence?: EventRecurrence | null;
+}
+
+/**
+ * What a connection's backend can do beyond writing single events (ADR 0012).
+ * Asked per connection, because one deployment can reach calendar providers
+ * that differ. A backend that says nothing has the basics only.
+ */
+export interface CalendarFeatures {
+  /** One repeating event per series: `recurrence` on create and update, `occurrenceStartUtc` on update and delete. */
+  recurrence: boolean;
+  /** Other people's busy times through this connection (`listAttendeeBusy`). */
+  attendeeFreeBusy: boolean;
+  /** The calendar creates a video room when `requestConferenceLink` is true. */
+  conferencing: boolean;
+}
+
+/** What a backend has when it declares nothing: single events, and the room the contract has always asked for. */
+export const BASIC_CALENDAR_FEATURES: Readonly<CalendarFeatures> = Object.freeze({
+  recurrence: false,
+  attendeeFreeBusy: false,
+  conferencing: true,
+});
+
+/** A connection's features: none at all with no provider, the basics plus what the backend declares otherwise. */
+export function calendarFeatures(provider: CalendarProvider, connectionRef: string): CalendarFeatures {
+  if (!provider.enabled) return { recurrence: false, attendeeFreeBusy: false, conferencing: false };
+  return { ...BASIC_CALENDAR_FEATURES, ...(provider.features?.(connectionRef) ?? {}) };
+}
+
+/** Whose busy times to read through a host's connection, and when. */
+export interface AttendeeBusyInput {
+  connectionRef: string;
+  /** The provider calendar beneath the connection that asks (the host's). */
+  calendarId?: string;
+  /** The people, by email. */
+  emails: string[];
+  fromUtc: string;
+  toUtc: string;
+}
+
+/**
+ * Why a person's busy times are not known. `not_shared`: the provider will not
+ * show that calendar to this connection (another organization, sharing off).
+ * `not_found`: no calendar answers to that address. `error`: the provider
+ * answered with an error for that person.
+ */
+export type AttendeeBusyUnknown = 'not_shared' | 'not_found' | 'error';
+
+/** One person's busy times, or why they are not known. Unknown is never free. */
+export interface AttendeeBusy {
+  email: string;
+  /** Busy intervals, or null when not known. */
+  busy: BusyInterval[] | null;
+  unknown?: AttendeeBusyUnknown | null;
 }
 
 /** One calendar exposed by a connected account (for the post-connect pick). */
@@ -157,6 +269,19 @@ export interface CalendarProvider {
   listCalendars(connectionRef: string): Promise<CalendarSummary[]>;
   /** Probe a connection's live health (drives the per-row status + ping). */
   checkConnection(connectionRef: string): Promise<ConnectionHealth>;
+  /**
+   * Optional: what this connection's backend can do beyond the basics. Read
+   * through `calendarFeatures`, which fills in what is not said. Synchronous:
+   * a backend knows it from the connection, without a call.
+   */
+  features?(connectionRef: string): Partial<CalendarFeatures>;
+  /**
+   * Optional: other people's busy times, read through the host's connection
+   * (only when `features` says `attendeeFreeBusy`). Every email asked for comes
+   * back, with its busy times or why they are not known; a person the provider
+   * will not show is unknown, NEVER free.
+   */
+  listAttendeeBusy?(input: AttendeeBusyInput): Promise<AttendeeBusy[]>;
 }
 
 /**
@@ -207,10 +332,36 @@ export class InMemoryCalendarProvider implements CalendarProvider {
   readonly created: CreateEventInput[] = [];
   readonly updated: UpdateEventInput[] = [];
   readonly deleted: DeleteEventInput[] = [];
+  readonly attendeeReads: AttendeeBusyInput[] = [];
+  /** What `features` answers for every connection (the basics until a spec says otherwise). */
+  declaredFeatures: Partial<CalendarFeatures> = {};
+  /** True: a create that asks for a room gets one (`https://video.example/<event id>`). */
+  mintRooms = false;
+  private attendeeBusy = new Map<string, BusyInterval[] | AttendeeBusyUnknown>();
   private seq = 0;
 
   seedBusy(connectionRef: string, intervals: BusyInterval[]): void {
     this.busy.set(connectionRef, intervals);
+  }
+
+  /** One person's busy times as any connection reads them, or why they are not known. */
+  seedAttendeeBusy(email: string, busy: BusyInterval[] | AttendeeBusyUnknown): void {
+    this.attendeeBusy.set(email.trim().toLowerCase(), busy);
+  }
+
+  features(): Partial<CalendarFeatures> {
+    return this.declaredFeatures;
+  }
+
+  listAttendeeBusy(input: AttendeeBusyInput): Promise<AttendeeBusy[]> {
+    this.attendeeReads.push(input);
+    return Promise.resolve(
+      input.emails.map((email) => {
+        const seeded = this.attendeeBusy.get(email.trim().toLowerCase()) ?? [];
+        if (typeof seeded === 'string') return { email, busy: null, unknown: seeded };
+        return { email, busy: seeded.filter((b) => b.endUtc > input.fromUtc && b.startUtc < input.toUtc) };
+      }),
+    );
   }
 
   seedCalendars(connectionRef: string, calendars: CalendarSummary[]): void {
@@ -237,9 +388,10 @@ export class InMemoryCalendarProvider implements CalendarProvider {
   }
   createEvent(input: CreateEventInput): Promise<CreatedEvent> {
     this.created.push(input);
+    const externalEventId = `evt-${++this.seq}`;
     return Promise.resolve({
-      externalEventId: `evt-${++this.seq}`,
-      meetingUrl: null,
+      externalEventId,
+      meetingUrl: this.mintRooms && input.requestConferenceLink ? `https://video.example/${externalEventId}` : null,
     });
   }
   updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {

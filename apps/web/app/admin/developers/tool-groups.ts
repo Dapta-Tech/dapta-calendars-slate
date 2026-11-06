@@ -9,7 +9,7 @@
  * none invented, so a new tool fails the spec until it is placed here.
  */
 export const TOOL_GROUPS = {
-  availability: ['find_available_slots', 'find_team_slots'],
+  availability: ['find_available_slots', 'find_team_slots', 'check_attendee_availability'],
   booking: ['book_meeting', 'book_team_meeting', 'create_booking'],
   holds: ['hold_slot'],
   bookings: ['create_event', 'list_bookings', 'get_booking', 'reschedule_booking', 'cancel_booking'],

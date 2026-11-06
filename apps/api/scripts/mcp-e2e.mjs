@@ -105,7 +105,7 @@ try {
   await anon.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { 'user-agent': USER_AGENT } } }));
   const tools = (await anon.listTools()).tools.map((t) => t.name);
   say(`anonymous tools/list -> ${tools.length} tools: ${tools.join(', ')}`);
-  if (tools.length !== 18) fail('expected 18 tools');
+  if (tools.length !== 19) fail('expected 19 tools');
   const denied = await anon.callTool({ name: 'list_bookings', arguments: {} });
   if (!denied.isError || !denied.content[0].text.includes('AUTH_REQUIRED')) fail('anonymous list_bookings was not refused');
   say(`anonymous list_bookings -> ${denied.content[0].text.slice(0, 80)}...`);

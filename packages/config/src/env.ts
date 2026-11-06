@@ -282,6 +282,12 @@ export const serverEnvSchema = z.object({
   // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
   // generic wording, which is the correct default for a bare fork.
   CALENDAR_CONFERENCING_LABEL: z.string().max(60).optional(),
+  // What the generic REST calendar backend can do beyond single events (ADR
+  // 0012), comma-separated: `recurrence` (one repeating event per series, its
+  // dates changed one by one) and `attendee-free-busy` (other people's busy
+  // times). Unset: neither, and dCal refuses a repeating event rather than
+  // write a single one. A private overlay declares its own and ignores this.
+  CALENDAR_BACKEND_FEATURES: z.string().max(200).optional(),
 
   // CRM write-out (H1a / #63 / ADR 0001). `disabled` (default) runs with no CRM
   // at all: nothing is enqueued and nothing is called, so a bare fork behaves

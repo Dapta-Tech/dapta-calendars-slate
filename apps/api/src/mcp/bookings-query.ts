@@ -25,6 +25,8 @@ export interface BookingListRow {
   eventTypeTitle: string;
   /** A host event's own title (the host wrote it); null for a booking, whose title may name the invitee. */
   hostEventTitle: string | null;
+  /** The repeating event a host event is a date of (ADR 0012); null otherwise. */
+  seriesId: string | null;
   primaryEmail: string | null;
   attendeeCount: number;
   /** The booking this one replaced (a move made as cancel + new booking), or null. */
@@ -103,6 +105,7 @@ export async function queryBookings(
     event_type_id: string | null;
     event_title: string;
     host_event_title: string | null;
+    series_id: string | null;
     primary_email: string | null;
     attendee_count: number | string;
     rescheduled_from_uid: string | null;
@@ -114,6 +117,7 @@ export async function queryBookings(
     // own event has no event type at all and lists with its own title.
     sql`SELECT b.uid, b.status, b.start_ms, b.end_ms, b.event_type_id, COALESCE(et.title, '') AS event_title,
                CASE WHEN b.event_type_id IS NULL THEN b.title ELSE NULL END AS host_event_title,
+               CASE WHEN b.event_type_id IS NULL THEN b.recurring_event_id ELSE NULL END AS series_id,
                b.rescheduled_from_uid, b.rescheduled_to_uid,
                (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
                   ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS primary_email,
@@ -135,6 +139,7 @@ export async function queryBookings(
       eventTypeId: r.event_type_id ?? null,
       eventTypeTitle: r.event_title,
       hostEventTitle: r.host_event_title ?? null,
+      seriesId: r.series_id ?? null,
       primaryEmail: r.primary_email,
       attendeeCount: Number(r.attendee_count),
       rescheduledFromUid: r.rescheduled_from_uid ?? null,
