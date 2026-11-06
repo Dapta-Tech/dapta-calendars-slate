@@ -49,7 +49,7 @@ export function AdvancedSettings({
         onClick={() => onToggle(!open)}
         className="-mx-tight flex min-h-control items-start gap-inline rounded-md px-tight text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <span className="mt-[3px] text-muted-foreground">
+        <span className="mt-tight text-muted-foreground">
           <ChevronIcon direction={open ? 'up' : 'down'} />
         </span>
         <span className="flex min-w-0 flex-col">
