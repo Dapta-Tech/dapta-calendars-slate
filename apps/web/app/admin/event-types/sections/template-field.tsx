@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useRef,
   type ClipboardEvent,
+  type FocusEvent,
   type KeyboardEvent,
 } from 'react';
 import { cn } from '@/lib/cn';
@@ -145,7 +146,7 @@ export const TemplateField = forwardRef<
     id: string;
     value: string;
     onChange: (next: string) => void;
-    onBlur?: () => void;
+    onBlur?: (e: FocusEvent<HTMLDivElement>) => void;
     onFocus?: () => void;
     look: (token: string) => ChipLook;
     multiline?: boolean;
@@ -247,9 +248,9 @@ export const TemplateField = forwardRef<
       onFocus={onFocus}
       onKeyUp={remember}
       onMouseUp={remember}
-      onBlur={() => {
+      onBlur={(e) => {
         remember();
-        onBlur?.();
+        onBlur?.(e);
       }}
       className={cn(
         'w-full cursor-text whitespace-pre-wrap break-words rounded-md border border-input bg-background px-field py-inline text-sm leading-7 transition-colors hover:border-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',

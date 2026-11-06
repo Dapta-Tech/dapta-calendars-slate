@@ -461,6 +461,16 @@ describe('calendar event title and description', () => {
     expect(el.textContent).toContain(ct.seatedNote);
   });
 
+  it('lights the palette while a template field has focus, and not after', async () => {
+    const el = await mount(event());
+    const palette = el.querySelector<HTMLElement>('[data-testid="et-variable-palette"]')!;
+    expect(palette.className).not.toContain('palette-pulse');
+    await act(async () => field(el).focus());
+    expect(palette.className).toContain('palette-pulse');
+    await act(async () => field(el).blur());
+    expect(palette.className).not.toContain('palette-pulse');
+  });
+
   it('an unknown variable shows as a flagged chip and is refused beside the field, the way the API would', async () => {
     const el = await mount(event());
     await typeText(field(el), 'Call with {{nmae}}');

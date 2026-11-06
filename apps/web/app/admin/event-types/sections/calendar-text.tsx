@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useId, useRef, useState, type FocusEvent } from 'react';
 import {
   TEMPLATE_VARIABLE_GROUPS,
   formVariable,
@@ -48,6 +48,21 @@ function sampleValues(locale: 'en' | 'es', eventTitle: string, questions: readon
  * booking by the API; empty keeps the event's own title and no description.
  * Each field shows what it renders to with sample values.
  */
+/**
+ * Scroll so the focused field sits just under the editor's sticky header with
+ * the palette below it in view: the chips are what the host reaches for next.
+ * Only ever scrolls down to make room, and never past the field itself.
+ */
+function revealWithPalette(field: HTMLElement | null, palette: HTMLElement | null) {
+  if (!field || !palette) return;
+  const header = field.closest('form')?.firstElementChild?.getBoundingClientRect().bottom ?? 0;
+  const margin = 16;
+  const overflow = palette.getBoundingClientRect().bottom + margin - window.innerHeight;
+  const room = field.getBoundingClientRect().top - (header + margin);
+  const by = Math.min(overflow, room);
+  if (by > 0) window.scrollBy({ top: by, behavior: 'smooth' });
+}
+
 export function CalendarTextSection({
   title,
   description,
@@ -81,6 +96,20 @@ export function CalendarTextSection({
   const descriptionRef = useRef<TemplateFieldHandle>(null);
   // The palette follows the field last used: the title allows fewer variables.
   const [target, setTarget] = useState<TemplateContext>('title');
+  // A template field has focus: the palette is where its variables come from,
+  // so it lights up, and the page scrolls so it is in view under the field.
+  const [active, setActive] = useState(false);
+  const paletteRef = useRef<HTMLDivElement>(null);
+  const onFieldFocus = (context: TemplateContext, fieldId: string) => {
+    setTarget(context);
+    setActive(true);
+    revealWithPalette(document.getElementById(fieldId), paletteRef.current);
+  };
+  const onFieldBlur = (e: FocusEvent<HTMLDivElement>, blur: () => void) => {
+    // Clicking a chip moves focus into the palette for a moment: stay lit.
+    if (!paletteRef.current?.contains(e.relatedTarget as Node | null)) setActive(false);
+    blur();
+  };
   const ids = { titleLabel: useId(), descriptionLabel: useId(), palette: useId() };
 
   const look = (token: string): ChipLook => {
@@ -131,14 +160,14 @@ export function CalendarTextSection({
           ref={titleRef}
           value={title}
           onChange={onTitle}
-          onBlur={onTitleBlur}
+          onBlur={(e) => onFieldBlur(e, onTitleBlur)}
           look={look}
           maxLength={MAX_CALENDAR_TITLE_TEMPLATE}
           placeholder={m.titlePlaceholder}
           labelledBy={ids.titleLabel}
           describedBy={titleError ? titleErrorId : undefined}
           invalid={!!titleError}
-          onFocus={() => setTarget('title')}
+          onFocus={() => onFieldFocus('title', CALENDAR_TEXT_IDS.title)}
         />
         {titleError ? (
           <p id={titleErrorId} className="text-xs text-destructive">
@@ -162,14 +191,14 @@ export function CalendarTextSection({
           ref={descriptionRef}
           value={description}
           onChange={onDescription}
-          onBlur={onDescriptionBlur}
+          onBlur={(e) => onFieldBlur(e, onDescriptionBlur)}
           look={look}
           multiline
           maxLength={MAX_CALENDAR_DESCRIPTION_TEMPLATE}
           labelledBy={ids.descriptionLabel}
           describedBy={descriptionError ? descriptionErrorId : undefined}
           invalid={!!descriptionError}
-          onFocus={() => setTarget('description')}
+          onFocus={() => onFieldFocus('description', CALENDAR_TEXT_IDS.description)}
         />
         {descriptionError ? (
           <p id={descriptionErrorId} className="text-xs text-destructive">
@@ -186,8 +215,13 @@ export function CalendarTextSection({
 
       <div
         id={ids.palette}
+        ref={paletteRef}
         data-testid="et-variable-palette"
-        className="flex flex-col gap-inline rounded-md border border-dashed border-border bg-background/40 p-card"
+        data-active={active || undefined}
+        className={cn(
+          'flex flex-col gap-inline rounded-md border border-dashed border-border bg-background/40 p-card transition-colors',
+          active && 'palette-pulse',
+        )}
       >
         <p className="text-xs text-muted-foreground">{m.paletteHint}</p>
         {!seated ? (

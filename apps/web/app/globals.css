@@ -358,6 +358,29 @@ body {
   }
 }
 
+/* The event editor's variable palette while a template field is focused: a
+   dimmer green border that blinks softly, saying "drag from here". Steady
+   (no blink) with reduced motion. */
+.palette-pulse {
+  border-style: solid;
+  border-color: rgb(61 220 132 / 0.55);
+  animation: palette-pulse 1.6s ease-in-out infinite;
+}
+@keyframes palette-pulse {
+  0%,
+  100% {
+    border-color: rgb(61 220 132 / 0.55);
+  }
+  50% {
+    border-color: rgb(61 220 132 / 0.2);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .palette-pulse {
+    animation: none;
+  }
+}
+
 /* The "Recommended" pill on the connect page breathes the same green glow,
    with a slight swell. Still with reduced motion. */
 .pill-pulse {
