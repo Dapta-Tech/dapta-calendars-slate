@@ -59,7 +59,7 @@ export function ReminderEmailPreview({
       >
         <i aria-hidden className="pi pi-eye" style={{ fontSize: 14 }} />
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} title={m.emailTitle} labelId={labelId}>
+      <Modal open={open} onClose={() => setOpen(false)} title={m.emailTitle} labelId={labelId} size="lg">
         <div className="flex flex-col gap-field" data-testid="et-email-preview">
           <p className="text-xs text-muted-foreground">{m.emailNote}</p>
           {state.status === 'loading' ? <p className="text-sm text-muted-foreground">{m.emailLoading}</p> : null}
@@ -99,7 +99,7 @@ export function ReminderEmailPreview({
                     ...[...body.children].map((c) => c.getBoundingClientRect().bottom),
                     body.scrollHeight,
                   );
-                  frame.style.height = `${Math.min(Math.ceil(content) + 24, 720)}px`;
+                  frame.style.height = `${Math.min(Math.ceil(content) + 24, 760)}px`;
                 }}
                 className="h-[60vh] w-full rounded-md border border-border bg-white"
               />

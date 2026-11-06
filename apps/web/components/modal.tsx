@@ -33,12 +33,15 @@ export function Modal({
   title,
   labelId,
   children,
+  size = 'md',
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   labelId: string;
   children: ReactNode;
+  /** `md` (default) for forms and questions; `lg` for content shown at its own width (an email). */
+  size?: 'md' | 'lg';
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -100,7 +103,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelId}
-        className="relative max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-popover p-group shadow-lg"
+        className={`relative max-h-[90dvh] w-full ${size === 'lg' ? 'max-w-2xl' : 'max-w-md'} overflow-y-auto rounded-xl border border-border bg-popover p-group shadow-lg`}
       >
         <h2 id={labelId} className="mb-card text-lg font-semibold">
           {title}

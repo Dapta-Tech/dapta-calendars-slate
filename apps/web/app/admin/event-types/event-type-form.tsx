@@ -338,6 +338,18 @@ export function EventTypeForm({
     setPendingFocus(null);
   }, [pendingFocus]);
 
+  // The tabs differ in length, so the page's scrollbar would come and go as the
+  // host switches tabs and the centred editor would jump sideways. Reserve its
+  // space while the editor is open.
+  useEffect(() => {
+    const root = document.documentElement;
+    const before = root.style.scrollbarGutter;
+    root.style.scrollbarGutter = 'stable';
+    return () => {
+      root.style.scrollbarGutter = before;
+    };
+  }, []);
+
   // Unsaved changes: the back link asks first, and so does leaving the page.
   const [dirty, setDirty] = useState(false);
   const firstDraft = useRef(draft);
