@@ -4,6 +4,7 @@ import type { CrmPropertyCatalog } from '@slate/types';
 import { adminApi, ApiError, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventRowActions } from '../event-row-actions';
+import { signInMcpUrl } from '@/lib/mcp-config';
 import { EventTypeForm } from '../event-type-form';
 
 export const dynamic = 'force-dynamic';
@@ -70,6 +71,7 @@ export default async function EditEventType({
   return (
     <div className="mx-auto max-w-4xl px-gutter sm:px-gutter-wide pb-gutter-y">
       <EventTypeForm
+        mcpUrl={signInMcpUrl()}
         initial={et}
         schedules={schedules}
         messages={m}

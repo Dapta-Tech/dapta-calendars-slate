@@ -100,6 +100,7 @@ export function TrackingSection({
               <Field label={m[label]}>
                 {key === 'posthogHost' ? (
                   <select
+                    id={`et-tracking-${key}`}
                     ref={(el) => {
                       inputRefs.current[key] = el;
                     }}
@@ -115,6 +116,7 @@ export function TrackingSection({
                   </select>
                 ) : (
                   <input
+                    id={`et-tracking-${key}`}
                     ref={(el) => {
                       inputRefs.current[key] = el;
                     }}

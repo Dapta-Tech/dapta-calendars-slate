@@ -141,6 +141,7 @@ export function ReminderCard({
       </div>
 
       <input
+        id={`et-reminder-${row.id}-subject`}
         ref={subjectRef}
         value={row.subject ?? ''}
         onFocus={() => (lastFocused.current = 'subject')}
@@ -151,6 +152,7 @@ export function ReminderCard({
         className="w-full rounded-md border border-input bg-background px-inline py-tight text-sm"
       />
       <textarea
+        id={`et-reminder-${row.id}-body`}
         ref={bodyRef}
         value={row.body ?? ''}
         onFocus={() => (lastFocused.current = 'body')}

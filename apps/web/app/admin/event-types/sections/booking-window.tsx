@@ -35,6 +35,7 @@ export function BookingWindowField({
           {/* No `min`/`max`/`step`: this form has no `noValidate`, so the
               browser's own bubble would fire before the error below. */}
           <input
+            id="et-booking-window"
             ref={inputRef}
             type="number"
             inputMode="numeric"

@@ -3,6 +3,7 @@ import { getMessages } from '@slate/shared';
 import type { CrmPropertyCatalog } from '@slate/types';
 import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
+import { signInMcpUrl } from '@/lib/mcp-config';
 import { EventTypeForm } from '../event-type-form';
 
 export const dynamic = 'force-dynamic';
@@ -44,6 +45,7 @@ export default async function NewEventType({
   return (
     <div className="mx-auto max-w-4xl px-gutter sm:px-gutter-wide pb-gutter-y">
       <EventTypeForm
+        mcpUrl={signInMcpUrl()}
         schedules={schedules}
         messages={m}
         locationLabels={msgs.location}

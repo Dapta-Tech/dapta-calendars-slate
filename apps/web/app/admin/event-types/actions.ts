@@ -12,9 +12,17 @@ import type {
   OneOffLinkView,
   SuccessRedirectData,
 } from '@slate/types';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, ApiError } from '@/lib/admin-api';
 
-export type ActionResult = { ok: boolean; message?: string };
+export type ActionResult = {
+  ok: boolean;
+  message?: string;
+  /** The API's error code (`SLUG_TAKEN`, `INVALID_TEMPLATE`, …), so the editor
+   *  can point at the field the refusal is about. */
+  code?: string;
+  /** `INVALID_TEMPLATE` only: which reminder field each issue is in. */
+  issues?: Array<{ field: string; reminderId?: string; message?: string }>;
+};
 
 export interface EventTypePayload {
   id?: string;
@@ -73,6 +81,19 @@ export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionRe
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
+    if (e instanceof ApiError) {
+      const raw = e.details?.issues;
+      const issues = Array.isArray(raw)
+        ? raw
+            .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object')
+            .map((i) => ({
+              field: String(i.field ?? ''),
+              ...(typeof i.reminderId === 'string' ? { reminderId: i.reminderId } : {}),
+              ...(typeof i.message === 'string' ? { message: i.message } : {}),
+            }))
+        : undefined;
+      return { ok: false, message: e.message, ...(e.code ? { code: e.code } : {}), ...(issues ? { issues } : {}) };
+    }
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }

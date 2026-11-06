@@ -507,6 +507,69 @@ export interface BookingMessages {
       integrations: string;
     };
     eventTypes: {
+      /** The tabbed editor's own copy (tabs, required marks, errors, advanced, agents). */
+      editor: {
+        tabsLabel: string;
+        tabs: { general: string; reminders: string; crm: string; agents: string };
+        /** Accessible badge on a tab: `{count}` fields in it need attention. */
+        tabErrorsOne: string;
+        tabErrorsMany: string;
+        /** The slug field, named for what it is to a host. */
+        slugLabel: string;
+        requiredLegend: string;
+        /** Appended to a required field's accessible name. */
+        required: string;
+        sections: {
+          basics: string;
+          availability: string;
+          hosts: string;
+          bookingForm: string;
+          afterBooking: string;
+          visibility: string;
+        };
+        duration: { label: string; custom: string; customLabel: string; minutes: string };
+        advanced: {
+          title: string;
+          hint: string;
+          /** Collapsed summary when every advanced value is its default. */
+          allDefault: string;
+          bufferBefore: string;
+          bufferAfter: string;
+          seats: string;
+          window: string;
+          interval: string;
+        };
+        errors: {
+          summaryOne: string;
+          summaryMany: string;
+          titleRequired: string;
+          slugRequired: string;
+          durationInvalid: string;
+          locationDetailRequired: string;
+          minNoticeInvalid: string;
+          bufferInvalid: string;
+          seatsInvalid: string;
+          intervalInvalid: string;
+          trackingInvalid: string;
+          slugTaken: string;
+          templateInvalid: string;
+        };
+        unsaved: { title: string; body: string; confirm: string; cancel: string };
+        agents: {
+          title: string;
+          intro: string;
+          eventIdLabel: string;
+          eventIdPending: string;
+          promptLabel: string;
+          /** `{title}` is the event's title. */
+          prompt: string;
+          mcpLabel: string;
+          mcpUnavailable: string;
+          connectLink: string;
+          copy: string;
+          copied: string;
+        };
+      };
       title: string;
       newEventType: string;
       emptyList: string;
@@ -2288,6 +2351,69 @@ export const en: BookingMessages = {
       integrations: 'Integrations',
     },
     eventTypes: {
+      editor: {
+        tabsLabel: 'Event settings',
+        tabs: { general: 'General', reminders: 'Reminders', crm: 'CRM Connection', agents: 'AI Agents' },
+        tabErrorsOne: '1 field needs attention',
+        tabErrorsMany: '{count} fields need attention',
+        slugLabel: 'Event link',
+        requiredLegend: 'Fields marked * are required.',
+        required: 'required',
+        sections: {
+          basics: 'Basics',
+          availability: 'Availability',
+          hosts: 'Hosts and calendars',
+          bookingForm: 'Booking form',
+          afterBooking: 'After booking',
+          visibility: 'Visibility and sharing',
+        },
+        duration: { label: 'Duration', custom: 'Custom', customLabel: 'Custom duration (minutes)', minutes: 'min' },
+        advanced: {
+          title: 'Advanced settings',
+          hint: 'Buffers, group seats, how far ahead people can book, and how often times start.',
+          allDefault: 'Default settings',
+          bufferBefore: '{n} min before',
+          bufferAfter: '{n} min after',
+          seats: '{n} seats per time',
+          window: 'up to {n} days ahead',
+          interval: 'starts every {n} min',
+        },
+        errors: {
+          summaryOne: 'Fix 1 field before saving',
+          summaryMany: 'Fix {count} fields before saving',
+          titleRequired: 'Add a title.',
+          slugRequired: 'Add an event link.',
+          durationInvalid: 'Use a whole number of minutes from 1 to 1440.',
+          locationDetailRequired: 'Add the details for this location, or choose another one.',
+          minNoticeInvalid: 'Use 0 or more minutes.',
+          bufferInvalid: 'Use 0 or more minutes.',
+          seatsInvalid: 'Use a whole number of 1 or more, or leave it empty.',
+          intervalInvalid: 'Use a whole number of minutes of 1 or more.',
+          trackingInvalid: 'This ID is not valid.',
+          slugTaken: 'Another event already uses this link. Choose a different one.',
+          templateInvalid: 'This reminder uses a variable that does not exist.',
+        },
+        unsaved: {
+          title: 'Discard your changes?',
+          body: 'You have changes that are not saved. If you leave now, they are lost.',
+          confirm: 'Discard changes',
+          cancel: 'Keep editing',
+        },
+        agents: {
+          title: 'How AI agents book this event',
+          intro:
+            'Agents connected to your account (Claude, ChatGPT and others) can find times and book this event for you. They use the event ID below, or its booking page.',
+          eventIdLabel: 'Event ID',
+          eventIdPending: 'The event ID appears here after you create the event.',
+          promptLabel: 'Try asking your agent',
+          prompt: 'Find a time next week for “{title}” with me and book it.',
+          mcpLabel: 'MCP server address',
+          mcpUnavailable: 'Connecting an agent is not set up on this installation.',
+          connectLink: 'Connect an agent',
+          copy: 'Copy',
+          copied: 'Copied',
+        },
+      },
       title: 'Events',
       newEventType: 'New event',
       emptyList: 'No events yet — create one below.',
@@ -4036,6 +4162,69 @@ export const es: BookingMessages = {
       integrations: 'Integraciones',
     },
     eventTypes: {
+      editor: {
+        tabsLabel: 'Ajustes del evento',
+        tabs: { general: 'General', reminders: 'Recordatorios', crm: 'Conexión con el CRM', agents: 'Agentes de IA' },
+        tabErrorsOne: '1 campo necesita atención',
+        tabErrorsMany: '{count} campos necesitan atención',
+        slugLabel: 'Enlace del evento',
+        requiredLegend: 'Los campos marcados con * son obligatorios.',
+        required: 'obligatorio',
+        sections: {
+          basics: 'Lo básico',
+          availability: 'Disponibilidad',
+          hosts: 'Anfitriones y calendarios',
+          bookingForm: 'Formulario de reserva',
+          afterBooking: 'Después de reservar',
+          visibility: 'Visibilidad y enlaces',
+        },
+        duration: { label: 'Duración', custom: 'Otra', customLabel: 'Otra duración (minutos)', minutes: 'min' },
+        advanced: {
+          title: 'Ajustes avanzados',
+          hint: 'Márgenes, cupos por grupo, con cuánta anticipación se puede reservar y cada cuánto empiezan los horarios.',
+          allDefault: 'Ajustes predeterminados',
+          bufferBefore: '{n} min antes',
+          bufferAfter: '{n} min después',
+          seats: '{n} cupos por horario',
+          window: 'hasta {n} días antes',
+          interval: 'empieza cada {n} min',
+        },
+        errors: {
+          summaryOne: 'Corrige 1 campo antes de guardar',
+          summaryMany: 'Corrige {count} campos antes de guardar',
+          titleRequired: 'Agrega un título.',
+          slugRequired: 'Agrega un enlace para el evento.',
+          durationInvalid: 'Usa un número entero de minutos, de 1 a 1440.',
+          locationDetailRequired: 'Agrega los datos de este lugar o elige otro.',
+          minNoticeInvalid: 'Usa 0 minutos o más.',
+          bufferInvalid: 'Usa 0 minutos o más.',
+          seatsInvalid: 'Usa un número entero de 1 o más, o déjalo vacío.',
+          intervalInvalid: 'Usa un número entero de minutos, de 1 o más.',
+          trackingInvalid: 'Este ID no es válido.',
+          slugTaken: 'Otro evento ya usa este enlace. Elige uno diferente.',
+          templateInvalid: 'Este recordatorio usa una variable que no existe.',
+        },
+        unsaved: {
+          title: '¿Descartar tus cambios?',
+          body: 'Tienes cambios sin guardar. Si sales ahora, se pierden.',
+          confirm: 'Descartar cambios',
+          cancel: 'Seguir editando',
+        },
+        agents: {
+          title: 'Cómo reservan este evento los agentes de IA',
+          intro:
+            'Los agentes conectados a tu cuenta (Claude, ChatGPT y otros) pueden buscar horarios y reservar este evento por ti. Usan el ID del evento que ves abajo, o su página de reservas.',
+          eventIdLabel: 'ID del evento',
+          eventIdPending: 'El ID del evento aparece aquí cuando crees el evento.',
+          promptLabel: 'Prueba a pedirle a tu agente',
+          prompt: 'Busca un horario la próxima semana para «{title}» conmigo y resérvalo.',
+          mcpLabel: 'Dirección del servidor MCP',
+          mcpUnavailable: 'Conectar un agente no está configurado en esta instalación.',
+          connectLink: 'Conectar un agente',
+          copy: 'Copiar',
+          copied: 'Copiado',
+        },
+      },
       title: 'Eventos',
       newEventType: 'Nuevo evento',
       emptyList: 'Aún no hay eventos — crea uno abajo.',

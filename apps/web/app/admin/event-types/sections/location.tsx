@@ -6,7 +6,7 @@ import { LOCATION_KINDS, type LocationKind } from '@slate/types';
 import { type Connection } from '@/lib/admin-api';
 import { joinHostNames } from '../team-hosts';
 import { buttonVariants } from '@/components/ui/button';
-import { EventTypeMessages, Field, SchedulingMethod, TeamMemberOption, inputCls } from './shared';
+import { EventTypeMessages, Field, SchedulingMethod, TeamMemberOption, errorAria, inputCls } from './shared';
 
 /**
  * WHERE the meeting happens: a location KIND plus, for the kinds that need one,
@@ -30,6 +30,8 @@ export function LocationField({
   m,
   locationLabels,
   locale,
+  detailError,
+  onDetailBlur,
 }: {
   kind: LocationKind | '';
   detail: string;
@@ -46,6 +48,9 @@ export function LocationField({
   locationLabels: BookingMessages['location'];
   /** Sorts and joins host names; the same on the server and in the browser. */
   locale: 'en' | 'es';
+  /** The detail's error, once it is shown (blur or a save attempt). */
+  detailError?: string | null;
+  onDetailBlur?: () => void;
 }) {
   // ADR 0008: the repo names no conferencing platform, the RUNNING product does.
   // The port reports it and it rides here on the connections response the editor
@@ -138,12 +143,23 @@ export function LocationField({
       </Field>
 
       {kind && kind !== 'conferencing' ? (
-        <Field label={detailLabel[kind] ?? m.fLocation}>
+        // Every kind but conferencing needs its detail: an in-person meeting
+        // with no address tells the invitee nothing.
+        <Field
+          label={detailLabel[kind] ?? m.fLocation}
+          required
+          requiredLabel={m.editor.required}
+          error={detailError}
+          errorId="et-location-detail-error"
+        >
           <input
+            id="et-location-detail"
             value={detail}
             onChange={(e) => onDetail(e.target.value)}
+            onBlur={onDetailBlur}
             placeholder={m.locationPlaceholder}
             className={inputCls}
+            {...errorAria(detailError, 'et-location-detail-error')}
           />
         </Field>
       ) : null}

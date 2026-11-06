@@ -66,13 +66,56 @@ export function HostCell({ label, children }: { label: string; children: React.R
   );
 }
 
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * A labelled control. `required` adds the `*` mark (hidden from assistive
+ * technology, which hears `requiredLabel` instead); `error` renders under the
+ * control with `errorId`, which the control should name in `aria-describedby`
+ * (see `errorAria`).
+ */
+export function Field({
+  label,
+  children,
+  required,
+  requiredLabel,
+  error,
+  errorId,
+}: {
+  label: string;
+  children: React.ReactNode;
+  required?: boolean;
+  requiredLabel?: string;
+  error?: string | null;
+  errorId?: string;
+}) {
   return (
-    <label className="flex flex-col gap-tight text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      {children}
-    </label>
+    <div className="flex flex-col gap-tight">
+      <label className="flex flex-col gap-tight text-sm">
+        <span className="text-muted-foreground">
+          {label}
+          {required ? (
+            <>
+              <span aria-hidden className="text-destructive">
+                {' '}
+                *
+              </span>
+              {requiredLabel ? <span className="sr-only"> ({requiredLabel})</span> : null}
+            </>
+          ) : null}
+        </span>
+        {children}
+      </label>
+      {error ? (
+        <p id={errorId} className="text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
+}
+
+/** The attributes a control needs to point at its shown error (or none). */
+export function errorAria(error: string | null | undefined, errorId: string) {
+  return error ? { 'aria-invalid': true as const, 'aria-describedby': errorId } : {};
 }
 
 /** Same inline chevron style as the DateTimePicker's month arrows. */
