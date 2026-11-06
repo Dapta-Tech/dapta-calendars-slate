@@ -14,7 +14,10 @@
  */
 import { Logger } from '@nestjs/common';
 import type {
+  AttendeeBusy,
+  AttendeeBusyInput,
   BusyInterval,
+  CalendarFeatures,
   CalendarProvider,
   CalendarSummary,
   ConnectionHealth,
@@ -246,7 +249,31 @@ export interface CalendarWire {
   discoverConnections(tenantKey: string, provider: string): WireRequest;
   /** tenantKey/provider are passed back so a wire can build stable opaque refs. */
   parseDiscovered(raw: unknown, tenantKey: string, provider: string): DiscoveredConnection[];
+  /**
+   * Optional (ADR 0012): what this connection's backend can do beyond single
+   * events. Absent, or a feature left out: not supported, except conferencing,
+   * which the contract has always had (`BASIC_CALENDAR_FEATURES`).
+   */
+  features?(connectionRef: string): Partial<CalendarFeatures>;
+  /** Optional: read other people's busy times through the host's connection. */
+  listAttendeeBusy?(input: AttendeeBusyInput): WireRequest;
+  /** Optional, with `listAttendeeBusy`: every email asked for, busy or unknown (never free when unknown). */
+  parseAttendeeBusy?(raw: unknown, input: AttendeeBusyInput): AttendeeBusy[];
+  /**
+   * Optional: an operation that takes more than one request on this backend
+   * (look an occurrence up before changing it, cancel skipped dates after a
+   * create). When present for an operation, it replaces the single request
+   * above and calls `send` for each request it needs.
+   */
+  run?: {
+    createEvent?(input: CreateEventInput, send: WireSend): Promise<CreatedEvent>;
+    updateEvent?(input: UpdateEventInput, send: WireSend): Promise<CreatedEvent>;
+    deleteEvent?(input: DeleteEventInput, send: WireSend): Promise<void>;
+  };
 }
+
+/** Sends one request for a multi-step operation (`CalendarWire.run`); answers the parsed JSON, throws on a non-2xx. */
+export type WireSend = (req: WireRequest) => Promise<unknown>;
 
 /**
  * The connect-flow capability (used by the connections API, not the booking
@@ -483,16 +510,65 @@ export class ExternalCalendarProvider implements CalendarProvider {
   }
 
   async createEvent(input: CreateEventInput): Promise<CreatedEvent> {
+    const run = this.wire.run?.createEvent;
+    if (run) return run.call(this.wire.run, input, (req) => this.send('createEvent', req));
     return this.wire.parseEvent(await this.send('createEvent', this.wire.createEvent(input)));
   }
 
   async updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
+    const run = this.wire.run?.updateEvent;
+    if (run) return run.call(this.wire.run, input, (req) => this.send('updateEvent', req));
     return this.wire.parseEvent(await this.send('updateEvent', this.wire.updateEvent(input)));
+  }
+
+  /** What the wire declares for this connection (`calendarFeatures` fills in the rest). */
+  features(connectionRef: string): Partial<CalendarFeatures> {
+    return this.wire.features?.(connectionRef) ?? {};
+  }
+
+  /**
+   * Other people's busy times, read one window at a time like `listBusy` (a
+   * provider caps how wide one free/busy read may be). A person unknown in any
+   * window is unknown for the whole read: half a calendar is not a free one.
+   * Throws when the wire cannot do it or the backend fails: the caller then
+   * reports everyone it asked about as unknown.
+   */
+  async listAttendeeBusy(input: AttendeeBusyInput): Promise<AttendeeBusy[]> {
+    const wire = this.wire;
+    if (!wire.listAttendeeBusy || !wire.parseAttendeeBusy) throw new Error('this calendar backend cannot read other people\'s busy times');
+    const fromMs = Date.parse(input.fromUtc);
+    const toMs = Date.parse(input.toUtc);
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) throw new Error('attendee busy read needs valid bounds');
+    const merged = new Map<string, AttendeeBusy>(input.emails.map((email) => [email, { email, busy: [] }]));
+    for (const [a, b] of splitBusyWindow(fromMs, toMs, this.busyWindowMs)) {
+      const window = { ...input, fromUtc: new Date(a).toISOString(), toUtc: new Date(b).toISOString() };
+      const req = wire.listAttendeeBusy(window);
+      await this.pacer.wait(req.subject ?? input.connectionRef);
+      const release = await this.busySlots.acquire();
+      let raw: unknown;
+      try {
+        raw = await this.send('listAttendeeBusy', req);
+      } finally {
+        release();
+      }
+      const answered = new Map(wire.parseAttendeeBusy(raw, window).map((r) => [r.email.trim().toLowerCase(), r]));
+      for (const email of input.emails) {
+        const prior = merged.get(email)!;
+        if (prior.busy === null) continue;
+        const r = answered.get(email.trim().toLowerCase());
+        // Asked and not answered: unknown, never free.
+        if (!r || r.busy === null) merged.set(email, { email, busy: null, unknown: r?.unknown ?? 'error' });
+        else prior.busy.push(...r.busy);
+      }
+    }
+    return input.emails.map((email) => merged.get(email)!);
   }
 
   async deleteEvent(input: DeleteEventInput): Promise<void> {
     try {
-      await this.send('deleteEvent', this.wire.deleteEvent(input));
+      const run = this.wire.run?.deleteEvent;
+      if (run) await run.call(this.wire.run, input, (req) => this.send('deleteEvent', req));
+      else await this.send('deleteEvent', this.wire.deleteEvent(input));
     } catch (err) {
       // Already gone is done: a retried cancel, or an event the host deleted by
       // hand, must not hold the job in the outbox until it gives up. Google

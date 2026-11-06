@@ -526,8 +526,13 @@ export class CalV2Service {
                  et.length_minutes, et.destination_calendar_id, b.cancellation_reason,
                  b.cancelled_by, b.rescheduled_from_uid, b.rescheduled_to_uid,
                  b.rescheduling_reason, b.rescheduled_by_email,
-                 (SELECT br.meeting_url FROM booking_reference br
-                  WHERE br.booking_id = b.id AND br.meeting_url IS NOT NULL LIMIT 1) AS meeting_url
+                 COALESCE(
+                   (SELECT br.meeting_url FROM booking_reference br
+                    WHERE br.booking_id = b.id AND br.meeting_url IS NOT NULL LIMIT 1),
+                   -- A date of a repeating host event: the series' one room (ADR 0012).
+                   (SELECT s.meeting_url FROM host_event_series s
+                    WHERE s.id = b.recurring_event_id AND b.event_type_id IS NULL)
+                 ) AS meeting_url
           FROM booking b
           LEFT JOIN event_type et ON et.id = b.event_type_id
           WHERE b.account_id = ${accountId} AND b.uid = ${uid}

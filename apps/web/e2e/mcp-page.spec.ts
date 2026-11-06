@@ -151,7 +151,7 @@ test('MCP off, or an API that cannot be asked: the same note', async ({ page }) 
 test('Tools: every tool in its group, in plain words, and the way back to connect', async ({ page }) => {
   await openAsOwner(page, TOOLS);
   await expect(page.getByRole('heading', { level: 1, name: 'Tools' })).toBeVisible();
-  await expect(page.getByTestId('tools-item')).toHaveCount(18);
+  await expect(page.getByTestId('tools-item')).toHaveCount(19);
   for (const group of ['availability', 'booking', 'holds', 'bookings', 'requests', 'account']) {
     await expect(page.getByTestId(`tools-group-${group}`)).toBeVisible();
   }

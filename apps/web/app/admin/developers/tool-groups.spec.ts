@@ -15,7 +15,7 @@ describe('TOOL_GROUPS', () => {
   const served = servedTools();
 
   it('reads the server catalog (a parse that finds nothing would pass everything)', () => {
-    expect(served.length).toBeGreaterThanOrEqual(18);
+    expect(served.length).toBeGreaterThanOrEqual(19);
     expect(new Set(served).size).toBe(served.length);
   });
 

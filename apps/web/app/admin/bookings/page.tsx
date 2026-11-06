@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { CancelAction, PendingActions } from './booking-actions';
 import {
   BookingStatusPill,
+  RepeatsPill,
   bookingSection,
   formatBookingStart,
   type BookingRowData as Row,
@@ -104,7 +105,8 @@ function Section({
               </Link>
               <div className="flex items-center gap-field">
                 {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
-                {action === 'cancel' ? <CancelAction uid={b.uid} m={m} /> : null}
+                {action === 'cancel' ? <CancelAction uid={b.uid} m={m} repeating={!!b.repeats} /> : null}
+                {b.repeats ? <RepeatsPill repeats={b.repeats} m={m} locale={locale} /> : null}
                 <BookingStatusPill status={b.status} m={m} />
               </div>
             </li>
