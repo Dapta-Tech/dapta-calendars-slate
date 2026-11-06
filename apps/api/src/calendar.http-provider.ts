@@ -592,6 +592,11 @@ export class ExternalCalendarProvider implements CalendarProvider {
         await this.send('checkConnection', this.wire.checkConnection(connectionRef)),
       );
     } catch (err) {
+      // Logged, not only answered: a backend that refuses every check (an
+      // action the integration does not have answered 404 for weeks, BUGS-2734)
+      // otherwise left a trace only in the stored health of each connection.
+      // Operation and status only, never the ref or the response body.
+      this.logger.warn(`connection health check failed: ${failureCause(err)}`);
       // The detail reaches the host's screen and the connection's stored
       // health; the error's message would carry the backend's response body.
       return { ok: false, detail: failureDetail(err) };

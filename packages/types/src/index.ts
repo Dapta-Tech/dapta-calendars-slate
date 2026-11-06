@@ -1388,6 +1388,72 @@ export const crmPropertyCatalogSchema = z.object({
 });
 export type CrmPropertyCatalog = z.infer<typeof crmPropertyCatalogSchema>;
 
+// --- Event custom hours ---------------------------------------------------
+
+/** Most ranges one event's custom hours may hold (a full week of split days is ~21). */
+export const MAX_CUSTOM_HOURS_RANGES = 50;
+
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const minutesOf = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+/** One row of custom hours: the weekdays it covers (0=Sun..6=Sat), from `start` to `end`. */
+export const customHoursRangeSchema = z.object({
+  days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+  start: z.string().regex(HH_MM, 'Use HH:MM times.'),
+  end: z.string().regex(HH_MM, 'Use HH:MM times.'),
+});
+export type CustomHoursRange = z.infer<typeof customHoursRangeSchema>;
+
+/**
+ * Weekly hours private to ONE event type, used instead of a schedule. Each
+ * range's end is after its start, and no two ranges overlap on a weekday once
+ * multi-day rows (Every day, Weekdays, Weekends) are expanded. Issues are
+ * reported at `ranges.<i>.end` (end before start) and `ranges.<i>` (overlap, on
+ * the later row), so an editor can point at the row.
+ */
+export const eventCustomHoursSchema = z
+  .object({
+    timeZone: timeZoneSchema,
+    ranges: z
+      .array(customHoursRangeSchema)
+      .min(1, 'Add at least one time range.')
+      .max(MAX_CUSTOM_HOURS_RANGES),
+  })
+  .superRefine((hours, ctx) => {
+    const byDay = new Map<number, Array<{ i: number; start: number; end: number }>>();
+    hours.ranges.forEach((r, i) => {
+      if (!HH_MM.test(r.start) || !HH_MM.test(r.end)) return;
+      const start = minutesOf(r.start);
+      const end = minutesOf(r.end);
+      if (end <= start) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['ranges', i, 'end'], message: 'End must be after start.' });
+        return;
+      }
+      for (const d of new Set(r.days)) {
+        const list = byDay.get(d) ?? [];
+        list.push({ i, start, end });
+        byDay.set(d, list);
+      }
+    });
+    const flagged = new Set<number>();
+    for (const list of byDay.values()) {
+      for (let a = 0; a < list.length; a++) {
+        for (let b = a + 1; b < list.length; b++) {
+          const x = list[a]!;
+          const y = list[b]!;
+          if (x.start < y.end && y.start < x.end) {
+            const later = Math.max(x.i, y.i);
+            if (!flagged.has(later)) {
+              flagged.add(later);
+              ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['ranges', later], message: 'Time ranges overlap.' });
+            }
+          }
+        }
+      }
+    }
+  });
+export type EventCustomHours = z.infer<typeof eventCustomHoursSchema>;
+
 // --- Event-type CRUD ------------------------------------------------------
 
 export const eventTypeInputSchema = z.object({
@@ -1405,6 +1471,12 @@ export const eventTypeInputSchema = z.object({
     .nullable()
     .optional(),
   scheduleId: z.string().nullable().optional(),
+  /** Weekly hours private to this event, used instead of a schedule (personal
+   *  events only). Omitted ⇒ the availability source is unchanged; an object ⇒
+   *  the event uses these hours (and `scheduleId` must be omitted); null ⇒ the
+   *  event stops using custom hours and follows `scheduleId` (null = the
+   *  host's working hours), and the hours are deleted. */
+  customHours: eventCustomHoursSchema.nullable().optional(),
   hidden: z.boolean().optional(),
   schedulingType: z.enum(schedulingType).nullable().optional(),
   /** Round robin only; NULL keeps `availability`. See `rrDistribution`. */

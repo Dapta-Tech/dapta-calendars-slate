@@ -1,0 +1,5 @@
+---
+"@slate/web": minor
+---
+
+The event type editor has an "In the calendar" section: the calendar event's title and description as templates (`Intro Call – {{attendee_name}} ({{form.company}})`), so each booking is named after who booked and what they answered. Variables show as chips inside the fields (answers from the booking form in their own colour, an unknown name flagged), and a palette of chips under both fields (the booking form's answers first, then the catalog's invitee, host, event and time variables the field last used allows; nothing about one invitee on an event with seats) can be dragged into either field or clicked to insert at the caret. Typing `{{name}}` turns into a chip too, and the stored value stays the plain template. Each field shows a live example rendered with sample values. Templates are checked in the editor with the engine's own validator, the same one the API applies, and an API refusal points at its field. Blank keeps the event title and no description. The API already stored and rendered `calendarTitleTemplate` / `calendarDescriptionTemplate`; this is their editor. EN and ES copy under `admin.eventTypes.editor.calendarText`.

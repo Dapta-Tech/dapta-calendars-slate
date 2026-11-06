@@ -1,4 +1,4 @@
--- See migrations/postgres/0040_host_event_series.sql for the rationale (ADR 0012).
+-- See migrations/postgres/0041_host_event_series.sql for the rationale (ADR 0012).
 CREATE TABLE IF NOT EXISTS host_event_series (
   id                     TEXT PRIMARY KEY,
   account_id             TEXT NOT NULL,

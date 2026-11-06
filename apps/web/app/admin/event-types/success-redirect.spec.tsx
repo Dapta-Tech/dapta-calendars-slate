@@ -153,7 +153,7 @@ describe('Redirect after booking, in the event type editor', () => {
       expect(el.textContent).not.toContain(m.invalid);
       await save(el);
       expect(saveEventTypeAction).not.toHaveBeenCalled();
-      expect(el.querySelector('[role="alert"]')?.textContent).toBe(m.invalid);
+      expect(el.querySelector('[role="alert"]:not([data-testid="et-error-summary"])')?.textContent).toBe(m.invalid);
       expect(input.getAttribute('aria-invalid')).toBe('true');
       // Focus goes to the field: it sits far below the Save button.
       expect(document.activeElement).toBe(input);

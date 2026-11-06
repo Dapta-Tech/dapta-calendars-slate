@@ -129,6 +129,8 @@ export const schedule = pgTable('schedule', {
   name: text('name').notNull(),
   timeZone: text('time_zone').notNull().default('UTC'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  /** Set when the schedule is one event type's private custom hours; NULL = reusable. */
+  eventTypeId: text('event_type_id'),
 });
 
 export const availability = pgTable('availability', {
@@ -527,7 +529,7 @@ export const bookingReference = pgTable('booking_reference', {
 /**
  * A repeating host event (ADR 0012): the rule, the attendees and the one
  * repeating event on the host's calendar. Its dated occurrences are `booking`
- * rows linked by `booking.recurring_event_id`. See migration 0040 (pg).
+ * rows linked by `booking.recurring_event_id`. See migration 0041 (pg).
  */
 export const hostEventSeries = pgTable('host_event_series', {
   id: text('id').primaryKey(),

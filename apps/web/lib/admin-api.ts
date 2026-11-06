@@ -11,7 +11,7 @@
  * treats as "sign in again", so the session survives and the page shows
  * something the person can retry.
  */
-import type { BookingUtm, BrandKit, EventTracking, SuccessRedirectData, WorkspaceView } from '@slate/types';
+import type { BookingUtm, BrandKit, EventCustomHours, EventTracking, SuccessRedirectData, WorkspaceView } from '@slate/types';
 import type { Locale } from '@slate/shared';
 import type {
   EventLocationDto,
@@ -246,6 +246,13 @@ export const adminApi = {
   createEventType: (b: unknown) => req<EventType>('POST', '/v1/event-types', b),
   updateEventType: (id: string, b: unknown) => req<EventType>('PATCH', `/v1/event-types/${id}`, b),
   deleteEventType: (id: string) => req<void>('DELETE', `/v1/event-types/${id}`),
+  /** One reminder rendered as the invitee would get it (real subject + branded HTML); nothing is sent. */
+  previewReminder: (b: unknown) =>
+    req<{ from: string | null; to: string; subject: string; text: string; html: string }>(
+      'POST',
+      '/v1/event-types/reminder-preview',
+      b,
+    ),
 
   // One-off invite links (#69 / AB2, #110). They hang off the event type they
   // grant access to, because that is what a link IS — a grant over an existing
@@ -259,7 +266,8 @@ export const adminApi = {
     req<void>('DELETE', `/v1/event-types/${eventTypeId}/one-off-links/${linkId}`),
 
   // Schedules
-  listSchedules: () => req<{ id: string; name: string; timeZone: string }[]>('GET', '/v1/schedules'),
+  /** `isDefault` marks the member's working hours (optional: an older API omits it). */
+  listSchedules: () => req<{ id: string; name: string; timeZone: string; isDefault?: boolean }[]>('GET', '/v1/schedules'),
   getSchedule: (id: string) => req<Schedule>('GET', `/v1/schedules/${id}`),
   createSchedule: (b: unknown) => req<Schedule>('POST', '/v1/schedules', b),
   updateSchedule: (id: string, b: unknown) => req<Schedule>('PATCH', `/v1/schedules/${id}`, b),
@@ -431,6 +439,9 @@ export interface EventType {
   hostMemberIds: string[];
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
   scheduleId: string | null;
+  /** Weekly hours private to this event (personal events); null or absent ⇒
+   *  it follows `scheduleId`. Optional on the wire: an older API omits it. */
+  customHours?: EventCustomHours | null;
   /** PHASE 2 — per-event calendar selection (personal events only). Empty ⇒
    *  falls back to the host's member-level check_conflicts calendars. */
   conflictCalendarIds: string[];
@@ -447,6 +458,10 @@ export interface EventType {
   successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page; null ⇒ none. Optional on the wire. */
   tracking?: EventTracking | null;
+  /** The calendar event's title and description templates; null ⇒ the event
+   *  title and no description. Optional on the wire. */
+  calendarTitleTemplate?: string | null;
+  calendarDescriptionTemplate?: string | null;
 }
 export interface Schedule {
   id: string;

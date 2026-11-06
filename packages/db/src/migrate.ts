@@ -53,15 +53,31 @@ export async function migrate(db: Db, migrationsRoot = MIGRATIONS_ROOT): Promise
   // backfill migration runs once, so anything created in a
   // migrated-but-stale-code window would stay stranded forever without this.
   // Idempotent + cheap no-op when nothing matches, so it runs every boot.
+  // An event's private custom hours (`event_type_id` set) are never a default;
+  // the column exists from 0039 (sqlite) / 0040 (postgres) on, and a run over
+  // an older migrations root (specs replay history) must not reference it.
+  const reusable = (await hasScheduleOwnerColumn(db))
+    ? { s: sql.raw('AND s.event_type_id IS NULL'), s2: sql.raw('AND s2.event_type_id IS NULL') }
+    : { s: sql.raw(''), s2: sql.raw('') };
   await db.run(sql`
     UPDATE member SET default_schedule_id = (
       SELECT s.id FROM schedule s
-      WHERE s.member_id = member.id
+      WHERE s.member_id = member.id ${reusable.s}
       ORDER BY s.created_at ASC, s.id ASC
       LIMIT 1
     )
     WHERE default_schedule_id IS NULL
-      AND EXISTS (SELECT 1 FROM schedule s2 WHERE s2.member_id = member.id)`);
+      AND EXISTS (SELECT 1 FROM schedule s2 WHERE s2.member_id = member.id ${reusable.s2})`);
 
   return applied;
+}
+
+/** Whether `schedule.event_type_id` (custom hours) exists yet on this database. */
+async function hasScheduleOwnerColumn(db: Db): Promise<boolean> {
+  try {
+    await db.get(sql`SELECT event_type_id FROM schedule LIMIT 0`);
+    return true;
+  } catch {
+    return false;
+  }
 }

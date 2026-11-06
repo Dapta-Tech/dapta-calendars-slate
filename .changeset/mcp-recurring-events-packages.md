@@ -22,7 +22,7 @@ create and update), change or cancel one date of it by its original start
 times (`listAttendeeBusy`, unknown never free). All optional: a backend that
 predates them keeps working and is never sent a series.
 
-`@slate/db`: `host_event_series` (migration 0040 on Postgres, 0039 on SQLite,
+`@slate/db`: `host_event_series` (migration 0041 on Postgres, 0040 on SQLite,
 additive) holds a series; its dates are host-event bookings linked by
 `booking.recurring_event_id`, written 180 days ahead with every date checked
 like a single event (`createHostEventSeries`), extended as time passes

@@ -243,7 +243,8 @@ body {
    `--focus` at `--primary-edge`, so the ring stays the host's accent and carries
    whatever contrast they picked, exactly as it did before this palette. */
 :focus-visible {
-  outline: 2px solid var(--focus);
+  /* 1.5px: present without shouting. The colour still clears 3:1. */
+  outline: 1.5px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -354,6 +355,29 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .rail-pulse {
+    animation: none;
+  }
+}
+
+/* The event editor's variable palette while a template field is focused: a
+   dimmer green border that blinks softly, saying "drag from here". Steady
+   (no blink) with reduced motion. */
+.palette-pulse {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--signal-edge) 55%, transparent);
+  animation: palette-pulse 1.6s ease-in-out infinite;
+}
+@keyframes palette-pulse {
+  0%,
+  100% {
+    border-color: color-mix(in srgb, var(--signal-edge) 55%, transparent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--signal-edge) 20%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .palette-pulse {
     animation: none;
   }
 }

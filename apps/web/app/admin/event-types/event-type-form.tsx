@@ -1,882 +1,60 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useId, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
+import { useEffect, useId, useReducer, useRef, useState, useTransition, type MouseEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { COUNTRIES, countryName, isReservedFieldName, t, type BookingMessages } from '@slate/shared';
+import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
 import {
-  LOCATION_KINDS,
   MAX_BOOKING_WINDOW_DAYS,
-  MAX_REMINDERS_PER_EVENT,
-  MAX_REMINDER_BODY,
-  MAX_REMINDER_LEAD_MINUTES,
-  MAX_REMINDER_SUBJECT,
-  MIN_REMINDER_LEAD_MINUTES,
-  EVENT_TRACKING_HOST_SCRIPT_KEYS,
-  EVENT_TRACKING_KEYS,
-  MAX_POSTHOG_HOST,
-  MAX_POSTHOG_KEY,
   MAX_SUCCESS_REDIRECT_URL,
-  MAX_TRACKING_ID,
-  POSTHOG_HOSTS,
-  defaultEventReminders,
-  eventTrackingSchema,
   isSuccessRedirectUrl,
-  normalizeEventTracking,
   type CrmPropertyCatalog,
-  type CrmPropertyMapping,
-  type EventReminder,
-  type EventTracking,
-  type LocationKind,
-  type OneOffLinkView,
   type SuccessRedirectData,
 } from '@slate/types';
-import { sourceExists } from '@slate/crm/mapping';
-import type { Connection, EventType } from '@/lib/admin-api';
+import { type Connection, type EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
 import {
   HostPrioritySelect,
   HostReadiness,
-  joinHostNames,
   PersonalHostsCard,
   TeamHostsNote,
   type TeamOption,
 } from './team-hosts';
-import { connectionDisplayLabel } from '@/lib/connection-label';
-import { cn } from '@/lib/cn';
-import { track } from '@/lib/analytics/port';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Radio } from '@/components/ui/radio';
 import { FormHeader } from '@/components/ui/page-header';
 import { useToast } from '@/components/toast';
+import { TabPanel, Tabs } from '@/components/ui/tabs';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { saveEventTypeAction, type ActionResult } from './actions';
+import { draftReducer, initialDraft, prefillCustomHours, toPayload, type DraftAction, type EventTypeDraft } from './draft';
+import { ErrorSummary } from './error-summary';
 import {
-  listOneOffLinksAction,
-  mintOneOffLinkAction,
-  revokeOneOffLinkAction,
-  saveEventTypeAction,
-  type ActionResult,
-  type EventTypePayload,
-} from './actions';
-import { usePublicOrigin } from '@/components/public-origin';
-
-export type EventTypeMessages = BookingMessages['admin']['eventTypes'];
-
-const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox', 'guests'];
-const SCHEDULING_METHODS = ['round_robin', 'collective', 'fixed_round_robin'] as const;
-type SchedulingMethod = (typeof SCHEDULING_METHODS)[number];
-
-interface IntakeField {
-  name: string;
-  label: string;
-  type: string;
-  required: boolean;
-  /** Phone questions: country the selector starts on (QA4 fix 1b). */
-  defaultCountry?: string;
-  /**
-   * select/checkbox choices. The editor has no control for these yet — they
-   * arrive through the API — but they are carried through so the CRM mapping
-   * section can reconcile them against an enumeration property's options, and
-   * so a save cannot silently drop the options an event already had.
-   */
-  options?: string[];
-}
-
-interface HostRow {
-  memberId: string;
-  priority: number | null;
-  weight: number | null;
-  isFixed: boolean;
-}
-
-export interface TeamMemberOption {
-  memberId: string;
-  displayName: string | null;
-  /** The name of last resort, after `displayName`. */
-  email?: string | null;
-  /** Undefined when the API predates the field: unknown, never "missing". */
-  hasDestinationCalendar?: boolean;
-  /** Any connected calendar (busy times are checked against it). Undefined = unknown. */
-  hasCalendar?: boolean;
-  /** Working hours on their default schedule. Undefined = unknown. */
-  hasHours?: boolean;
-}
-
-type ReminderMessages = EventTypeMessages['reminders'];
-
-/** The built-ins a reminder may quote, mirroring `TEMPLATE_VARIABLES`. */
-const REMINDER_VARIABLES = [
-  'attendee_name',
-  'attendee_email',
-  'host_name',
-  'event_title',
-  'start_time',
-  'end_time',
-  'location',
-  // The meeting link (C2 #85), resolved at delivery — the one variable that is
-  // not snapshotted with the rest. It belongs in reminder copy more than
-  // anywhere: a nudge an hour before the call is exactly when someone wants it.
-  'meeting_url',
-  'manage_url',
-  'reminder_lead',
-  'booking_link',
-];
-
-const FORM_TOKEN_RE = /\{\{\s*form\.([A-Za-z0-9_]+)\s*\}\}/g;
-
-type LeadUnit = 'minutes' | 'hours' | 'days';
-
-/** Show a lead in the largest whole unit it fits — 1440 reads as "1 day". */
-function splitLead(minutes: number): { value: number; unit: LeadUnit } {
-  if (minutes % 1440 === 0) return { value: minutes / 1440, unit: 'days' };
-  if (minutes % 60 === 0) return { value: minutes / 60, unit: 'hours' };
-  return { value: minutes, unit: 'minutes' };
-}
-
-function joinLead(value: number, unit: LeadUnit): number {
-  const factor = unit === 'days' ? 1440 : unit === 'hours' ? 60 : 1;
-  const minutes = Math.round(value * factor);
-  return Math.min(Math.max(minutes, MIN_REMINDER_LEAD_MINUTES), MAX_REMINDER_LEAD_MINUTES);
-}
-
-function newReminderId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `r${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/**
- * One reminder row: its own switch, its own lead, its own subject and body
- * (#68 decision 1). The variable chips insert into whichever of the two text
- * fields was last focused — a raw text box beside a list of variable names is
- * a gap, not a feature.
- */
-function ReminderCard({
-  row,
-  onChange,
-  onRemove,
-  fieldNames,
-  m,
-}: {
-  row: EventReminder;
-  onChange: (patch: Partial<EventReminder>) => void;
-  onRemove?: () => void;
-  fieldNames: string[];
-  m: ReminderMessages;
-}) {
-  const subjectRef = useRef<HTMLInputElement | null>(null);
-  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
-  const lastFocused = useRef<'subject' | 'body'>('body');
-  const lead = splitLead(row.leadMinutes);
-
-  const insert = (token: string) => {
-    const el = lastFocused.current === 'subject' ? subjectRef.current : bodyRef.current;
-    const current = (lastFocused.current === 'subject' ? row.subject : row.body) ?? '';
-    const at = el?.selectionStart ?? current.length;
-    const next = `${current.slice(0, at)}{{${token}}}${current.slice(el?.selectionEnd ?? at)}`;
-    onChange(lastFocused.current === 'subject' ? { subject: next } : { body: next });
-    // Put the caret after the inserted token rather than at the end.
-    requestAnimationFrame(() => {
-      const pos = at + token.length + 4;
-      el?.focus();
-      el?.setSelectionRange(pos, pos);
-    });
-  };
-
-  return (
-    <div className="flex flex-col gap-inline rounded-md border border-border bg-background/40 p-field">
-      <div className="flex flex-wrap items-center gap-inline">
-        <label className="flex cursor-pointer items-center gap-inline text-sm">
-          <Checkbox
-            checked={row.enabled}
-            onChange={(e) => onChange({ enabled: e.target.checked })}
-            aria-label={m.enabledLabel}
-          />
-          <span className="text-muted-foreground">{m.sendLabel}</span>
-        </label>
-        <input
-          type="number"
-          // The floor is 5 MINUTES, so it is only 5 in the minutes unit — an
-          // input advertising min=1 that silently snaps to 5 is a small lie.
-          min={lead.unit === 'minutes' ? MIN_REMINDER_LEAD_MINUTES : 1}
-          max={lead.unit === 'days' ? 28 : lead.unit === 'hours' ? 672 : MAX_REMINDER_LEAD_MINUTES}
-          value={lead.value}
-          onChange={(e) => onChange({ leadMinutes: joinLead(Number(e.target.value) || 1, lead.unit) })}
-          aria-label={`${m.sendLabel} — ${m.unitMinutes}/${m.unitHours}/${m.unitDays}`}
-          className="w-20 rounded-md border border-input bg-background px-inline py-tight text-sm"
-        />
-        <select
-          value={lead.unit}
-          onChange={(e) => onChange({ leadMinutes: joinLead(lead.value, e.target.value as LeadUnit) })}
-          aria-label={row.kind === 'follow_up' ? m.afterEnd : m.beforeStart}
-          className="rounded-md border border-input bg-background px-inline py-tight text-sm"
-        >
-          <option value="minutes">{m.unitMinutes}</option>
-          <option value="hours">{m.unitHours}</option>
-          <option value="days">{m.unitDays}</option>
-        </select>
-        <span className="text-sm text-muted-foreground">
-          {row.kind === 'follow_up' ? m.afterEnd : m.beforeStart}
-        </span>
-        {onRemove ? (
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={m.remove}
-            className="ml-auto text-muted-foreground hover:text-destructive"
-          >
-            ×
-          </button>
-        ) : null}
-      </div>
-
-      <input
-        ref={subjectRef}
-        value={row.subject ?? ''}
-        onFocus={() => (lastFocused.current = 'subject')}
-        onChange={(e) => onChange({ subject: e.target.value || null })}
-        placeholder={m.subjectLabel}
-        aria-label={m.subjectLabel}
-        maxLength={MAX_REMINDER_SUBJECT}
-        className="w-full rounded-md border border-input bg-background px-inline py-tight text-sm"
-      />
-      <textarea
-        ref={bodyRef}
-        value={row.body ?? ''}
-        onFocus={() => (lastFocused.current = 'body')}
-        onChange={(e) => onChange({ body: e.target.value || null })}
-        placeholder={m.bodyLabel}
-        aria-label={m.bodyLabel}
-        // Stop at the contract's limit rather than letting the save come back
-        // as a bare 400 from the other side of the wire.
-        maxLength={MAX_REMINDER_BODY}
-        rows={3}
-        className="w-full rounded-md border border-input bg-background px-inline py-tight text-sm"
-      />
-      <p className="text-xs text-muted-foreground">{m.defaultCopyHint}</p>
-
-      <div className="flex flex-col gap-tight">
-        <span className="text-2xs uppercase tracking-wide text-muted-foreground">{m.variablesLabel}</span>
-        <div className="flex flex-wrap gap-tight">
-          {REMINDER_VARIABLES.map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => insert(v)}
-              className="rounded border border-border px-inline py-tight font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
-            >
-              {`{{${v}}}`}
-            </button>
-          ))}
-        </div>
-        <span className="mt-tight text-2xs uppercase tracking-wide text-muted-foreground">
-          {m.formVariablesLabel}
-        </span>
-        {fieldNames.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{m.noFormVariables}</p>
-        ) : (
-          <div className="flex flex-wrap gap-tight">
-            {fieldNames.map((name) => (
-              <button
-                key={name}
-                type="button"
-                onClick={() => insert(`form.${name}`)}
-                className="rounded border border-border px-inline py-tight font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
-              >
-                {`{{form.${name}}}`}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Reminders + follow-up, owned by the event type (#68). The list is one array
- * with a `kind` discriminator: reminders fire before the start, the single
- * follow-up after the end, and both share the row shape and the same switch.
- */
-function RemindersSection({
-  rows,
-  setRows,
-  fieldNames,
-  m,
-}: {
-  rows: EventReminder[];
-  setRows: (fn: (rows: EventReminder[]) => EventReminder[]) => void;
-  fieldNames: string[];
-  m: ReminderMessages;
-}) {
-  const reminders = rows.filter((r) => r.kind === 'reminder');
-  const followUp = rows.find((r) => r.kind === 'follow_up');
-  const patch = (id: string, p: Partial<EventReminder>) =>
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
-
-  // Dangling references warn, never block (#68 decision 3): renaming or
-  // deleting a question leaves the variable rendering empty, which is a
-  // surprise worth naming — not a reason to refuse the save.
-  const dangling = useMemo(() => {
-    const known = new Set(fieldNames);
-    const found = new Set<string>();
-    for (const r of rows) {
-      for (const text of [r.subject ?? '', r.body ?? '']) {
-        for (const match of text.matchAll(FORM_TOKEN_RE)) {
-          if (!known.has(match[1]!)) found.add(match[1]!);
-        }
-      }
-    }
-    return [...found];
-  }, [rows, fieldNames]);
-
-  return (
-    <div className="flex flex-col gap-inline">
-      <span className="text-sm font-semibold text-muted-foreground">{m.sectionTitle}</span>
-      <p className="text-xs text-muted-foreground">{m.sectionHint}</p>
-
-      <span className="mt-tight text-xs font-medium text-muted-foreground">{m.beforeMeeting}</span>
-      {reminders.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{m.noReminders}</p>
-      ) : (
-        reminders.map((r) => (
-          <ReminderCard
-            key={r.id}
-            row={r}
-            fieldNames={fieldNames}
-            m={m}
-            onChange={(p) => patch(r.id, p)}
-            onRemove={() => setRows((rs) => rs.filter((x) => x.id !== r.id))}
-          />
-        ))
-      )}
-      <div className="flex items-center gap-field">
-        <button
-          type="button"
-          disabled={reminders.length >= MAX_REMINDERS_PER_EVENT}
-          onClick={() =>
-            setRows((rs) => [
-              ...rs.filter((r) => r.kind === 'reminder'),
-              { id: newReminderId(), kind: 'reminder', enabled: true, leadMinutes: 60, subject: null, body: null },
-              ...rs.filter((r) => r.kind === 'follow_up'),
-            ])
-          }
-          className="self-start rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
-        >
-          {m.addReminder}
-        </button>
-        {reminders.length >= MAX_REMINDERS_PER_EVENT ? (
-          <span className="text-xs text-muted-foreground">
-            {m.capReached.replace('{max}', String(MAX_REMINDERS_PER_EVENT))}
-          </span>
-        ) : null}
-      </div>
-
-      <span className="mt-inline text-xs font-medium text-muted-foreground">{m.afterMeeting}</span>
-      <p className="text-xs text-muted-foreground">{m.followUpHint}</p>
-      <ReminderCard
-        // An event whose stored list carries no follow-up still shows one,
-        // switched off — the control has to be reachable to be turned on.
-        row={
-          followUp ?? {
-            id: 'follow-up',
-            kind: 'follow_up',
-            enabled: false,
-            leadMinutes: 60,
-            subject: null,
-            body: null,
-          }
-        }
-        fieldNames={fieldNames}
-        m={m}
-        onChange={(p) =>
-          setRows((rs) =>
-            rs.some((r) => r.kind === 'follow_up')
-              ? rs.map((r) => (r.kind === 'follow_up' ? { ...r, ...p } : r))
-              : [
-                  ...rs,
-                  {
-                    id: newReminderId(),
-                    kind: 'follow_up' as const,
-                    enabled: false,
-                    leadMinutes: 60,
-                    subject: null,
-                    body: null,
-                    ...p,
-                  },
-                ],
-          )
-        }
-      />
-
-      {dangling.length > 0 ? (
-        <p className="text-xs text-destructive" role="alert">
-          {m.danglingWarn.replace('{tokens}', dangling.map((t) => `{{form.${t}}}`).join(', '))}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * PHASE 2 — the EDITABLE "Calendars for this event" section (personal events
- * only; team events keep no per-event calendar config — Phase 3, each host
- * has their own connection and a single line here would be misleading).
- * Replaces the old read-only calendar-link notice (Felipe: "cómo está el
- * calendario conectado al evento, esto no hace sentido") with per-connection
- * "check for conflicts" + a single "add events here" destination choice.
- * Gracefully degrades: 0 connections → the connect-a-calendar hint; 1
- * connection → shown alone (both toggles default on, same as before).
- */
-function CalendarsForEventSection({
-  connections,
-  conflictIds,
-  destinationId,
-  onToggleConflict,
-  onSetDestination,
-  m,
-}: {
-  connections: Connection[];
-  conflictIds: Set<string>;
-  destinationId: string | null;
-  onToggleConflict: (id: string) => void;
-  onSetDestination: (id: string) => void;
-  m: EventTypeMessages;
-}) {
-  if (connections.length === 0) {
-    return (
-      <div className="flex flex-col items-start gap-field rounded-md border border-dashed border-border bg-background/60 p-field text-sm text-muted-foreground">
-        <p>{m.calendarLinkNone}</p>
-        <Link href="/admin/connections" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
-          {m.calendarLinkConnect}
-        </Link>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-field rounded-md border border-border bg-background/40 p-card">
-      <div className="flex items-center justify-between gap-field">
-        <span className="text-sm font-semibold text-muted-foreground">{m.calendarsSectionTitle}</span>
-        <Link
-          href="/admin/connections"
-          className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'shrink-0')}
-        >
-          {m.calendarsManageLink}
-        </Link>
-      </div>
-      <p className="text-xs text-muted-foreground">{m.calendarsSectionHint}</p>
-      <div className="flex flex-col gap-inline">
-        <div className="flex items-center gap-field px-tight text-xs text-muted-foreground">
-          <span className="flex-1" />
-          <span className="w-28 text-center sm:w-32">{m.calendarsCheckConflicts}</span>
-          <span className="w-28 text-center sm:w-32">{m.calendarsAddEventsHere}</span>
-        </div>
-        {connections.map((c) => {
-          const label = connectionDisplayLabel(c);
-          return (
-            <div
-              key={c.id}
-              className="flex items-center gap-field rounded-md border border-border bg-card px-field py-inline"
-            >
-              <span className="min-w-0 flex-1 truncate text-sm" title={label}>
-                {label}
-              </span>
-              <label
-                className="flex w-28 cursor-pointer justify-center sm:w-32"
-                aria-label={`${label} — ${m.calendarsCheckConflicts}`}
-              >
-                <Checkbox checked={conflictIds.has(c.id)} onChange={() => onToggleConflict(c.id)} />
-              </label>
-              <label
-                className="flex w-28 cursor-pointer justify-center sm:w-32"
-                aria-label={`${label} — ${m.calendarsAddEventsHere}`}
-              >
-                <Radio
-                  name="destinationCalendarId"
-                  checked={destinationId === c.id}
-                  onChange={() => onSetDestination(c.id)}
-                />
-              </label>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/**
- * WHERE the meeting happens: a location KIND plus, for the kinds that need one,
- * a detail. Each kind gets its own labelled input, so every shape a location can
- * take is reachable — a bare text box could only ever express "custom".
- *
- * `conferencing` is the one kind with no detail: the link is minted by the
- * calendar port when the booking is confirmed. Its display name is injected by
- * the deployment (ADR 0008) — this repo names no platform, so a bare fork shows
- * only the generic wording.
- */
-function LocationField({
-  kind,
-  detail,
-  onKind,
-  onDetail,
-  connections,
-  teamHosts,
-  schedulingType,
-  fixedHostIds,
-  m,
-  locationLabels,
-  locale,
-}: {
-  kind: LocationKind | '';
-  detail: string;
-  onKind: (kind: LocationKind | '') => void;
-  onDetail: (detail: string) => void;
-  connections?: Connection[];
-  /** Present only for a TEAM event: every host the location applies to. */
-  teamHosts?: TeamMemberOption[];
-  /** Team events: decides whose calendar a booking's link can come from. */
-  schedulingType: SchedulingMethod;
-  /** Fixed round robin: the hosts on every booking (live form state). */
-  fixedHostIds: string[];
-  m: EventTypeMessages;
-  locationLabels: BookingMessages['location'];
-  /** Sorts and joins host names; the same on the server and in the browser. */
-  locale: 'en' | 'es';
-}) {
-  // ADR 0008: the repo names no conferencing platform, the RUNNING product does.
-  // The port reports it and it rides here on the connections response the editor
-  // already fetches — so a host sees which platform they are choosing. Null (a
-  // bare fork, or no calendar connected) falls back to the generic wording,
-  // which is correct: there is no conferencing to name. This is a HOST-facing
-  // affordance only; invitee surfaces stay generic.
-  const conferencingLabel =
-    connections?.map((c) => c.conferencingLabel).find((l) => !!l && l.trim() !== '') ?? null;
-  const kindLabel: Record<LocationKind, string> = {
-    conferencing: conferencingLabel?.trim() || locationLabels.conferencing,
-    in_person: locationLabels.inPerson,
-    phone: locationLabels.phone,
-    custom: locationLabels.custom,
-  };
-  const detailLabel: Partial<Record<LocationKind, string>> = {
-    in_person: m.locationDetailAddress,
-    phone: m.locationDetailPhone,
-    custom: m.locationDetailCustom,
-  };
-  // Warn, never disable: a host must be able to configure conferencing BEFORE
-  // connecting a calendar, or connecting later leaves a silently broken event.
-  // `connections === undefined` is a team event, warned about per host below.
-  const missingDestination =
-    kind === 'conferencing' && !!connections && !connections.some((c) => c.isDestination);
-  // A team event has ONE location for every host, but its meeting link is
-  // minted on the first host ON THE BOOKING with a calendar set to receive new
-  // events, organizer first (`destinationRefs` in calendar-refs.ts). So the gap
-  // depends on who is on a booking:
-  //  - round robin: one host, so each host without one is a gap;
-  //  - collective: every host, so one calendar among them is enough;
-  //  - fixed round robin: every fixed host, so one fixed calendar is enough;
-  //    without it, each rotating host without one is a gap. Read the hosts the
-  //    way the engine does (`combineTeamSlots` in parity.ts): no fixed host is
-  //    plain round robin, no rotating host is collective over the fixed ones.
-  // Strictly `false`: an API that predates the field sends nothing, and an
-  // unknown is not a gap.
-  const lacksCalendar = (h: TeamMemberOption) => h.hasDestinationCalendar === false;
-  let gapHosts: TeamMemberOption[] = [];
-  let noHostHasCalendar = false;
-  if (kind === 'conferencing' && teamHosts) {
-    const isFixed = (h: TeamMemberOption) => fixedHostIds.includes(h.memberId);
-    const fixed = schedulingType === 'fixed_round_robin' ? teamHosts.filter(isFixed) : [];
-    const rotating = schedulingType === 'fixed_round_robin' ? teamHosts.filter((h) => !isFixed(h)) : [];
-    if (schedulingType === 'collective' || (fixed.length > 0 && rotating.length === 0)) {
-      const attending = schedulingType === 'collective' ? teamHosts : fixed;
-      noHostHasCalendar = attending.length > 0 && attending.every(lacksCalendar);
-    } else if (fixed.length > 0) {
-      if (fixed.every(lacksCalendar)) gapHosts = rotating.filter(lacksCalendar);
-    } else {
-      gapHosts = teamHosts.filter(lacksCalendar);
-    }
-  }
-  // The roster arrives in no set order: `joinHostNames` sorts and joins it in
-  // the page's locale, so the server render and the browser's agree.
-  const gapTemplate =
-    gapHosts.length === 1 ? m.locationTeamNoDestinationOne : m.locationTeamNoDestinationMany;
-  const linkGapWarning = noHostHasCalendar
-    ? m.locationTeamNoDestinationAll
-    : gapHosts.length > 0
-      ? gapTemplate.replace('{names}', joinHostNames(gapHosts, locale))
-      : null;
-  const conferencingHint = !teamHosts
-    ? m.locationConferencingHint
-    : schedulingType === 'round_robin'
-      ? m.locationTeamConferencingHint
-      : m.locationTeamSharedConferencingHint;
-
-  return (
-    <div className="flex flex-col gap-field">
-      <Field label={m.fLocation}>
-        <select
-          value={kind}
-          onChange={(e) => {
-            const next = e.target.value as LocationKind | '';
-            onKind(next);
-            // Detail belongs to the kind that asked for it — carrying an
-            // address over into "Phone" would be worse than starting clean.
-            if (next !== kind) onDetail('');
-          }}
-          className={inputCls}
-        >
-          <option value="">{m.locationNone}</option>
-          {LOCATION_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {kindLabel[k]}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {kind && kind !== 'conferencing' ? (
-        <Field label={detailLabel[kind] ?? m.fLocation}>
-          <input
-            value={detail}
-            onChange={(e) => onDetail(e.target.value)}
-            placeholder={m.locationPlaceholder}
-            className={inputCls}
-          />
-        </Field>
-      ) : null}
-
-      {kind === 'conferencing' ? (
-        <p className="text-xs text-muted-foreground">{conferencingHint}</p>
-      ) : null}
-
-      {/* No connect button, unlike the personal warning below: each host
-          sets their own calendar, so there is nothing to click for them. */}
-      {linkGapWarning ? (
-        <div className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground">
-          <p>{linkGapWarning}</p>
-        </div>
-      ) : null}
-
-      {missingDestination ? (
-        <div className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground">
-          <p>{m.locationNoDestinationWarning}</p>
-          <Link href="/admin/connections" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
-            {m.calendarLinkConnect}
-          </Link>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * One-off invite links (#69 / AB2, #110) — the minting panel.
- *
- * WHAT A HOST DOES HERE: mint a link, copy it (now or days later), see which
- * ones have been used, and revoke one they sent to the wrong person.
- *
- * Copying it LATER is the whole reason this list shows the token at all. The
- * storage policy in `docs/adr/0003-public-tokens-have-two-storage-policies.md`
- * chose clear text over the manage token's show-once hashing precisely because
- * the host is this token's custodian rather than its recipient: they mint it,
- * then paste it into an email, a DM or an applicant-tracking field, possibly
- * minutes or days later and possibly for five candidates at once. Show-once
- * would mean re-minting every time this panel closed.
- *
- * NOT A SECURITY CONTROL, and the copy must never imply otherwise. A one-off
- * link stops a link sent to one person from being forwarded and re-used; it
- * authenticates nobody. The per-IP limiter is the security control.
- *
- * Loads on MOUNT rather than on save, and holds its own state, so an unreachable
- * API costs the host this list and never the unsaved edits in the rest of the
- * form.
- */
-function OneOffLinksSection({
-  eventTypeId,
-  eventIsPublic,
-  m,
-  locale,
-}: {
-  /** Absent until the event exists — you cannot grant access to nothing. */
-  eventTypeId?: string;
-  /** Requirement 4: a link over a publicly bookable event limits nothing. */
-  eventIsPublic: boolean;
-  m: EventTypeMessages;
-  locale: 'en' | 'es';
-}) {
-  const t = m.oneOffLinks;
-  const { success } = useToast();
-  const [links, setLinks] = useState<OneOffLinkView[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!eventTypeId) return;
-    let cancelled = false;
-    void listOneOffLinksAction(eventTypeId).then((r) => {
-      if (cancelled) return;
-      if (r.ok) setLinks(r.links);
-      else setError(t.failed);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [eventTypeId, t.failed]);
-
-  const mint = async () => {
-    if (!eventTypeId || busy) return;
-    setBusy(true);
-    setError(null);
-    const r = await mintOneOffLinkAction(eventTypeId);
-    setBusy(false);
-    if (!r.ok) {
-      setError(t.failed);
-      return;
-    }
-    setLinks((prev) => [r.link, ...prev]);
-    // Put the fresh link on the clipboard straight away: minting one and then
-    // pasting it is a single intention, and the host came here to send it.
-    // ONE toast for the pair — "created" then "copied" back to back reports a
-    // single action twice and the second would hide the first.
-    const copied = await copy(r.link, { quiet: true });
-    success(copied ? t.copiedOnMint : t.minted);
-  };
-
-  /**
-   * Returns whether the clipboard actually took it, so the caller can say which
-   * of the two things happened rather than claiming the better one.
-   *
-   * A blocked clipboard is not an error worth a toast: the path is rendered in
-   * full in the row beside the button and stays selectable, which is the
-   * fallback that matters over plain HTTP and in embedded webviews.
-   */
-  const publicOrigin = usePublicOrigin();
-  const copy = async (link: OneOffLinkView, opts?: { quiet?: boolean }): Promise<boolean> => {
-    try {
-      await navigator.clipboard.writeText(`${publicOrigin()}${link.path}`);
-      track('link_copied', { link: 'one_off' });
-      setCopiedId(link.id);
-      // Let the row settle back to "Copy". Without this the button reads
-      // "Copied." for the rest of the session and stops looking like a control.
-      window.setTimeout(() => setCopiedId((id) => (id === link.id ? null : id)), 2000);
-      if (!opts?.quiet) success(t.copied);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const revoke = async (link: OneOffLinkView) => {
-    if (!eventTypeId || busy) return;
-    setBusy(true);
-    setError(null);
-    const r = await revokeOneOffLinkAction(eventTypeId, link.id);
-    setBusy(false);
-    if (!r.ok) {
-      setError(t.failed);
-      return;
-    }
-    setLinks((prev) =>
-      prev.map((l) => (l.id === link.id ? { ...l, state: 'revoked', revokedAt: Date.now() } : l)),
-    );
-    success(t.revoked);
-  };
-
-  const stateLabel = (state: OneOffLinkView['state']) =>
-    state === 'live' ? t.stateLive : state === 'consumed' ? t.stateConsumed : t.stateRevoked;
-
-  return (
-    <div className="flex flex-col gap-inline">
-      <span className="text-sm font-semibold text-muted-foreground">{t.title}</span>
-      <p className="text-xs text-muted-foreground">{t.hint}</p>
-
-      {/* Requirement 4: COPY PLUS A CONDITION, never a block. A host may have a
-          reason to mint one over a visible event, so nothing here is disabled —
-          they are told what it does and does not buy, where they mint it. */}
-      {eventIsPublic ? (
-        <p className="rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground">
-          {t.publicWarning}
-        </p>
-      ) : null}
-
-      {!eventTypeId ? (
-        // A link is a grant over an event type, so there is nothing to grant
-        // until the event has an id. Said plainly rather than hidden, so the
-        // feature is discoverable while creating an event.
-        <p className="text-xs text-muted-foreground">{t.saveFirst}</p>
-      ) : (
-        <>
-          <div>
-            <Button type="button" variant="outline" onClick={mint} disabled={busy}>
-              {t.mint}
-            </Button>
-          </div>
-
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
-
-          {links.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t.empty}</p>
-          ) : (
-            <ul className="flex flex-col gap-inline">
-              {links.map((link) => {
-                const dead = link.state !== 'live';
-                return (
-                  <li
-                    key={link.id}
-                    className={cn(
-                      'flex flex-wrap items-center gap-inline rounded-md border border-border px-field py-inline',
-                      dead && 'opacity-60',
-                    )}
-                  >
-                    {/* The token itself, readable and selectable. The clipboard
-                        button is the fast path; this is the one that still works
-                        when the browser blocks clipboard access, which it does
-                        over plain HTTP and in some embedded webviews. */}
-                    <code className="min-w-0 flex-1 truncate font-mono text-xs" title={link.path}>
-                      {link.path}
-                    </code>
-                    <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                      {stateLabel(link.state)}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {t.createdAt.replace(
-                        '{date}',
-                        new Date(link.createdAt).toLocaleDateString(locale),
-                      )}
-                    </span>
-                    {/* Copy stays available on a DEAD link too: a host looking at
-                        a used link may well want to check which URL they sent. */}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void copy(link)}
-                      aria-label={`${t.copy} — ${link.path}`}
-                    >
-                      {copiedId === link.id ? t.copied : t.copy}
-                    </Button>
-                    {link.state === 'live' ? (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => void revoke(link)}
-                        disabled={busy}
-                      >
-                        {t.revoke}
-                      </Button>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
+  EDITOR_TABS,
+  FIELD_IDS,
+  errorCounts,
+  firstError,
+  validateDraft,
+  type EditorTab,
+  type FieldError,
+} from './validation';
+import { AdvancedSettings, advancedSummary } from './sections/advanced';
+import { AgentsTab } from './sections/agents';
+import { DurationField } from './sections/duration';
+import { NoticeField } from './sections/notice';
+import { CALENDAR_TEXT_IDS, CalendarTextSection } from './sections/calendar-text';
+import {
+  AvailabilityField,
+  type AvailabilitySource,
+  type ScheduleRule,
+} from './sections/availability';
+import { openDraftPreview } from './draft-preview';
+import { ChevronIcon, EventTypeMessages, FIELD_TYPES, Field, HostCell, HostRow, SCHEDULING_METHODS, SchedulingMethod, TeamMemberOption, errorAria, inputCls } from './sections/shared';
+import { RemindersSection } from './sections/reminders';
+import { CalendarsForEventSection } from './sections/calendars';
+import { LocationField } from './sections/location';
+import { OneOffLinksSection } from './sections/one-off-links';
+import { BookingWindowField } from './sections/booking-window';
+import { TrackingKey, TrackingSection, invalidTrackingKeys, trackingKeysShown } from './sections/tracking';
 
 export function EventTypeForm({
   initial,
@@ -899,9 +77,11 @@ export function EventTypeForm({
   headerExtras,
   crmCatalog,
   locale = 'en',
+  mcpUrl,
+  workingHours,
 }: {
   initial?: EventType;
-  schedules?: Array<{ id: string; name: string }>;
+  schedules?: Array<{ id: string; name: string; isDefault?: boolean }>;
   messages: EventTypeMessages;
   /** Location-kind names (from the shared `location` catalog) — the same copy
    *  the public booking page and the manage page render. */
@@ -952,52 +132,97 @@ export function EventTypeForm({
   crmCatalog?: CrmPropertyCatalog;
   /** Resolves the Select primitives' own search/no-results copy. */
   locale?: 'en' | 'es';
+  /** The MCP server address agents connect to (AI Agents tab); null when this
+   *  installation offers no sign-in connection. */
+  mcpUrl?: string | null;
+  /** The host's working hours: shown under "My working hours", and where
+   *  custom hours start from. */
+  workingHours?: { timeZone: string; rules: ScheduleRule[] } | null;
 }) {
   // Declared before the state that reads it: the mapping list is stored keyed
   // by provider, and with no adapter wired there is no key to read.
   const crmProvider = crmCatalog?.provider ?? null;
   const router = useRouter();
-  const [title, setTitle] = useState(initial?.title ?? '');
-  const [slug, setSlug] = useState(initial?.slug ?? '');
-  const [slugTouched, setSlugTouched] = useState(!!initial);
-  const [description, setDescription] = useState(initial?.description ?? '');
-  // Where the meeting happens: a KIND plus, for the kinds that need one, a
-  // detail. '' is "not specified" — the same absent value the column always had.
-  const [locationKind, setLocationKind] = useState<LocationKind | ''>(initial?.location?.kind ?? '');
-  const [locationDetail, setLocationDetail] = useState(initial?.location?.detail ?? '');
-  const [lengthMinutes, setLength] = useState(initial?.lengthMinutes ?? 30);
-  // Hydrate from the stored event — these used to default silently, so EDITING
-  // an event reset its notice/interval/buffers on save (QA2 fix 2).
-  const [minNotice, setMinNotice] = useState(initial?.minimumBookingNotice ?? 120);
-  // Booking window, hydrated for the same reason: '' is "no limit", which is
-  // what every event that predates it reads as. The error waits for a blur or
-  // a save attempt.
-  const [windowDays, setWindowDays] = useState<number | ''>(initial?.bookingWindowDays ?? '');
+  // Every value the host edits lives in ONE draft (see `draft.ts`), so the
+  // editor's parts share it and the save is a pure function of it. The setters
+  // below keep the names this component always used.
+  const [draft, dispatch] = useReducer(draftReducer, undefined, () =>
+    initialDraft({ initial, crmProvider, teamMembers, connections, workingHours }),
+  );
+  const setter =
+    <K extends keyof EventTypeDraft>(key: K) =>
+    (value: EventTypeDraft[K] | ((prev: EventTypeDraft[K]) => EventTypeDraft[K])) =>
+      dispatch({ type: 'set', key, value } as DraftAction);
+  const {
+    title,
+    slug,
+    slugTouched,
+    description,
+    locationKind,
+    locationDetail,
+    lengthMinutes,
+    minNotice,
+    windowDays,
+    slotInterval,
+    beforeBuf,
+    afterBuf,
+    seats,
+    scheduleId,
+    requiresConfirmation,
+    preventDuplicateBookings,
+    hidden,
+    redirectUrl,
+    redirectData,
+    trackingDraft,
+    reminders,
+    fields,
+    crmMappings,
+    conflictIds,
+    destinationId,
+    schedulingType,
+    rrDistribution,
+    hosts,
+  } = draft;
+  const setTitle = setter('title');
+  const setSlug = setter('slug');
+  const setSlugTouched = setter('slugTouched');
+  const setDescription = setter('description');
+  const setCalendarTitle = setter('calendarTitle');
+  const setCalendarDescription = setter('calendarDescription');
+  const setLocationKind = setter('locationKind');
+  const setLocationDetail = setter('locationDetail');
+  const setLength = setter('lengthMinutes');
+  const setMinNotice = setter('minNotice');
+  const setWindowDays = setter('windowDays');
+  const setSlotInterval = setter('slotInterval');
+  const setBeforeBuf = setter('beforeBuf');
+  const setAfterBuf = setter('afterBuf');
+  const setSeats = setter('seats');
+  const setScheduleId = setter('scheduleId');
+  const setRequiresConf = setter('requiresConfirmation');
+  const setPreventDuplicate = setter('preventDuplicateBookings');
+  const setHidden = setter('hidden');
+  const setRedirectUrl = setter('redirectUrl');
+  const setRedirectData = setter('redirectData');
+  const setTrackingDraft = setter('trackingDraft');
+  const setReminders = setter('reminders');
+  const setFields = setter('fields');
+  const setCrmMappings = setter('crmMappings');
+  const setConflictIds = setter('conflictIds');
+  const setDestinationId = setter('destinationId');
+  const setSchedulingType = setter('schedulingType');
+  const setRrDistribution = setter('rrDistribution');
+  const setHosts = setter('hosts');
+  const setAvailabilitySource = setter('availabilitySource');
+  const setCustomHours = setter('customHours');
+
+  // The booking window's error waits for a blur or a save attempt.
   const [windowChecked, setWindowChecked] = useState(false);
   const windowInputRef = useRef<HTMLInputElement>(null);
   const windowInvalid =
     windowDays !== '' && (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > MAX_BOOKING_WINDOW_DAYS);
-  const [slotInterval, setSlotInterval] = useState<number | ''>(
-    initial?.slotInterval ?? initial?.lengthMinutes ?? 30,
-  );
-  const [beforeBuf, setBeforeBuf] = useState(initial?.beforeEventBuffer ?? 0);
-  const [afterBuf, setAfterBuf] = useState(initial?.afterEventBuffer ?? 0);
-  const [seats, setSeats] = useState<number | ''>(initial?.seatsPerTimeSlot ?? '');
-  const [scheduleId, setScheduleId] = useState<string>(initial?.scheduleId ?? '');
-  const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
-  // Duplicate-booking guard (#69). Hydrated from the event so that EDITING one
-  // cannot silently switch it back off — the class of defect QA2 fix 2 already
-  // corrected on this form for notice/interval/buffers. A new event starts off,
-  // which is also what every event that predates this reads as.
-  const [preventDuplicateBookings, setPreventDuplicate] = useState(
-    initial?.preventDuplicateBookings ?? false,
-  );
-  const [hidden, setHidden] = useState(initial?.hidden ?? false);
-  // Redirect after booking. '' is "none", the same absent value the column has.
-  // The error waits for a blur or a save attempt, so typing the address is not
-  // interrupted by it on the first keystroke.
-  const [redirectUrl, setRedirectUrl] = useState(initial?.successRedirectUrl ?? '');
-  const [redirectData, setRedirectData] = useState<SuccessRedirectData | ''>(initial?.successRedirectData ?? '');
+  // Redirect after booking. The error waits for a blur or a save attempt, so
+  // typing the address is not interrupted by it on the first keystroke.
   const [redirectChecked, setRedirectChecked] = useState(false);
   const redirectTrimmed = redirectUrl.trim();
   const redirectInvalid = redirectTrimmed !== '' && !isSuccessRedirectUrl(redirectTrimmed);
@@ -1007,53 +232,12 @@ export function EventTypeForm({
   const redirectInputRef = useRef<HTMLInputElement>(null);
   // Tracking and pixels: one text per vendor, '' = off. Same wait as above
   // before an error shows: a blur of that field, or a save attempt.
-  const [trackingDraft, setTrackingDraft] = useState<TrackingDraft>(() => trackingDraftOf(initial?.tracking));
   const [trackingChecked, setTrackingChecked] = useState<Set<TrackingKey>>(() => new Set());
   const trackingKeys = trackingKeysShown(hostScriptsEnabled);
   const trackingInvalid = invalidTrackingKeys(trackingDraft, trackingKeys);
   const trackingInputRefs = useRef<Partial<Record<TrackingKey, HTMLInputElement | HTMLSelectElement | null>>>({});
-  // Reminders + follow-up (#68). Editing opens on the effective list the API
-  // returns (a never-configured event surfaces the shipped 24h + 1h with the
-  // follow-up off). CREATE has no `initial`, so it seeds the same shipped list
-  // — the form both shows what the new event will send and submits it, instead
-  // of displaying "no reminders" and then storing that empty list as a
-  // deliberate "none".
-  const [reminders, setReminders] = useState<EventReminder[]>(
-    initial?.reminders ?? defaultEventReminders(),
-  );
-  const [fields, setFields] = useState<IntakeField[]>(
-    (initial?.bookingFields as IntakeField[] | undefined)?.map((f) => ({
-      name: f.name,
-      label: f.label,
-      type: f.type,
-      required: !!f.required,
-      defaultCountry: f.defaultCountry,
-      options: f.options,
-    })) ?? [],
-  );
-  // H2 (#108) — CRM property mappings for THIS provider. Kept as a flat list
-  // in the editor and re-keyed by provider on save, so the section never has to
-  // know which CRM is wired.
-  const [crmMappings, setCrmMappings] = useState<CrmPropertyMapping[]>(
-    () => (crmProvider ? (initial?.crmPropertyMappings?.[crmProvider] ?? []) : []),
-  );
   const eventTeamId = initial?.teamId ?? teamId;
   const isTeamEvent = !!eventTeamId && !!teamMembers && !!scheduling;
-  // PHASE 2 — per-event calendar selection (personal events only). Prefill
-  // from the event's own configured set when non-empty; otherwise default to
-  // the host's CURRENT member-level settings (all check_conflicts calendars +
-  // the member's is_destination calendar) — identical to today's behavior.
-  const [conflictIds, setConflictIds] = useState<Set<string>>(
-    () =>
-      new Set(
-        initial?.conflictCalendarIds && initial.conflictCalendarIds.length > 0
-          ? initial.conflictCalendarIds
-          : (connections ?? []).filter((c) => c.checkConflicts).map((c) => c.id),
-      ),
-  );
-  const [destinationId, setDestinationId] = useState<string | null>(
-    initial?.destinationCalendarId ?? (connections ?? []).find((c) => c.isDestination)?.id ?? null,
-  );
   const toggleConflict = (id: string) =>
     setConflictIds((ids) => {
       const next = new Set(ids);
@@ -1061,31 +245,10 @@ export function EventTypeForm({
       else next.add(id);
       return next;
     });
-  const [schedulingType, setSchedulingType] = useState<SchedulingMethod>(
-    (SCHEDULING_METHODS as readonly string[]).includes(initial?.schedulingType ?? '')
-      ? (initial!.schedulingType as SchedulingMethod)
-      : 'round_robin',
-  );
-  // Round robin's distribution method; 'availability' (null in the column)
-  // is today's behavior, 'equal' counts this event's bookings only.
-  const [rrDistribution, setRrDistribution] = useState<'availability' | 'equal'>(
-    initial?.rrDistribution === 'equal' ? 'equal' : 'availability',
-  );
   // Equal distribution ranks hosts by bookings alone, so priority and weight
   // have nothing to say there.
   const ranksHosts =
     schedulingType !== 'collective' && !(schedulingType === 'round_robin' && rrDistribution === 'equal');
-  const [hosts, setHosts] = useState<HostRow[]>(
-    (teamMembers ?? []).map((tm) => {
-      const existing = initial?.hosts?.find((h) => h.memberId === tm.memberId);
-      return {
-        memberId: tm.memberId,
-        priority: existing?.priority ?? 0,
-        weight: existing?.weight ?? 100,
-        isFixed: existing?.isFixed ?? false,
-      };
-    }),
-  );
   const setHost = (memberId: string, patch: Partial<HostRow>) =>
     setHosts((hs) => hs.map((h) => (h.memberId === memberId ? { ...h, ...patch } : h)));
   /** Swap a question with its neighbour — bookingFields is an ordered array and
@@ -1123,840 +286,885 @@ export function EventTypeForm({
     if (!slugTouched) setSlug(v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''));
   };
 
-  const save = () => {
-    // The API refuses it too; stopping here keeps the reason beside the field,
-    // and focus goes there, since the field sits far below the Save button.
-    if (windowInvalid) {
-      setWindowChecked(true);
-      windowInputRef.current?.focus();
-      return;
-    }
-    // Reserved names are a hard stop, not just the inline warning — saving one
-    // would make the public page ask the attendee twice (QA3 fix 3).
-    if (fields.some((f) => f.name && isReservedFieldName(f.name))) {
-      setRes({ ok: false, message: m.reservedBlocked });
-      return;
-    }
-    // The API refuses it too; stopping here keeps the reason beside the field,
-    // and focus goes there, since the field sits far below the Save button.
-    if (redirectInvalid) {
-      setRedirectChecked(true);
-      redirectInputRef.current?.focus();
-      return;
-    }
-    if (trackingEnabled && trackingInvalid.length > 0) {
-      setTrackingChecked(new Set(trackingKeys));
-      trackingInputRefs.current[trackingInvalid[0]!]?.focus();
-      return;
-    }
-    start(async () => {
-      const payload: EventTypePayload = {
-        id: initial?.id,
-        title,
-        slug,
-        description: description.trim() || null,
-        location: locationKind
-          ? {
-              kind: locationKind,
-              // Conferencing has no host-authored detail — the link is minted
-              // by the calendar port at write-out.
-              detail: locationKind === 'conferencing' ? null : locationDetail.trim() || null,
-            }
-          : null,
-        lengthMinutes: Number(lengthMinutes),
-        minimumBookingNotice: Number(minNotice),
-        bookingWindowDays: windowDays === '' ? null : Number(windowDays),
-        slotInterval: slotInterval === '' ? null : Number(slotInterval),
-        beforeEventBuffer: Number(beforeBuf),
-        afterEventBuffer: Number(afterBuf),
-        seatsPerTimeSlot: seats === '' ? null : Number(seats),
-        scheduleId: scheduleId || null,
-        requiresConfirmation,
-        // Travels on create AND edit, personal AND team events — both public
-        // write paths honour it, so the editor must not offer it on only one.
-        preventDuplicateBookings,
-        hidden,
-        bookingFields: fields.filter((f) => f.name && f.label),
-        reminders,
-        successRedirectUrl: redirectTrimmed || null,
-        // Nothing to carry without an address: cleared with it.
-        successRedirectData: redirectTrimmed && redirectData ? redirectData : null,
-        // Blank ids are left out, and nothing left is null ("no tracking").
-        ...(trackingEnabled ? { tracking: normalizeEventTracking(trackingDraft) } : {}),
-        // Re-keyed by provider, and only sent when an adapter is wired: a
-        // deployment with no CRM must not rewrite this column at all, so an
-        // event configured on a CRM-enabled deployment keeps its mappings if it
-        // is later edited on one where the CRM is off.
-        ...(crmProvider
-          ? {
-              crmPropertyMappings: {
-                // Other providers' mappings are preserved verbatim — this
-                // editor only ever owns the wired one's list.
-                ...(initial?.crmPropertyMappings ?? {}),
-                [crmProvider]: deliverableMappings(crmMappings, fields),
-              },
-            }
-          : {}),
-        ...(isTeamEvent
-          ? {
-              // teamId travels on CREATE only — an existing event never
-              // changes teams from this form.
-              ...(initial ? {} : { teamId }),
-              schedulingType,
-              rrDistribution: rrDistribution === 'equal' ? 'equal' : null,
-              hosts: hosts.map((h) => ({
-                memberId: h.memberId,
-                priority: h.priority,
-                weight: h.weight,
-                isFixed: schedulingType === 'fixed_round_robin' ? h.isFixed : false,
-              })),
-            }
-          : connections
-            ? {
-                // PHASE 2 — personal events only; team events send no calendar
-                // config (the API ignores it for team events regardless).
-                conflictCalendarIds: [...conflictIds],
-                destinationCalendarId: destinationId,
-              }
-            : {}),
-      };
-      const r = await saveEventTypeAction(payload);
-      setRes(r);
-      // Success is a TOAST, not a quiet line below the fold — the old inline
-      // "Saved." was easy to miss (QA4 fix 2). Errors stay inline (persistent).
-      if (r.ok) success(m.saved);
-      // Create on a dedicated /new surface → return to the list on success.
-      if (r.ok && !initial && redirectOnSuccess) router.push(redirectOnSuccess);
+  // --- Tabs, validation and guidance -------------------------------------
+  // One error list (`validateDraft`) drives the message under each field, the
+  // count on each tab, the summary at the top and the save's jump to the
+  // first error. Errors wait for a blur of that field or a save attempt.
+  const editor = m.editor;
+  const crmTabShown = (!!crmCatalog && !!crmProvider) || trackingEnabled;
+  const tabItems = EDITOR_TABS.filter((t) => t !== 'crm' || crmTabShown);
+  const [activeTab, setActiveTab] = useState<EditorTab>('general');
+  // The active tab lives in the URL (`?tab=`), so a reload or a shared link
+  // opens the same tab. Read after mount: the server render has no URL here.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted && (tabItems as readonly string[]).includes(wanted)) setActiveTab(wanted as EditorTab);
+  }, []);
+  const selectTab = (tab: EditorTab) => {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    if (tab === 'general') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', tab);
+    window.history.replaceState(window.history.state, '', url);
+  };
+
+  const [advancedOpen, setAdvancedOpen] = useState(() => advancedSummary(draft, editor.advanced).custom);
+  const advanced = advancedSummary(draft, editor.advanced);
+  const [touched, setTouched] = useState<Set<string>>(() => new Set());
+  const touch = (fieldId: string) => setTouched((t) => (t.has(fieldId) ? t : new Set(t).add(fieldId)));
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [serverErrors, setServerErrors] = useState<FieldError[]>([]);
+  const [serverPlain, setServerPlain] = useState<string[]>([]);
+  const errors = validateDraft(draft, { m, trackingEnabled, trackingKeys, isTeamEvent, locale });
+  const visibleErrors = submitAttempted ? [...errors, ...serverErrors] : serverErrors;
+  const counts = errorCounts(visibleErrors);
+  const errorFor = (fieldId: string): string | null => {
+    const server = serverErrors.find((e) => e.fieldId === fieldId);
+    if (server) return server.message;
+    if (!submitAttempted && !touched.has(fieldId)) return null;
+    return errors.find((e) => e.fieldId === fieldId)?.message ?? null;
+  };
+  const tabLabels: Record<EditorTab, string> = editor.tabs;
+
+  // Going to an error: open its tab and section, then focus it once they are
+  // rendered (an effect, so it runs after the commit that un-hides them).
+  const [pendingFocus, setPendingFocus] = useState<FieldError | null>(null);
+  const goToError = (e: FieldError) => {
+    if (e.tab !== activeTab) selectTab(e.tab);
+    if (e.section === 'advanced') setAdvancedOpen(true);
+    setPendingFocus(e);
+  };
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const el = document.getElementById(pendingFocus.fieldId);
+    el?.scrollIntoView?.({ block: 'center' });
+    el?.focus();
+    setPendingFocus(null);
+  }, [pendingFocus]);
+
+  // The tabs differ in length, so the page's scrollbar would come and go as the
+  // host switches tabs and the centred editor would jump sideways. Reserve its
+  // space while the editor is open.
+  useEffect(() => {
+    const root = document.documentElement;
+    const before = root.style.scrollbarGutter;
+    root.style.scrollbarGutter = 'stable';
+    return () => {
+      root.style.scrollbarGutter = before;
+    };
+  }, []);
+
+  // Unsaved changes: the back link asks first, and so does leaving the page.
+  const [dirty, setDirty] = useState(false);
+  const firstDraft = useRef(draft);
+  useEffect(() => {
+    if (draft !== firstDraft.current) setDirty(true);
+  }, [draft]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+  const { confirm, dialog } = useConfirmDialog(locale);
+  const onBack = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (!dirty) return;
+    e.preventDefault();
+    void confirm({
+      title: editor.unsaved.title,
+      message: editor.unsaved.body,
+      confirmLabel: editor.unsaved.confirm,
+      cancelLabel: editor.unsaved.cancel,
+      destructive: true,
+    }).then((discard) => {
+      if (!discard) return;
+      setDirty(false);
+      router.push(backHref);
     });
   };
 
+  /** The availability source. Custom hours start from the working hours the
+   *  first time; a saved schedule starts on the first one. */
+  const onAvailabilitySource = (next: AvailabilitySource) => {
+    if (next === 'custom' && draft.customHours.ranges.length === 0) setCustomHours(prefillCustomHours(workingHours));
+    if (next === 'saved' && !scheduleId && schedules[0]) setScheduleId(schedules[0].id);
+    setAvailabilitySource(next);
+  };
+
+  // What the event looks like right now, unsaved changes included: the eye
+  // button draws it as the booking page in a new tab, and each reminder's
+  // preview renders the real email around it.
+  const draftLocation = locationKind
+    ? { kind: locationKind, detail: locationKind === 'conferencing' ? null : locationDetail.trim() || null }
+    : null;
+  const draftQuestions = fields.filter((f) => f.name && f.label && !isReservedFieldName(f.name));
+  const previewPage = () =>
+    openDraftPreview(
+      {
+        title,
+        description: description.trim() || null,
+        lengthMinutes: Number.isFinite(lengthMinutes) ? lengthMinutes : 30,
+        location: draftLocation,
+        bookingFields: draftQuestions as Parameters<typeof openDraftPreview>[0]['bookingFields'],
+      },
+      { teamId: isTeamEvent ? eventTeamId : null, savedSlug: !isTeamEvent ? initial?.slug : null },
+    );
+  const reminderContext = {
+    title: title.trim() || heading,
+    description: description.trim() || null,
+    lengthMinutes: Number.isFinite(lengthMinutes) && lengthMinutes > 0 ? lengthMinutes : 30,
+    location: draftLocation,
+    questions: draftQuestions.map((f) => ({ name: f.name, label: f.label })),
+  };
+
+  /** Duration, carrying the slot interval along while it still follows it. */
+  const onDuration = (minutes: number) => {
+    if (slotInterval === lengthMinutes && Number.isFinite(minutes)) setSlotInterval(minutes);
+    setLength(minutes);
+  };
+
+  const save = () => {
+    setSubmitAttempted(true);
+    setServerErrors([]);
+    setServerPlain([]);
+    // The components that keep their own "checked" state show their errors too.
+    setWindowChecked(true);
+    setRedirectChecked(true);
+    if (trackingEnabled) setTrackingChecked(new Set(trackingKeys));
+    const first = firstError(errors);
+    if (first) {
+      goToError(first);
+      return;
+    }
+    start(async () => {
+      const payload = toPayload(draft, {
+        initial,
+        crmProvider,
+        trackingEnabled,
+        isTeamEvent,
+        teamId,
+        hasConnections: !!connections,
+      });
+      const r = await saveEventTypeAction(payload);
+      setRes(r);
+      if (r.ok) {
+        // Success is a TOAST, not a quiet line below the fold — the old inline
+        // "Saved." was easy to miss (QA4 fix 2).
+        success(m.saved);
+        setDirty(false);
+        firstDraft.current = draft;
+        // Create on a dedicated /new surface → return to the list on success.
+        if (!initial && redirectOnSuccess) router.push(redirectOnSuccess);
+        return;
+      }
+      // A refusal that names a field points at it, like the editor's own checks.
+      const mapped = serverFieldErrors(r, editor.errors);
+      setServerErrors(mapped);
+      setServerPlain(mapped.length ? [] : [r.message ?? editor.errors.summaryOne]);
+      if (mapped[0]) goToError(mapped[0]);
+    });
+  };
+
+  const sectionHeading = (text: string) => (
+    <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{text}</h2>
+  );
+  const fieldError = (fieldId: string) => {
+    const error = errorFor(fieldId);
+    return { error, errorId: `${fieldId}-error`, aria: errorAria(error, `${fieldId}-error`) };
+  };
+  const titleErr = fieldError(FIELD_IDS.title);
+  const slugErr = fieldError(FIELD_IDS.slug);
+  const minNoticeErr = fieldError(FIELD_IDS.minNotice);
+  const beforeErr = fieldError(FIELD_IDS.beforeBuf);
+  const afterErr = fieldError(FIELD_IDS.afterBuf);
+  const seatsErr = fieldError(FIELD_IDS.seats);
+  const intervalErr = fieldError(FIELD_IDS.slotInterval);
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); save(); }}>
+    <form noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
       <FormHeader
         gutter="responsive"
         backHref={backHref}
         backLabel={backLabel}
         title={heading}
+        onBack={onBack}
         actions={
           <span className="flex items-center gap-field">
             {headerExtras}
-            <Button type="submit" disabled={pending || !title || !slug}>
+            <button
+              type="button"
+              onClick={previewPage}
+              aria-label={editor.preview.eye}
+              title={editor.preview.eye}
+              data-testid="et-preview-page"
+              className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+            >
+              <i aria-hidden className="pi pi-eye" style={{ fontSize: 15 }} />
+            </button>
+            <Button type="submit" disabled={pending}>
               {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
             </Button>
           </span>
         }
       />
-      <div className="flex flex-col gap-card rounded-md border border-border bg-card p-card">
-      <div className="grid grid-cols-2 gap-field">
-        <Field label={m.fTitle}>
-          <input value={title} onChange={(e) => onTitle(e.target.value)} className={inputCls} />
-        </Field>
-        <Field label={m.fSlug}>
-          <input value={slug} onChange={(e) => { setSlug(e.target.value); setSlugTouched(true); }} className={inputCls} />
-        </Field>
-      </div>
-      <Field label={m.fDescription}>
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputCls} />
-      </Field>
-      <LocationField
-        kind={locationKind}
-        detail={locationDetail}
-        onKind={setLocationKind}
-        onDetail={setLocationDetail}
-        connections={connections}
-        teamHosts={isTeamEvent ? teamMembers : undefined}
-        schedulingType={schedulingType}
-        fixedHostIds={hosts.filter((h) => h.isFixed).map((h) => h.memberId)}
-        m={m}
-        locationLabels={locationLabels}
-        locale={locale}
-      />
-      <div className="grid grid-cols-3 gap-field">
-        <Field label={m.fLength}>
-          <input type="number" value={lengthMinutes} onChange={(e) => setLength(Number(e.target.value))} className={inputCls} />
-        </Field>
-        <Field label={m.fSlotInterval}>
-          <input type="number" value={slotInterval} onChange={(e) => setSlotInterval(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
-        </Field>
-        <Field label={m.fMinNotice}>
-          <input type="number" value={minNotice} onChange={(e) => setMinNotice(Number(e.target.value))} className={inputCls} />
-        </Field>
-      </div>
-      <div className="grid grid-cols-3 gap-field">
-        <Field label={m.fBufferBefore}>
-          <input type="number" value={beforeBuf} onChange={(e) => setBeforeBuf(Number(e.target.value))} className={inputCls} />
-        </Field>
-        <Field label={m.fBufferAfter}>
-          <input type="number" value={afterBuf} onChange={(e) => setAfterBuf(Number(e.target.value))} className={inputCls} />
-        </Field>
-        <Field label={m.fSeats}>
-          <input type="number" min={1} placeholder="1" value={seats} onChange={(e) => setSeats(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
-        </Field>
-      </div>
-      <BookingWindowField
-        inputRef={windowInputRef}
-        value={windowDays}
-        onChange={setWindowDays}
-        onBlur={() => setWindowChecked(true)}
-        invalid={windowChecked && windowInvalid}
-        m={m.bookingWindow}
-      />
-      <Field label={m.fSchedule}>
-        <select value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} className={inputCls}>
-          <option value="">
-            {schedules.length ? m.useDefaultSchedule : m.noSchedules}
-          </option>
-          {schedules.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {connections ? (
-        <CalendarsForEventSection
-          connections={connections}
-          conflictIds={conflictIds}
-          destinationId={destinationId}
-          onToggleConflict={toggleConflict}
-          onSetDestination={setDestinationId}
-          m={m}
+      {dialog}
+      <div className="flex min-w-0 flex-col gap-card">
+        <ErrorSummary
+          errors={visibleErrors}
+          plain={serverPlain}
+          tabLabels={tabLabels}
+          onGo={goToError}
+          m={editor.errors}
         />
-      ) : null}
-
-      {/* Where a team event shows its Hosts block, a personal one says it has
-          none and points at team events, so the question "where do I add my
-          team?" has an answer in the same place in either editor. */}
-      {!isTeamEvent && teams ? (
-        <PersonalHostsCard
-          teams={teams}
-          title={m.hostsTitle}
-          canManageTeams={canManageTeams}
-          m={m.teamHosts}
+        <Tabs
+          items={tabItems.map((id) => ({
+            id,
+            label: tabLabels[id],
+            badge: counts[id],
+            badgeLabel:
+              counts[id] === 1 ? editor.tabErrorsOne : editor.tabErrorsMany.replace('{count}', String(counts[id])),
+          }))}
+          active={activeTab}
+          onChange={selectTab}
+          idPrefix="et"
+          label={editor.tabsLabel}
         />
-      ) : null}
 
-      {isTeamEvent && scheduling ? (
-        <div className="flex flex-col gap-card rounded-md border border-border bg-background/40 p-card">
-          <Field label={m.schedulingMethod}>
-            <select
-              value={schedulingType}
-              onChange={(e) => setSchedulingType(e.target.value as SchedulingMethod)}
-              className={inputCls}
-            >
-              {SCHEDULING_METHODS.map((method) => (
-                <option key={method} value={method}>
-                  {scheduling[method]}
-                </option>
-              ))}
-            </select>
-            <span className="mt-tight text-xs text-muted-foreground">{scheduling[`${schedulingType}_hint`]}</span>
-          </Field>
-          {schedulingType === 'round_robin' ? (
-            <Field label={scheduling.distribution}>
-              <select
-                value={rrDistribution}
-                onChange={(e) => setRrDistribution(e.target.value === 'equal' ? 'equal' : 'availability')}
-                className={inputCls}
-              >
-                <option value="availability">{scheduling.availability}</option>
-                <option value="equal">{scheduling.equal}</option>
-              </select>
-              <span className="mt-tight text-xs text-muted-foreground">{scheduling[`${rrDistribution}_hint`]}</span>
-            </Field>
-          ) : null}
-
-          <div className="flex flex-col gap-inline">
-            <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
-            {eventTeamId && teamName ? (
-              <TeamHostsNote
-                teamId={eventTeamId}
-                teamName={teamName}
-                canManageTeams={canManageTeams}
-                m={m.teamHosts}
-              />
-            ) : null}
-            <HostReadiness
-              hosts={teamMembers ?? []}
-              collective={schedulingType === 'collective'}
-              m={m.teamHosts}
-              locale={locale}
-            />
-            {/* Who a booking goes to, then the column header: only the fields
-                the active method actually uses. Below `sm` the header is
-                hidden and each control carries its own label (HostCell): the
-                three columns do not fit beside a name at 360px. */}
-            {ranksHosts ? (
-              <>
-                <p className="text-xs text-muted-foreground">{m.priorityHint}</p>
-                <div className="hidden items-center gap-field px-field text-xs text-muted-foreground sm:flex">
-                  <span className="flex-1" />
-                  <span className="w-28 text-center">{m.priority}</span>
-                  <span className="w-20 text-center">{m.weight}</span>
-                  {schedulingType === 'fixed_round_robin' ? (
-                    <span className="w-16 text-center">{m.fixedHost}</span>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-            {hosts.map((h) => {
-              const name = teamMembers!.find((tm) => tm.memberId === h.memberId)?.displayName ?? h.memberId;
-              return (
-                <div
-                  key={h.memberId}
-                  className="flex flex-col gap-inline rounded-md border border-border bg-card px-field py-inline sm:flex-row sm:items-center sm:gap-field"
+        {/* --- General ------------------------------------------------------ */}
+        <TabPanel id="general" idPrefix="et" active={activeTab === 'general'}>
+          <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card sm:p-group">
+            <section className="flex flex-col gap-field">
+              {sectionHeading(editor.sections.basics)}
+              <p className="text-xs text-muted-foreground">{editor.requiredLegend}</p>
+              <div className="grid grid-cols-1 gap-field sm:grid-cols-2">
+                <Field
+                  label={m.fTitle}
+                  required
+                  requiredLabel={editor.required}
+                  error={titleErr.error}
+                  errorId={titleErr.errorId}
                 >
-                  <span className="text-sm sm:flex-1">{name}</span>
-                  {ranksHosts ? (
-                    <>
-                      <HostCell label={m.priority}>
-                        <HostPrioritySelect
-                          hostName={name}
-                          value={h.priority}
-                          onChange={(priority) => setHost(h.memberId, { priority })}
-                          m={m}
-                          locale={locale}
+                  <input
+                    id={FIELD_IDS.title}
+                    value={title}
+                    onChange={(e) => onTitle(e.target.value)}
+                    onBlur={() => touch(FIELD_IDS.title)}
+                    className={inputCls}
+                    {...titleErr.aria}
+                  />
+                </Field>
+                <Field
+                  label={editor.slugLabel}
+                  required
+                  requiredLabel={editor.required}
+                  error={slugErr.error}
+                  errorId={slugErr.errorId}
+                >
+                  <input
+                    id={FIELD_IDS.slug}
+                    value={slug}
+                    onChange={(e) => { setSlug(e.target.value); setSlugTouched(true); }}
+                    onBlur={() => touch(FIELD_IDS.slug)}
+                    className={inputCls}
+                    {...slugErr.aria}
+                  />
+                </Field>
+              </div>
+              <Field label={m.fDescription}>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputCls} />
+              </Field>
+              <DurationField
+                value={lengthMinutes}
+                onChange={onDuration}
+                onBlur={() => touch(FIELD_IDS.duration)}
+                error={errorFor(FIELD_IDS.duration)}
+                m={editor}
+              />
+              <LocationField
+                kind={locationKind}
+                detail={locationDetail}
+                onKind={setLocationKind}
+                onDetail={setLocationDetail}
+                onDetailBlur={() => touch(FIELD_IDS.locationDetail)}
+                detailError={errorFor(FIELD_IDS.locationDetail)}
+                connections={connections}
+                teamHosts={isTeamEvent ? teamMembers : undefined}
+                schedulingType={schedulingType}
+                fixedHostIds={hosts.filter((h) => h.isFixed).map((h) => h.memberId)}
+                m={m}
+                locationLabels={locationLabels}
+                locale={locale}
+              />
+            </section>
+
+            <section className="flex flex-col gap-field">
+              {sectionHeading(editor.calendarText.section)}
+              <CalendarTextSection
+                title={draft.calendarTitle}
+                description={draft.calendarDescription}
+                onTitle={setCalendarTitle}
+                onDescription={setCalendarDescription}
+                onTitleBlur={() => touch(CALENDAR_TEXT_IDS.title)}
+                onDescriptionBlur={() => touch(CALENDAR_TEXT_IDS.description)}
+                titleError={errorFor(CALENDAR_TEXT_IDS.title)}
+                descriptionError={errorFor(CALENDAR_TEXT_IDS.description)}
+                eventTitle={title}
+                questions={draftQuestions.map((f) => ({ name: f.name, label: f.label }))}
+                seated={seats !== '' && Number(seats) > 1}
+                locale={locale}
+                m={editor.calendarText}
+              />
+            </section>
+
+            <section className="flex flex-col gap-field">
+              {sectionHeading(editor.sections.availability)}
+              <AvailabilityField
+                source={draft.availabilitySource}
+                onSource={onAvailabilitySource}
+                scheduleId={scheduleId}
+                onScheduleId={setScheduleId}
+                schedules={schedules}
+                workingHours={workingHours}
+                customHours={draft.customHours}
+                onCustomHours={setCustomHours}
+                isTeam={isTeamEvent}
+                errorFor={errorFor}
+                locale={locale}
+                m={editor.availability}
+                savedLabel={m.fSchedule}
+              />
+              <div className="grid grid-cols-1 gap-field sm:grid-cols-2">
+                <NoticeField
+                  id={FIELD_IDS.minNotice}
+                  value={minNotice}
+                  onChange={setMinNotice}
+                  error={minNoticeErr.error}
+                  m={editor.notice}
+                />
+              </div>
+            </section>
+
+            {connections || (!isTeamEvent && teams) || (isTeamEvent && scheduling) ? (
+              <section className="flex flex-col gap-field">
+                {sectionHeading(editor.sections.hosts)}
+                {connections ? (
+                  <CalendarsForEventSection
+                    connections={connections}
+                    conflictIds={conflictIds}
+                    destinationId={destinationId}
+                    onToggleConflict={toggleConflict}
+                    onSetDestination={setDestinationId}
+                    m={m}
+                  />
+                ) : null}
+
+                {/* Where a team event shows its Hosts block, a personal one says it has
+                    none and points at team events, so the question "where do I add my
+                    team?" has an answer in the same place in either editor. */}
+                {!isTeamEvent && teams ? (
+                  <PersonalHostsCard
+                    teams={teams}
+                    title={m.hostsTitle}
+                    canManageTeams={canManageTeams}
+                    m={m.teamHosts}
+                  />
+                ) : null}
+
+                {isTeamEvent && scheduling ? (
+                  <div className="flex flex-col gap-card rounded-md border border-border bg-background/40 p-card">
+                    <Field label={m.schedulingMethod}>
+                      <select
+                        value={schedulingType}
+                        onChange={(e) => setSchedulingType(e.target.value as SchedulingMethod)}
+                        className={inputCls}
+                      >
+                        {SCHEDULING_METHODS.map((method) => (
+                          <option key={method} value={method}>
+                            {scheduling[method]}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="mt-tight text-xs text-muted-foreground">{scheduling[`${schedulingType}_hint`]}</span>
+                    </Field>
+                    {schedulingType === 'round_robin' ? (
+                      <Field label={scheduling.distribution}>
+                        <select
+                          value={rrDistribution}
+                          onChange={(e) => setRrDistribution(e.target.value === 'equal' ? 'equal' : 'availability')}
+                          className={inputCls}
+                        >
+                          <option value="availability">{scheduling.availability}</option>
+                          <option value="equal">{scheduling.equal}</option>
+                        </select>
+                        <span className="mt-tight text-xs text-muted-foreground">{scheduling[`${rrDistribution}_hint`]}</span>
+                      </Field>
+                    ) : null}
+
+                    <div className="flex flex-col gap-inline">
+                      <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
+                      {eventTeamId && teamName ? (
+                        <TeamHostsNote
+                          teamId={eventTeamId}
+                          teamName={teamName}
+                          canManageTeams={canManageTeams}
+                          m={m.teamHosts}
                         />
-                      </HostCell>
-                      <HostCell label={m.weight}>
-                        <input
-                          type="number"
-                          min={1}
-                          aria-label={`${name}: ${m.weight}`}
-                          value={h.weight ?? 100}
-                          onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
-                          className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
-                        />
-                      </HostCell>
-                      {schedulingType === 'fixed_round_robin' ? (
-                        <HostCell label={m.fixedHost}>
-                          <label className="flex w-16 cursor-pointer justify-end sm:justify-center" title={m.fixedHostHint}>
-                            <Checkbox
-                              aria-label={`${name}: ${m.fixedHost}`}
-                              checked={h.isFixed}
-                              onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
-                            />
-                          </label>
-                        </HostCell>
                       ) : null}
-                    </>
+                      <HostReadiness
+                        hosts={teamMembers ?? []}
+                        collective={schedulingType === 'collective'}
+                        m={m.teamHosts}
+                        locale={locale}
+                      />
+                      {/* Who a booking goes to, then the column header: only the fields
+                          the active method actually uses. Below `sm` the header is
+                          hidden and each control carries its own label (HostCell): the
+                          three columns do not fit beside a name at 360px. */}
+                      {ranksHosts ? (
+                        <>
+                          <p className="text-xs text-muted-foreground">{m.priorityHint}</p>
+                          <div className="hidden items-center gap-field px-field text-xs text-muted-foreground sm:flex">
+                            <span className="flex-1" />
+                            <span className="w-28 text-center">{m.priority}</span>
+                            <span className="w-20 text-center">{m.weight}</span>
+                            {schedulingType === 'fixed_round_robin' ? (
+                              <span className="w-16 text-center">{m.fixedHost}</span>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : null}
+                      {hosts.map((h) => {
+                        const name = teamMembers!.find((tm) => tm.memberId === h.memberId)?.displayName ?? h.memberId;
+                        return (
+                          <div
+                            key={h.memberId}
+                            className="flex flex-col gap-inline rounded-md border border-border bg-card px-field py-inline sm:flex-row sm:items-center sm:gap-field"
+                          >
+                            <span className="text-sm sm:flex-1">{name}</span>
+                            {ranksHosts ? (
+                              <>
+                                <HostCell label={m.priority}>
+                                  <HostPrioritySelect
+                                    hostName={name}
+                                    value={h.priority}
+                                    onChange={(priority) => setHost(h.memberId, { priority })}
+                                    m={m}
+                                    locale={locale}
+                                  />
+                                </HostCell>
+                                <HostCell label={m.weight}>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    aria-label={`${name}: ${m.weight}`}
+                                    value={h.weight ?? 100}
+                                    onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
+                                    className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
+                                  />
+                                </HostCell>
+                                {schedulingType === 'fixed_round_robin' ? (
+                                  <HostCell label={m.fixedHost}>
+                                    <label className="flex w-16 cursor-pointer justify-end sm:justify-center" title={m.fixedHostHint}>
+                                      <Checkbox
+                                        aria-label={`${name}: ${m.fixedHost}`}
+                                        checked={h.isFixed}
+                                        onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
+                                      />
+                                    </label>
+                                  </HostCell>
+                                ) : null}
+                              </>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {/* After booking: what happens once somebody books. */}
+            <section className="flex flex-col gap-field">
+              {sectionHeading(editor.sections.afterBooking)}
+              {/* Booking-policy booleans. The duplicate-booking guard (#69) joins the
+                  row a host already reads for this class of setting. */}
+              <div className="flex flex-col gap-inline">
+                <div className="flex flex-wrap gap-x-group gap-y-inline">
+                  <label className="flex cursor-pointer items-center gap-inline text-sm">
+                    <Checkbox checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
+                    {m.requiresConfirmation}
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-inline text-sm">
+                    <Checkbox
+                      checked={preventDuplicateBookings}
+                      onChange={(e) => setPreventDuplicate(e.target.checked)}
+                    />
+                    {m.duplicateGuard.label}
+                  </label>
+                </div>
+                {/* Always visible, not gated on the checkbox: the hint carries the
+                    caveat that the guard confirms an address has a booking, and a
+                    caveat shown only after you tick the box informs nothing. */}
+                <p className="text-xs text-muted-foreground">{m.duplicateGuard.hint}</p>
+              </div>
+
+              {/* Redirect after booking. The hint stays visible and the error joins
+                  it, because the hint is what says reschedules and cancellations
+                  never redirect. */}
+              <div className="flex flex-col gap-tight">
+                <Field label={m.successRedirect.label}>
+                  {/* `text` with a URL keyboard, not `type="url"`: the browser's own
+                      bubble must not fire before the editor's message. */}
+                  <input
+                    id={FIELD_IDS.redirectUrl}
+                    ref={redirectInputRef}
+                    type="text"
+                    inputMode="url"
+                    autoComplete="off"
+                    spellCheck={false}
+                    maxLength={MAX_SUCCESS_REDIRECT_URL}
+                    placeholder={m.successRedirect.placeholder}
+                    value={redirectUrl}
+                    onChange={(e) => setRedirectUrl(e.target.value)}
+                    onBlur={() => setRedirectChecked(true)}
+                    aria-invalid={redirectChecked && redirectInvalid ? true : undefined}
+                    aria-describedby={redirectChecked && redirectInvalid ? `${redirectErrorId} ${redirectHintId}` : redirectHintId}
+                    className={inputCls}
+                  />
+                </Field>
+                {redirectChecked && redirectInvalid ? (
+                  <p id={redirectErrorId} className="text-xs text-destructive" role="alert">
+                    {m.successRedirect.invalid}
+                  </p>
+                ) : null}
+                <p id={redirectHintId} className="text-xs text-muted-foreground">
+                  {m.successRedirect.hint}
+                </p>
+                {redirectUrl.trim() ? (
+                  <>
+                    <Field label={m.successRedirect.dataLabel}>
+                      <select
+                        value={redirectData}
+                        onChange={(e) => setRedirectData(e.target.value as SuccessRedirectData | '')}
+                        aria-describedby={redirectDataHintId}
+                        className={inputCls}
+                      >
+                        <option value="">{m.successRedirect.dataNone}</option>
+                        <option value="event">{m.successRedirect.dataEvent}</option>
+                        <option value="event_and_invitee">{m.successRedirect.dataEventAndInvitee}</option>
+                      </select>
+                    </Field>
+                    <p id={redirectDataHintId} className="text-xs text-muted-foreground">
+                      {m.successRedirect.dataHint}
+                    </p>
+                  </>
+                ) : null}
+              </div>
+            </section>
+
+            {/* Visibility and sharing. One-off links sit directly under Hidden on
+                purpose: the warning they render is ABOUT that checkbox (#110), and
+                reads `hidden` from live form state so ticking it clears at once. */}
+            <section className="flex flex-col gap-field">
+              {sectionHeading(editor.sections.visibility)}
+              <label className="flex cursor-pointer items-center gap-inline text-sm">
+                <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+                {m.hiddenLabel}
+              </label>
+              <OneOffLinksSection
+                eventTypeId={initial?.id}
+                eventIsPublic={!hidden}
+                m={m}
+                locale={locale}
+              />
+            </section>
+
+            <AdvancedSettings open={advancedOpen} onToggle={setAdvancedOpen} summary={advanced.text} m={editor.advanced}>
+              <div className="grid grid-cols-1 gap-field sm:grid-cols-3">
+                <Field label={m.fBufferBefore} error={beforeErr.error} errorId={beforeErr.errorId}>
+                  <input
+                    id={FIELD_IDS.beforeBuf}
+                    type="number"
+                    min={0}
+                    value={Number.isFinite(beforeBuf) ? beforeBuf : ''}
+                    onChange={(e) => setBeforeBuf(e.target.value === '' ? Number.NaN : Number(e.target.value))}
+                    onBlur={() => touch(FIELD_IDS.beforeBuf)}
+                    className={inputCls}
+                    {...beforeErr.aria}
+                  />
+                </Field>
+                <Field label={m.fBufferAfter} error={afterErr.error} errorId={afterErr.errorId}>
+                  <input
+                    id={FIELD_IDS.afterBuf}
+                    type="number"
+                    min={0}
+                    value={Number.isFinite(afterBuf) ? afterBuf : ''}
+                    onChange={(e) => setAfterBuf(e.target.value === '' ? Number.NaN : Number(e.target.value))}
+                    onBlur={() => touch(FIELD_IDS.afterBuf)}
+                    className={inputCls}
+                    {...afterErr.aria}
+                  />
+                </Field>
+                <Field label={m.fSeats} error={seatsErr.error} errorId={seatsErr.errorId}>
+                  <input
+                    id={FIELD_IDS.seats}
+                    type="number"
+                    min={1}
+                    placeholder="1"
+                    value={seats}
+                    onChange={(e) => setSeats(e.target.value === '' ? '' : Number(e.target.value))}
+                    onBlur={() => touch(FIELD_IDS.seats)}
+                    className={inputCls}
+                    {...seatsErr.aria}
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-1 gap-field sm:grid-cols-3">
+                <Field label={m.fSlotInterval} error={intervalErr.error} errorId={intervalErr.errorId}>
+                  <input
+                    id={FIELD_IDS.slotInterval}
+                    type="number"
+                    min={1}
+                    value={slotInterval}
+                    onChange={(e) => setSlotInterval(e.target.value === '' ? '' : Number(e.target.value))}
+                    onBlur={() => touch(FIELD_IDS.slotInterval)}
+                    className={inputCls}
+                    {...intervalErr.aria}
+                  />
+                </Field>
+              </div>
+              <BookingWindowField
+                inputRef={windowInputRef}
+                value={windowDays}
+                onChange={setWindowDays}
+                onBlur={() => setWindowChecked(true)}
+                invalid={windowChecked && windowInvalid}
+                m={m.bookingWindow}
+              />
+            </AdvancedSettings>
+          </div>
+        </TabPanel>
+
+        {/* --- Booking form ------------------------------------------------ */}
+        <TabPanel id="form" idPrefix="et" active={activeTab === 'form'}>
+          <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card sm:p-group">
+            {/* Booking form: the questions the public page asks. */}
+            <section className="flex flex-col gap-inline">
+              {sectionHeading(editor.sections.bookingForm)}
+              {/* Built-in fields the public booking page ALWAYS asks — shown locked so
+                  nobody re-creates "name"/"email" as custom questions and the attendee
+                  gets asked twice (QA2 fix 7). */}
+              <p className="text-xs text-muted-foreground">{m.fixedFieldsHint}</p>
+              {[
+                { label: m.fixedName, required: true },
+                { label: m.fixedEmail, required: true },
+                { label: m.fixedNotes, required: false },
+              ].map((bf) => (
+                <div
+                  key={bf.label}
+                  className="flex items-center gap-inline rounded-md border border-dashed border-border bg-background/40 px-field py-inline text-sm text-muted-foreground"
+                >
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+                    <rect x="5" y="11" width="14" height="9" rx="2" />
+                    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                  </svg>
+                  <span className="flex-1">
+                    {bf.label}
+                    {bf.required ? ' *' : ''}
+                  </span>
+                  <span className="text-xs uppercase tracking-wide">{m.alwaysAsked}</span>
+                </div>
+              ))}
+              {fields.map((f, i) => (
+                <div key={i} className="flex flex-col gap-tight">
+                  <div className="flex flex-wrap items-center gap-inline">
+                    <input
+                      id={FIELD_IDS.questionName(i)}
+                      placeholder={m.namePlaceholder}
+                      value={f.name}
+                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
+                      aria-invalid={isReservedFieldName(f.name) ? true : undefined}
+                      className="w-28 rounded-md border border-input bg-background px-inline py-tight text-sm"
+                    />
+                    <input
+                      placeholder={m.labelPlaceholder}
+                      value={f.label}
+                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                      className="min-w-0 flex-1 rounded-md border border-input bg-background px-inline py-tight text-sm"
+                    />
+                    <select
+                      value={f.type}
+                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+                      className="rounded-md border border-input bg-background px-inline py-tight text-sm"
+                    >
+                      {FIELD_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                    {f.type === 'phone' ? (
+                      // Which country the phone selector starts on for attendees
+                      // (QA4 fix 1b) — stored inside the question definition.
+                      <select
+                        value={f.defaultCountry ?? 'US'}
+                        onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, defaultCountry: e.target.value } : x)))}
+                        aria-label={`${m.defaultCountryLabel} — ${f.label || f.name}`}
+                        title={m.defaultCountryLabel}
+                        className="w-36 rounded-md border border-input bg-background px-inline py-tight text-sm"
+                      >
+                        {countryOptions.length === 0 ? (
+                          // SSR/first paint: a bare-code option so the select's value
+                          // resolves identically on server and client (QA4-B1); the
+                          // named list replaces it right after mount.
+                          <option value={f.defaultCountry ?? 'US'}>{f.defaultCountry ?? 'US'}</option>
+                        ) : (
+                          countryOptions.map((c) => (
+                            <option key={c.code} value={c.code}>
+                              {c.flag} {c.name} {c.dial}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    ) : null}
+                    <label className="flex cursor-pointer items-center gap-tight text-sm">
+                      <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
+                      {m.req}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={i === 0}
+                      onClick={() => moveField(i, -1)}
+                      aria-label={`${m.moveUp} — ${f.label || f.name}`}
+                      className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+                    >
+                      <ChevronIcon direction="up" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={i === fields.length - 1}
+                      onClick={() => moveField(i, 1)}
+                      aria-label={`${m.moveDown} — ${f.label || f.name}`}
+                      className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+                    >
+                      <ChevronIcon direction="down" />
+                    </button>
+                    <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+                  </div>
+                  {isReservedFieldName(f.name) ? (
+                    <p className="text-xs text-destructive" role="alert">
+                      {m.reservedWarning}
+                    </p>
                   ) : null}
                 </div>
-              );
-            })}
+              ))}
+              <button
+                type="button"
+                onClick={() => setFields((fs) => [...fs, { name: '', label: '', type: 'text', required: false }])}
+                className="self-start rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary"
+              >
+                {m.addQuestion}
+              </button>
+            </section>
           </div>
-        </div>
-      ) : null}
+        </TabPanel>
 
-      {/* Booking-policy booleans. The duplicate-booking guard (#69) joins the
-          row a host already reads for this class of setting, rather than
-          opening a section of its own. */}
-      <div className="flex flex-col gap-inline">
-        <div className="flex flex-wrap gap-x-group gap-y-inline">
-          <label className="flex cursor-pointer items-center gap-inline text-sm">
-            <Checkbox checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
-            {m.requiresConfirmation}
-          </label>
-          <label className="flex cursor-pointer items-center gap-inline text-sm">
-            <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-            {m.hiddenLabel}
-          </label>
-          <label className="flex cursor-pointer items-center gap-inline text-sm">
-            <Checkbox
-              checked={preventDuplicateBookings}
-              onChange={(e) => setPreventDuplicate(e.target.checked)}
+        {/* --- Reminders ---------------------------------------------------- */}
+        <TabPanel id="reminders" idPrefix="et" active={activeTab === 'reminders'}>
+          <div className="flex flex-col gap-card rounded-md border border-border bg-card p-card sm:p-group">
+            {/* Their {{form.*}} variables read the questions defined in General. */}
+            <RemindersSection
+              rows={reminders}
+              setRows={(fn) => setReminders(fn)}
+              fieldNames={fields.filter((f) => f.name && !isReservedFieldName(f.name)).map((f) => f.name)}
+              m={m.reminders}
+              preview={{ context: reminderContext, m: editor.preview }}
             />
-            {m.duplicateGuard.label}
-          </label>
-        </div>
-        {/* Always visible, not gated on the checkbox: the hint carries the
-            caveat that the guard confirms an address has a booking, and a
-            caveat shown only after you tick the box informs nothing. */}
-        <p className="text-xs text-muted-foreground">{m.duplicateGuard.hint}</p>
-      </div>
-
-      {/* One-off invite links (#110). Directly under the visibility checkbox on
-          purpose: the warning it renders is ABOUT that checkbox, and a host who
-          reads "this event is visible, so a link limits nothing" needs the
-          control that fixes it in the same eyeful. Reads `hidden` from live form
-          state rather than from the saved event, so ticking Hidden clears the
-          warning immediately instead of after a save. */}
-      <OneOffLinksSection
-        eventTypeId={initial?.id}
-        eventIsPublic={!hidden}
-        m={m}
-        locale={locale}
-      />
-
-      {/* Redirect after booking: what happens once somebody books, so it sits
-          with the booking-policy settings above rather than in a section of
-          its own. The hint stays visible and the error joins it, because the
-          hint is what says reschedules and cancellations never redirect. */}
-      <div className="flex flex-col gap-tight">
-        <Field label={m.successRedirect.label}>
-          {/* `text` with a URL keyboard, not `type="url"`: this form has no
-              `noValidate`, and the browser's own bubble would fire first. */}
-          <input
-            ref={redirectInputRef}
-            type="text"
-            inputMode="url"
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={MAX_SUCCESS_REDIRECT_URL}
-            placeholder={m.successRedirect.placeholder}
-            value={redirectUrl}
-            onChange={(e) => setRedirectUrl(e.target.value)}
-            onBlur={() => setRedirectChecked(true)}
-            aria-invalid={redirectChecked && redirectInvalid ? true : undefined}
-            aria-describedby={redirectChecked && redirectInvalid ? `${redirectErrorId} ${redirectHintId}` : redirectHintId}
-            className={inputCls}
-          />
-        </Field>
-        {redirectChecked && redirectInvalid ? (
-          <p id={redirectErrorId} className="text-xs text-destructive" role="alert">
-            {m.successRedirect.invalid}
-          </p>
-        ) : null}
-        <p id={redirectHintId} className="text-xs text-muted-foreground">
-          {m.successRedirect.hint}
-        </p>
-        {redirectUrl.trim() ? (
-          <>
-            <Field label={m.successRedirect.dataLabel}>
-              <select
-                value={redirectData}
-                onChange={(e) => setRedirectData(e.target.value as SuccessRedirectData | '')}
-                aria-describedby={redirectDataHintId}
-                className={inputCls}
-              >
-                <option value="">{m.successRedirect.dataNone}</option>
-                <option value="event">{m.successRedirect.dataEvent}</option>
-                <option value="event_and_invitee">{m.successRedirect.dataEventAndInvitee}</option>
-              </select>
-            </Field>
-            <p id={redirectDataHintId} className="text-xs text-muted-foreground">
-              {m.successRedirect.dataHint}
-            </p>
-          </>
-        ) : null}
-      </div>
-
-      {trackingEnabled ? (
-        <TrackingSection
-          draft={trackingDraft}
-          onChange={(key, value) => setTrackingDraft((d) => ({ ...d, [key]: value }))}
-          onBlur={(key) => setTrackingChecked((c) => new Set(c).add(key))}
-          invalid={trackingInvalid.filter((key) => trackingChecked.has(key))}
-          inputRefs={trackingInputRefs}
-          keys={trackingKeys}
-          hostScriptsEnabled={hostScriptsEnabled}
-          m={m.tracking}
-        />
-      ) : null}
-
-      {/* Intake questions */}
-      <div className="flex flex-col gap-inline">
-        <span className="text-sm font-semibold text-muted-foreground">{m.intakeQuestions}</span>
-        {/* Built-in fields the public booking page ALWAYS asks — shown locked so
-            nobody re-creates "name"/"email" as custom questions and the attendee
-            gets asked twice (QA2 fix 7). */}
-        <p className="text-xs text-muted-foreground">{m.fixedFieldsHint}</p>
-        {[
-          { label: m.fixedName, required: true },
-          { label: m.fixedEmail, required: true },
-          { label: m.fixedNotes, required: false },
-        ].map((bf) => (
-          <div
-            key={bf.label}
-            className="flex items-center gap-inline rounded-md border border-dashed border-border bg-background/40 px-field py-inline text-sm text-muted-foreground"
-          >
-            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-              <rect x="5" y="11" width="14" height="9" rx="2" />
-              <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-            </svg>
-            <span className="flex-1">
-              {bf.label}
-              {bf.required ? ' *' : ''}
-            </span>
-            <span className="text-xs uppercase tracking-wide">{m.alwaysAsked}</span>
+            {serverErrors
+              .filter((e) => e.tab === 'reminders')
+              .map((e) => (
+                <p key={e.fieldId} className="text-xs text-destructive">
+                  {e.message}
+                </p>
+              ))}
           </div>
-        ))}
-        {fields.map((f, i) => (
-          <div key={i} className="flex flex-col gap-tight">
-            <div className="flex items-center gap-inline">
-              <input
-                placeholder={m.namePlaceholder}
-                value={f.name}
-                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
-                className="w-28 rounded-md border border-input bg-background px-inline py-tight text-sm"
-              />
-              <input
-                placeholder={m.labelPlaceholder}
-                value={f.label}
-                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-                className="flex-1 rounded-md border border-input bg-background px-inline py-tight text-sm"
-              />
-              <select
-                value={f.type}
-                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
-                className="rounded-md border border-input bg-background px-inline py-tight text-sm"
-              >
-                {FIELD_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              {f.type === 'phone' ? (
-                // Which country the phone selector starts on for attendees
-                // (QA4 fix 1b) — stored inside the question definition.
-                <select
-                  value={f.defaultCountry ?? 'US'}
-                  onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, defaultCountry: e.target.value } : x)))}
-                  aria-label={`${m.defaultCountryLabel} — ${f.label || f.name}`}
-                  title={m.defaultCountryLabel}
-                  className="w-36 rounded-md border border-input bg-background px-inline py-tight text-sm"
-                >
-                  {countryOptions.length === 0 ? (
-                    // SSR/first paint: a bare-code option so the select's value
-                    // resolves identically on server and client (QA4-B1); the
-                    // named list replaces it right after mount.
-                    <option value={f.defaultCountry ?? 'US'}>{f.defaultCountry ?? 'US'}</option>
-                  ) : (
-                    countryOptions.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.flag} {c.name} {c.dial}
-                      </option>
-                    ))
-                  )}
-                </select>
+        </TabPanel>
+
+        {/* --- CRM Connection ----------------------------------------------- */}
+        {crmTabShown ? (
+          <TabPanel id="crm" idPrefix="et" active={activeTab === 'crm'}>
+            <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card sm:p-group">
+              {/* CRM property mapping (H2 / #108). Absent entirely when no CRM
+                  adapter is wired on this deployment. */}
+              {crmCatalog && crmProvider ? (
+                <CrmMappingSection
+                  provider={crmProvider}
+                  catalog={crmCatalog}
+                  fields={fields.filter((f) => f.name)}
+                  mappings={crmMappings}
+                  onChange={setCrmMappings}
+                  m={m.crmMapping}
+                  locale={locale}
+                />
               ) : null}
-              <label className="flex cursor-pointer items-center gap-tight text-sm">
-                <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
-                {m.req}
-              </label>
-              <button
-                type="button"
-                disabled={i === 0}
-                onClick={() => moveField(i, -1)}
-                aria-label={`${m.moveUp} — ${f.label || f.name}`}
-                className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
-              >
-                <ChevronIcon direction="up" />
-              </button>
-              <button
-                type="button"
-                disabled={i === fields.length - 1}
-                onClick={() => moveField(i, 1)}
-                aria-label={`${m.moveDown} — ${f.label || f.name}`}
-                className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
-              >
-                <ChevronIcon direction="down" />
-              </button>
-              <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+              {trackingEnabled ? (
+                <TrackingSection
+                  draft={trackingDraft}
+                  onChange={(key, value) => setTrackingDraft((d) => ({ ...d, [key]: value }))}
+                  onBlur={(key) => setTrackingChecked((c) => new Set(c).add(key))}
+                  invalid={trackingInvalid.filter((key) => trackingChecked.has(key))}
+                  inputRefs={trackingInputRefs}
+                  keys={trackingKeys}
+                  hostScriptsEnabled={hostScriptsEnabled}
+                  m={m.tracking}
+                />
+              ) : null}
             </div>
-            {isReservedFieldName(f.name) ? (
-              <p className="text-xs text-destructive" role="alert">
-                {m.reservedWarning}
-              </p>
-            ) : null}
+          </TabPanel>
+        ) : null}
+
+        {/* --- AI Agents ---------------------------------------------------- */}
+        <TabPanel id="agents" idPrefix="et" active={activeTab === 'agents'}>
+          <div className="rounded-md border border-border bg-card p-card sm:p-group">
+            <AgentsTab eventTypeId={initial?.id} title={title} mcpUrl={mcpUrl} m={editor.agents} />
           </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => setFields((fs) => [...fs, { name: '', label: '', type: 'text', required: false }])}
-          className="self-start rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary"
-        >
-          {m.addQuestion}
-        </button>
-      </div>
+        </TabPanel>
 
-      {/* Reminders — below intake, because their {{form.*}} variables read the
-          questions defined right above them. */}
-      <RemindersSection
-        rows={reminders}
-        setRows={(fn) => setReminders(fn)}
-        fieldNames={fields.filter((f) => f.name && !isReservedFieldName(f.name)).map((f) => f.name)}
-        m={m.reminders}
-      />
-
-      {/* CRM property mapping (H2 / #108) — last, so Reminders keeps its
-          adjacency to the intake questions its {{form.*}} variables read.
-          Absent entirely when no CRM adapter is wired on this deployment. */}
-      {crmCatalog && crmProvider ? (
-        <CrmMappingSection
-          provider={crmProvider}
-          catalog={crmCatalog}
-          fields={fields.filter((f) => f.name)}
-          mappings={crmMappings}
-          onChange={setCrmMappings}
-          m={m.crmMapping}
-          locale={locale}
-        />
-      ) : null}
-
-      {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
+        {res && !res.ok && !serverErrors.length && !serverPlain.length ? (
+          <p className="text-sm text-destructive">{res.message}</p>
+        ) : null}
       </div>
     </form>
   );
 }
 
-const inputCls =
-  'w-full rounded-md border border-input bg-background px-field py-inline text-sm transition-colors placeholder:text-muted-foreground hover:border-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-
 /**
- * The mapping rows a save may actually carry.
- *
- * Two kinds of row are dropped rather than sent, because sending either one
- * makes the WHOLE event type unsaveable:
- *
- *   - a row with an unchosen target. "+ Add another property" appends an empty
- *     slot, and the contract requires every target to be a non-empty string —
- *     so an untouched slot would 400 the save, taking the title, the questions
- *     and the reminders down with it.
- *   - a row whose QUESTION no longer exists. Deleting, renaming or retyping an
- *     intake question orphans its mapping; the row is flagged in the section so
- *     the host sees it going, and it must not block an ordinary edit.
+ * The fields an API refusal is about, as editor errors: a taken link, or a
+ * reminder template naming a variable that does not exist. Anything else has
+ * no field to point at and shows as plain text in the summary.
  */
-function deliverableMappings(
-  rows: CrmPropertyMapping[],
-  fields: IntakeField[],
-): CrmPropertyMapping[] {
-  return rows
-    .filter((row) => sourceExists(row.source, fields))
-    .map((row) => ({ ...row, properties: row.properties.filter((p) => p.trim() !== '') }))
-    .filter((row) => row.properties.length > 0);
+function serverFieldErrors(r: ActionResult, e: EventTypeMessages['editor']['errors']): FieldError[] {
+  if (r.code === 'SLUG_TAKEN') return [{ fieldId: FIELD_IDS.slug, tab: 'general', message: e.slugTaken }];
+  if (r.code === 'INVALID_TEMPLATE' && r.issues?.length) {
+    const calendar = r.issues.filter((i) => i.field === 'calendarTitleTemplate' || i.field === 'calendarDescriptionTemplate');
+    if (calendar.length) {
+      return calendar.map((i) => ({
+        fieldId: i.field === 'calendarTitleTemplate' ? CALENDAR_TEXT_IDS.title : CALENDAR_TEXT_IDS.description,
+        tab: 'general' as const,
+        message: i.message ?? r.message ?? e.templateInvalid,
+      }));
+    }
+    return r.issues
+      .filter((i) => i.reminderId && (i.field === 'subject' || i.field === 'body'))
+      .map((i) => ({
+        fieldId: FIELD_IDS.reminder(i.reminderId!, i.field as 'subject' | 'body'),
+        tab: 'reminders' as const,
+        message: i.message ?? r.message ?? e.templateInvalid,
+      }));
+  }
+  return [];
 }
 
-/**
- * One host control in a team event's Hosts block. From `sm` up it steps aside
- * (`contents`) and the control sits under its column header; below `sm` the
- * header is hidden, so the control shows its column's name beside it. The
- * name is for the eye only: each control already has its own accessible label.
- */
-function HostCell({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-field sm:contents">
-      <span aria-hidden className="text-xs text-muted-foreground sm:hidden">
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-/**
- * The booking window: one number on the grid of the timing fields above it
- * (same column width, so it lines up under Length and Buffer before), with its
- * hint below the row. The hint always shows, because it says how the days are
- * counted; the error joins it.
- */
-function BookingWindowField({
-  inputRef,
-  value,
-  onChange,
-  onBlur,
-  invalid,
-  m,
-}: {
-  inputRef: React.Ref<HTMLInputElement>;
-  value: number | '';
-  onChange: (v: number | '') => void;
-  onBlur: () => void;
-  invalid: boolean;
-  m: EventTypeMessages['bookingWindow'];
-}) {
-  const hintId = useId();
-  const errorId = useId();
-  return (
-    <div className="flex flex-col gap-tight">
-      <div className="grid grid-cols-3 gap-field">
-        <Field label={m.label}>
-          {/* No `min`/`max`/`step`: this form has no `noValidate`, so the
-              browser's own bubble would fire before the error below. */}
-          <input
-            ref={inputRef}
-            type="number"
-            inputMode="numeric"
-            placeholder={m.placeholder}
-            value={value}
-            onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
-            onBlur={onBlur}
-            aria-invalid={invalid ? true : undefined}
-            aria-describedby={invalid ? `${errorId} ${hintId}` : hintId}
-            className={inputCls}
-          />
-        </Field>
-      </div>
-      {invalid ? (
-        <p id={errorId} className="text-xs text-destructive" role="alert">
-          {t(m.invalid, { max: MAX_BOOKING_WINDOW_DAYS })}
-        </p>
-      ) : null}
-      <p id={hintId} className="text-xs text-muted-foreground">
-        {m.hint}
-      </p>
-    </div>
-  );
-}
-
-type TrackingKey = (typeof EVENT_TRACKING_KEYS)[number];
-type TrackingDraft = Record<TrackingKey, string>;
-
-/** The editor's text per vendor, '' for an id the event does not set. */
-function trackingDraftOf(tracking: EventTracking | null | undefined): TrackingDraft {
-  const draft = {} as TrackingDraft;
-  for (const key of EVENT_TRACKING_KEYS) draft[key] = tracking?.[key] ?? '';
-  return draft;
-}
-
-/** The fields the section shows: every workspace's, then GTM, GA4 and HubSpot where allowed. */
-function trackingKeysShown(hostScriptsEnabled: boolean): TrackingKey[] {
-  return EVENT_TRACKING_KEYS.filter(
-    (key) => hostScriptsEnabled || !(EVENT_TRACKING_HOST_SCRIPT_KEYS as readonly string[]).includes(key),
-  );
-}
-
-/** The shown fields the API would refuse, in the order the section lists them. */
-function invalidTrackingKeys(draft: TrackingDraft, keys: TrackingKey[]): TrackingKey[] {
-  return keys.filter((key) => !eventTrackingSchema.shape[key].safeParse(draft[key]).success);
-}
-
-type TrackingText = keyof EventTypeMessages['tracking'];
-
-const TRACKING_FIELDS: Record<
-  TrackingKey,
-  { label: TrackingText; help: TrackingText; invalid: TrackingText; placeholder: string; max: number }
-> = {
-  metaPixelId: { label: 'metaLabel', help: 'metaHelp', invalid: 'metaInvalid', placeholder: '123456789012345', max: MAX_TRACKING_ID },
-  ga4Id: { label: 'ga4Label', help: 'ga4Help', invalid: 'ga4Invalid', placeholder: 'G-XXXXXXXXXX', max: MAX_TRACKING_ID },
-  posthogKey: { label: 'posthogKeyLabel', help: 'posthogKeyHelp', invalid: 'posthogKeyInvalid', placeholder: 'phc_...', max: MAX_POSTHOG_KEY },
-  posthogHost: { label: 'posthogHostLabel', help: 'posthogHostHelp', invalid: 'posthogHostInvalid', placeholder: '', max: MAX_POSTHOG_HOST },
-  gtmId: { label: 'gtmLabel', help: 'gtmHelp', invalid: 'gtmInvalid', placeholder: 'GTM-XXXXXXX', max: MAX_TRACKING_ID },
-  hubspotTrackingId: { label: 'hubspotLabel', help: 'hubspotHelp', invalid: 'hubspotInvalid', placeholder: '12345678', max: MAX_TRACKING_ID },
-};
-
-/** The PostHog cloud select's value: US is the default, so it is stored as none. */
-function posthogCloudOf(host: string): '' | 'eu' {
-  return /^https:\/\/eu\.i\.posthog\.com\/?$/i.test(host.trim()) ? 'eu' : '';
-}
-
-/**
- * Tracking and pixels on the event's booking page, per event type: one field
- * per vendor, each with the line that says what its tag hears. Saved with the
- * event, live at once (there is no draft here). The PostHog cloud is a choice
- * of two, not an address: any other host would be the host's own code.
- */
-function TrackingSection({
-  draft,
-  onChange,
-  onBlur,
-  invalid,
-  inputRefs,
-  keys,
-  hostScriptsEnabled,
-  m,
-}: {
-  draft: TrackingDraft;
-  onChange: (key: TrackingKey, value: string) => void;
-  onBlur: (key: TrackingKey) => void;
-  /** Fields to show an error on (invalid AND already left or saved). */
-  invalid: TrackingKey[];
-  inputRefs: React.MutableRefObject<Partial<Record<TrackingKey, HTMLInputElement | HTMLSelectElement | null>>>;
-  keys: TrackingKey[];
-  hostScriptsEnabled: boolean;
-  m: EventTypeMessages['tracking'];
-}) {
-  const baseId = useId();
-  return (
-    <section className="flex flex-col gap-inline" aria-labelledby={`${baseId}-title`}>
-      <span id={`${baseId}-title`} className="text-sm font-semibold text-muted-foreground">
-        {m.title}
-      </span>
-      <p className="text-xs text-muted-foreground">{m.subtitle}</p>
-      <div className="grid gap-field sm:grid-cols-2">
-        {keys.map((key) => {
-          const { label, help, invalid: invalidText, placeholder, max } = TRACKING_FIELDS[key];
-          const bad = invalid.includes(key);
-          const hintId = `${baseId}-${key}-hint`;
-          const errorId = `${baseId}-${key}-error`;
-          const described = bad ? `${errorId} ${hintId}` : hintId;
-          return (
-            <div key={key} className="flex flex-col gap-tight">
-              <Field label={m[label]}>
-                {key === 'posthogHost' ? (
-                  <select
-                    ref={(el) => {
-                      inputRefs.current[key] = el;
-                    }}
-                    value={posthogCloudOf(draft[key])}
-                    onChange={(e) => onChange(key, e.target.value === 'eu' ? POSTHOG_HOSTS[1] : '')}
-                    onBlur={() => onBlur(key)}
-                    aria-invalid={bad ? true : undefined}
-                    aria-describedby={described}
-                    className={inputCls}
-                  >
-                    <option value="">{m.posthogHostUs}</option>
-                    <option value="eu">{m.posthogHostEu}</option>
-                  </select>
-                ) : (
-                  <input
-                    ref={(el) => {
-                      inputRefs.current[key] = el;
-                    }}
-                    type="text"
-                    autoComplete="off"
-                    spellCheck={false}
-                    maxLength={max}
-                    placeholder={placeholder}
-                    value={draft[key]}
-                    onChange={(e) => onChange(key, e.target.value)}
-                    onBlur={() => onBlur(key)}
-                    aria-invalid={bad ? true : undefined}
-                    aria-describedby={described}
-                    className={inputCls}
-                  />
-                )}
-              </Field>
-              {bad ? (
-                <p id={errorId} className="text-xs text-destructive" role="alert">
-                  {m[invalidText]}
-                </p>
-              ) : null}
-              <p id={hintId} className="text-xs text-muted-foreground">
-                {m[help]}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-      {hostScriptsEnabled ? null : <p className="text-xs text-muted-foreground">{m.hostScriptsUnavailable}</p>}
-    </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-tight text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-/** Same inline chevron style as the DateTimePicker's month arrows. */
-function ChevronIcon({ direction }: { direction: 'up' | 'down' }) {
-  return (
-    <svg
-      aria-hidden
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-4 w-4"
-    >
-      {direction === 'up' ? <path d="M18 15l-6-6-6 6" /> : <path d="M6 9l6 6 6-6" />}
-    </svg>
-  );
-}
+export type { EventTypeMessages, TeamMemberOption } from './sections/shared';

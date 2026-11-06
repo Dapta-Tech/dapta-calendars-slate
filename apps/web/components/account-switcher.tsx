@@ -43,6 +43,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 export function AccountSwitcher({
   accounts,
   currentAccountId,
+  currentAccountName = null,
   hasMore: initialHasMore = false,
   fallbackLabel,
   collapsed = false,
@@ -51,6 +52,8 @@ export function AccountSwitcher({
 }: {
   accounts: AccountOption[];
   currentAccountId: string | null;
+  /** Resolved server-side when the current account is not on the first page. */
+  currentAccountName?: string | null;
   hasMore?: boolean;
   fallbackLabel?: string;
   collapsed?: boolean;
@@ -103,12 +106,15 @@ export function AccountSwitcher({
 
   if (accounts.length === 0) return null;
 
-  // The current account is only named when it happens to be on screen — the
-  // first page is 20 rows out of however many exist. Its code is what the
-  // address bar shows, so it is the honest fallback, and it changes with the
-  // account rather than reading the same in all of them.
-  const current = results.find((a) => a.accountId === currentAccountId);
-  const label = current?.name ?? fallbackLabel ?? m.label;
+  // The first page is 20 rows out of however many exist, and a search replaces
+  // it, so the current account is often not among the rows on screen. The
+  // layout looks its name up in that case (`currentAccountName`); the account
+  // code is only the last resort, for when upstream could not say — it is an
+  // opaque id, not something a person recognises the client by.
+  const current =
+    results.find((a) => a.accountId === currentAccountId) ??
+    accounts.find((a) => a.accountId === currentAccountId);
+  const label = current?.name ?? currentAccountName ?? fallbackLabel ?? m.label;
 
   const choose = (accountId: string) => {
     setError(null);
