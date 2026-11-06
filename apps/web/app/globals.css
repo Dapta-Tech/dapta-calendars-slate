@@ -243,7 +243,8 @@ body {
    `--focus` at `--primary-edge`, so the ring stays the host's accent and carries
    whatever contrast they picked, exactly as it did before this palette. */
 :focus-visible {
-  outline: 2px solid var(--focus);
+  /* 1.5px: present without shouting. The colour still clears 3:1. */
+  outline: 1.5px solid var(--focus);
   outline-offset: 2px;
 }
 
