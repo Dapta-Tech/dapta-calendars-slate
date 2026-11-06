@@ -132,15 +132,15 @@ const saved = () => vi.mocked(saveEventTypeAction).mock.lastCall?.[0] as EventTy
 const summary = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-testid="et-error-summary"]');
 
 describe('tabs', () => {
-  it('shows General, Reminders, CRM Connection and AI Agents, in that order, General first', async () => {
+  it('shows General, Booking form, Reminders, CRM Connection and AI Agents, in that order, General first', async () => {
     const el = await mount(undefined, { crm: true });
-    expect(tabs(el).map((t) => t.textContent)).toEqual(['General', 'Reminders', 'CRM Connection', 'AI Agents']);
+    expect(tabs(el).map((t) => t.textContent)).toEqual(['General', 'Booking form', 'Reminders', 'CRM Connection', 'AI Agents']);
     expect(activeTab(el)).toBe('General');
   });
 
   it('hides CRM Connection when there is no CRM and no tracking', async () => {
     const el = await mount(event());
-    expect(tabs(el).map((t) => t.textContent)).toEqual(['General', 'Reminders', 'AI Agents']);
+    expect(tabs(el).map((t) => t.textContent)).toEqual(['General', 'Booking form', 'Reminders', 'AI Agents']);
   });
 
   it('shows CRM Connection for tracking alone', async () => {
@@ -166,6 +166,20 @@ describe('tabs', () => {
     expect(byId(el, 'et-title').value).toBe('Renamed call');
     await save(el);
     expect(saved()?.title).toBe('Renamed call');
+  });
+});
+
+describe('Booking form tab', () => {
+  it('holds the questions, and a save with a reserved question name opens it at that question', async () => {
+    const el = await mount(event({ bookingFields: [{ name: 'email', label: 'Email again', type: 'email', required: false }] }));
+    const panel = el.querySelector<HTMLElement>('#et-panel-form')!;
+    expect(panel.querySelector('#et-question-0-name')).not.toBeNull();
+    expect(el.querySelector('#et-panel-general #et-question-0-name')).toBeNull();
+    await save(el);
+    expect(saveEventTypeAction).not.toHaveBeenCalled();
+    expect(activeTab(el)).toContain('Booking form');
+    expect(document.activeElement?.id).toBe('et-question-0-name');
+    expect(summary(el)!.textContent).toContain(`Booking form: ${m.reservedWarning}`);
   });
 });
 
@@ -376,7 +390,7 @@ describe('AI Agents tab', () => {
   it('is in Spanish on a Spanish editor', async () => {
     const es = getMessages('es').admin.eventTypes.editor;
     const el = await mount(event(), { locale: 'es' });
-    expect(tabs(el).map((t) => t.textContent)).toEqual([es.tabs.general, es.tabs.reminders, es.tabs.agents]);
+    expect(tabs(el).map((t) => t.textContent)).toEqual([es.tabs.general, es.tabs.form, es.tabs.reminders, es.tabs.agents]);
     expect(el.querySelector('#et-panel-agents')!.textContent).toContain(es.agents.title);
   });
 });

@@ -791,123 +791,6 @@ export function EventTypeForm({
               </section>
             ) : null}
 
-            {/* Booking form: the questions the public page asks. */}
-            <section className="flex flex-col gap-inline">
-              {sectionHeading(editor.sections.bookingForm)}
-              {/* Built-in fields the public booking page ALWAYS asks — shown locked so
-                  nobody re-creates "name"/"email" as custom questions and the attendee
-                  gets asked twice (QA2 fix 7). */}
-              <p className="text-xs text-muted-foreground">{m.fixedFieldsHint}</p>
-              {[
-                { label: m.fixedName, required: true },
-                { label: m.fixedEmail, required: true },
-                { label: m.fixedNotes, required: false },
-              ].map((bf) => (
-                <div
-                  key={bf.label}
-                  className="flex items-center gap-inline rounded-md border border-dashed border-border bg-background/40 px-field py-inline text-sm text-muted-foreground"
-                >
-                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-                    <rect x="5" y="11" width="14" height="9" rx="2" />
-                    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-                  </svg>
-                  <span className="flex-1">
-                    {bf.label}
-                    {bf.required ? ' *' : ''}
-                  </span>
-                  <span className="text-xs uppercase tracking-wide">{m.alwaysAsked}</span>
-                </div>
-              ))}
-              {fields.map((f, i) => (
-                <div key={i} className="flex flex-col gap-tight">
-                  <div className="flex flex-wrap items-center gap-inline">
-                    <input
-                      id={FIELD_IDS.questionName(i)}
-                      placeholder={m.namePlaceholder}
-                      value={f.name}
-                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
-                      aria-invalid={isReservedFieldName(f.name) ? true : undefined}
-                      className="w-28 rounded-md border border-input bg-background px-inline py-tight text-sm"
-                    />
-                    <input
-                      placeholder={m.labelPlaceholder}
-                      value={f.label}
-                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-                      className="min-w-0 flex-1 rounded-md border border-input bg-background px-inline py-tight text-sm"
-                    />
-                    <select
-                      value={f.type}
-                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
-                      className="rounded-md border border-input bg-background px-inline py-tight text-sm"
-                    >
-                      {FIELD_TYPES.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                    {f.type === 'phone' ? (
-                      // Which country the phone selector starts on for attendees
-                      // (QA4 fix 1b) — stored inside the question definition.
-                      <select
-                        value={f.defaultCountry ?? 'US'}
-                        onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, defaultCountry: e.target.value } : x)))}
-                        aria-label={`${m.defaultCountryLabel} — ${f.label || f.name}`}
-                        title={m.defaultCountryLabel}
-                        className="w-36 rounded-md border border-input bg-background px-inline py-tight text-sm"
-                      >
-                        {countryOptions.length === 0 ? (
-                          // SSR/first paint: a bare-code option so the select's value
-                          // resolves identically on server and client (QA4-B1); the
-                          // named list replaces it right after mount.
-                          <option value={f.defaultCountry ?? 'US'}>{f.defaultCountry ?? 'US'}</option>
-                        ) : (
-                          countryOptions.map((c) => (
-                            <option key={c.code} value={c.code}>
-                              {c.flag} {c.name} {c.dial}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    ) : null}
-                    <label className="flex cursor-pointer items-center gap-tight text-sm">
-                      <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
-                      {m.req}
-                    </label>
-                    <button
-                      type="button"
-                      disabled={i === 0}
-                      onClick={() => moveField(i, -1)}
-                      aria-label={`${m.moveUp} — ${f.label || f.name}`}
-                      className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
-                    >
-                      <ChevronIcon direction="up" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={i === fields.length - 1}
-                      onClick={() => moveField(i, 1)}
-                      aria-label={`${m.moveDown} — ${f.label || f.name}`}
-                      className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
-                    >
-                      <ChevronIcon direction="down" />
-                    </button>
-                    <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
-                  </div>
-                  {isReservedFieldName(f.name) ? (
-                    <p className="text-xs text-destructive" role="alert">
-                      {m.reservedWarning}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => setFields((fs) => [...fs, { name: '', label: '', type: 'text', required: false }])}
-                className="self-start rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary"
-              >
-                {m.addQuestion}
-              </button>
-            </section>
-
             {/* After booking: what happens once somebody books. */}
             <section className="flex flex-col gap-field">
               {sectionHeading(editor.sections.afterBooking)}
@@ -1067,6 +950,128 @@ export function EventTypeForm({
                 m={m.bookingWindow}
               />
             </AdvancedSettings>
+          </div>
+        </TabPanel>
+
+        {/* --- Booking form ------------------------------------------------ */}
+        <TabPanel id="form" idPrefix="et" active={activeTab === 'form'}>
+          <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card sm:p-group">
+            {/* Booking form: the questions the public page asks. */}
+            <section className="flex flex-col gap-inline">
+              {sectionHeading(editor.sections.bookingForm)}
+              {/* Built-in fields the public booking page ALWAYS asks — shown locked so
+                  nobody re-creates "name"/"email" as custom questions and the attendee
+                  gets asked twice (QA2 fix 7). */}
+              <p className="text-xs text-muted-foreground">{m.fixedFieldsHint}</p>
+              {[
+                { label: m.fixedName, required: true },
+                { label: m.fixedEmail, required: true },
+                { label: m.fixedNotes, required: false },
+              ].map((bf) => (
+                <div
+                  key={bf.label}
+                  className="flex items-center gap-inline rounded-md border border-dashed border-border bg-background/40 px-field py-inline text-sm text-muted-foreground"
+                >
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+                    <rect x="5" y="11" width="14" height="9" rx="2" />
+                    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                  </svg>
+                  <span className="flex-1">
+                    {bf.label}
+                    {bf.required ? ' *' : ''}
+                  </span>
+                  <span className="text-xs uppercase tracking-wide">{m.alwaysAsked}</span>
+                </div>
+              ))}
+              {fields.map((f, i) => (
+                <div key={i} className="flex flex-col gap-tight">
+                  <div className="flex flex-wrap items-center gap-inline">
+                    <input
+                      id={FIELD_IDS.questionName(i)}
+                      placeholder={m.namePlaceholder}
+                      value={f.name}
+                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
+                      aria-invalid={isReservedFieldName(f.name) ? true : undefined}
+                      className="w-28 rounded-md border border-input bg-background px-inline py-tight text-sm"
+                    />
+                    <input
+                      placeholder={m.labelPlaceholder}
+                      value={f.label}
+                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                      className="min-w-0 flex-1 rounded-md border border-input bg-background px-inline py-tight text-sm"
+                    />
+                    <select
+                      value={f.type}
+                      onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+                      className="rounded-md border border-input bg-background px-inline py-tight text-sm"
+                    >
+                      {FIELD_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                    {f.type === 'phone' ? (
+                      // Which country the phone selector starts on for attendees
+                      // (QA4 fix 1b) — stored inside the question definition.
+                      <select
+                        value={f.defaultCountry ?? 'US'}
+                        onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, defaultCountry: e.target.value } : x)))}
+                        aria-label={`${m.defaultCountryLabel} — ${f.label || f.name}`}
+                        title={m.defaultCountryLabel}
+                        className="w-36 rounded-md border border-input bg-background px-inline py-tight text-sm"
+                      >
+                        {countryOptions.length === 0 ? (
+                          // SSR/first paint: a bare-code option so the select's value
+                          // resolves identically on server and client (QA4-B1); the
+                          // named list replaces it right after mount.
+                          <option value={f.defaultCountry ?? 'US'}>{f.defaultCountry ?? 'US'}</option>
+                        ) : (
+                          countryOptions.map((c) => (
+                            <option key={c.code} value={c.code}>
+                              {c.flag} {c.name} {c.dial}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    ) : null}
+                    <label className="flex cursor-pointer items-center gap-tight text-sm">
+                      <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
+                      {m.req}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={i === 0}
+                      onClick={() => moveField(i, -1)}
+                      aria-label={`${m.moveUp} — ${f.label || f.name}`}
+                      className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+                    >
+                      <ChevronIcon direction="up" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={i === fields.length - 1}
+                      onClick={() => moveField(i, 1)}
+                      aria-label={`${m.moveDown} — ${f.label || f.name}`}
+                      className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+                    >
+                      <ChevronIcon direction="down" />
+                    </button>
+                    <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+                  </div>
+                  {isReservedFieldName(f.name) ? (
+                    <p className="text-xs text-destructive" role="alert">
+                      {m.reservedWarning}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setFields((fs) => [...fs, { name: '', label: '', type: 'text', required: false }])}
+                className="self-start rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary"
+              >
+                {m.addQuestion}
+              </button>
+            </section>
           </div>
         </TabPanel>
 

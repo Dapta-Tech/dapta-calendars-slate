@@ -17,7 +17,7 @@ import { invalidTrackingKeys, type TrackingKey } from './sections/tracking';
 import { HOURS_IDS } from './sections/availability';
 import { CALENDAR_TEXT_IDS } from './sections/calendar-text';
 
-export const EDITOR_TABS = ['general', 'reminders', 'crm', 'agents'] as const;
+export const EDITOR_TABS = ['general', 'form', 'reminders', 'crm', 'agents'] as const;
 export type EditorTab = (typeof EDITOR_TABS)[number];
 
 /** A collapsed part of a tab that must open before its field can be focused. */
@@ -112,9 +112,10 @@ export function validateDraft(
   }
   if (!isWhole(d.minNotice) || d.minNotice < 0) general(FIELD_IDS.minNotice, e.minNoticeInvalid);
 
-  // Booking form: a reserved name would make the public page ask twice.
+  // Booking form (its own tab): a reserved name would make the public page ask twice.
   d.fields.forEach((f, i) => {
-    if (f.name && isReservedFieldName(f.name)) general(FIELD_IDS.questionName(i), m.reservedWarning);
+    if (f.name && isReservedFieldName(f.name))
+      out.push({ fieldId: FIELD_IDS.questionName(i), tab: 'form', message: m.reservedWarning });
   });
 
   // After booking
@@ -146,7 +147,7 @@ export function validateDraft(
 
 /** Errors per tab, for the badges. */
 export function errorCounts(errors: readonly FieldError[]): Record<EditorTab, number> {
-  const counts: Record<EditorTab, number> = { general: 0, reminders: 0, crm: 0, agents: 0 };
+  const counts: Record<EditorTab, number> = { general: 0, form: 0, reminders: 0, crm: 0, agents: 0 };
   for (const err of errors) counts[err.tab] += 1;
   return counts;
 }

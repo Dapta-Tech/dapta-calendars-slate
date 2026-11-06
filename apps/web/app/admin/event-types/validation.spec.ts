@@ -47,7 +47,7 @@ describe('validateDraft', () => {
 
   it('a reserved question name is an error on that question', () => {
     const fields = [{ name: 'email', label: 'Email again', type: 'email', required: false }];
-    expect(only({ fields })[0]).toMatchObject({ fieldId: FIELD_IDS.questionName(0), message: m.reservedWarning });
+    expect(only({ fields })[0]).toMatchObject({ fieldId: FIELD_IDS.questionName(0), tab: 'form', message: m.reservedWarning });
   });
 
   it('a redirect must be an https address', () => {
@@ -84,7 +84,7 @@ describe('validateDraft', () => {
 describe('errorCounts and firstError', () => {
   it('counts per tab and finds the first error in tab order', () => {
     const errs = check({ title: '', trackingDraft: { ...valid.trackingDraft, metaPixelId: 'x' } }, true);
-    expect(errorCounts(errs)).toEqual({ general: 1, reminders: 0, crm: 1, agents: 0 });
+    expect(errorCounts(errs)).toEqual({ general: 1, form: 0, reminders: 0, crm: 1, agents: 0 });
     expect(firstError([...errs].reverse())?.fieldId).toBe(FIELD_IDS.title);
   });
 });

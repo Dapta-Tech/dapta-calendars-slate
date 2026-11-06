@@ -510,7 +510,7 @@ export interface BookingMessages {
       /** The tabbed editor's own copy (tabs, required marks, errors, advanced, agents). */
       editor: {
         tabsLabel: string;
-        tabs: { general: string; reminders: string; crm: string; agents: string };
+        tabs: { general: string; form: string; reminders: string; crm: string; agents: string };
         /** Accessible badge on a tab: `{count}` fields in it need attention. */
         tabErrorsOne: string;
         tabErrorsMany: string;
@@ -2416,7 +2416,7 @@ export const en: BookingMessages = {
     eventTypes: {
       editor: {
         tabsLabel: 'Event settings',
-        tabs: { general: 'General', reminders: 'Reminders', crm: 'CRM Connection', agents: 'AI Agents' },
+        tabs: { general: 'General', form: 'Booking form', reminders: 'Reminders', crm: 'CRM Connection', agents: 'AI Agents' },
         tabErrorsOne: '1 field needs attention',
         tabErrorsMany: '{count} fields need attention',
         slugLabel: 'Event link',
@@ -4286,7 +4286,13 @@ export const es: BookingMessages = {
     eventTypes: {
       editor: {
         tabsLabel: 'Ajustes del evento',
-        tabs: { general: 'General', reminders: 'Recordatorios', crm: 'Conexión con el CRM', agents: 'Agentes de IA' },
+        tabs: {
+          general: 'General',
+          form: 'Formulario de reserva',
+          reminders: 'Recordatorios',
+          crm: 'Conexión con el CRM',
+          agents: 'Agentes de IA',
+        },
         tabErrorsOne: '1 campo necesita atención',
         tabErrorsMany: '{count} campos necesitan atención',
         slugLabel: 'Enlace del evento',
