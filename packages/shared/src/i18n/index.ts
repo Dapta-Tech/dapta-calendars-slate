@@ -557,11 +557,18 @@ export interface BookingMessages {
         preview: {
           /** The eye button: opens the draft as the booking page in a new tab. */
           eye: string;
+          /** New and team events: example times. */
           pageBanner: string;
+          /** Saved events: their real times as saved. */
+          pageBannerReal: string;
           pageMissing: string;
+          /** Shown when the preview's form is submitted: nothing was booked. */
+          bookingDisabled: string;
           emailButton: string;
           emailTitle: string;
           subjectLabel: string;
+          fromLabel: string;
+          toLabel: string;
           /** Says the design is what mail apps show, and where the written message goes. */
           emailNote: string;
           emailLoading: string;
@@ -2434,11 +2441,17 @@ export const en: BookingMessages = {
         },
         preview: {
           eye: 'Preview booking page',
-          pageBanner: 'Preview of your booking page with your unsaved changes. The times are examples, and nothing can be booked here.',
+          pageBanner:
+            'Preview of your booking page with your unsaved changes. The times are examples until you create the event. Nothing you do here books a meeting.',
+          pageBannerReal:
+            'Preview of your booking page with your unsaved changes. The times are your real availability as last saved. Nothing you do here books a meeting.',
+          bookingDisabled: 'This is a preview, so no meeting was booked. Invitees see their confirmation here.',
           pageMissing: 'There is nothing to preview. Open the preview again from the event editor.',
           emailButton: 'Preview email',
           emailTitle: 'Email preview',
           subjectLabel: 'Subject',
+          fromLabel: 'From',
+          toLabel: 'To',
           emailNote:
             'This is the email an invitee gets, for a sample booking with Sam Taylor tomorrow. Most email apps show this design; your message is sent as its plain-text version.',
           emailLoading: 'Loading the preview…',
@@ -4282,11 +4295,17 @@ export const es: BookingMessages = {
         },
         preview: {
           eye: 'Ver página de reservas',
-          pageBanner: 'Vista previa de tu página de reservas con tus cambios sin guardar. Los horarios son de ejemplo y aquí no se puede reservar.',
+          pageBanner:
+            'Vista previa de tu página de reservas con tus cambios sin guardar. Los horarios son de ejemplo hasta que crees el evento. Nada de lo que hagas aquí reserva una reunión.',
+          pageBannerReal:
+            'Vista previa de tu página de reservas con tus cambios sin guardar. Los horarios son tu disponibilidad real según lo último que guardaste. Nada de lo que hagas aquí reserva una reunión.',
+          bookingDisabled: 'Esto es una vista previa, así que no se reservó ninguna reunión. Los invitados ven aquí su confirmación.',
           pageMissing: 'No hay nada que mostrar. Abre la vista previa otra vez desde el editor del evento.',
           emailButton: 'Ver correo',
           emailTitle: 'Vista previa del correo',
           subjectLabel: 'Asunto',
+          fromLabel: 'De',
+          toLabel: 'Para',
           emailNote:
             'Este es el correo que recibe un invitado, para una reserva de ejemplo con Sam Taylor mañana. La mayoría de los programas de correo muestran este diseño; tu mensaje se envía como su versión de texto plano.',
           emailLoading: 'Cargando la vista previa…',

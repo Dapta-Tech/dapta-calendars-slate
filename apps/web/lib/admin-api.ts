@@ -248,7 +248,11 @@ export const adminApi = {
   deleteEventType: (id: string) => req<void>('DELETE', `/v1/event-types/${id}`),
   /** One reminder rendered as the invitee would get it (real subject + branded HTML); nothing is sent. */
   previewReminder: (b: unknown) =>
-    req<{ subject: string; text: string; html: string }>('POST', '/v1/event-types/reminder-preview', b),
+    req<{ from: string | null; to: string; subject: string; text: string; html: string }>(
+      'POST',
+      '/v1/event-types/reminder-preview',
+      b,
+    ),
 
   // One-off invite links (#69 / AB2, #110). They hang off the event type they
   // grant access to, because that is what a link IS — a grant over an existing

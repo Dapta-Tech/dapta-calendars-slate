@@ -16,14 +16,23 @@ export interface DraftPreview {
 
 const PREFIX = 'dcal:event-preview:';
 
-export function openDraftPreview(draft: DraftPreview, teamId?: string | null): void {
+/**
+ * `savedSlug`: the event's slug as SAVED (personal events), so the preview can
+ * show its real times. Absent for a new event or a team event, which preview
+ * with example times.
+ */
+export function openDraftPreview(draft: DraftPreview, opts: { teamId?: string | null; savedSlug?: string | null } = {}): void {
   const key = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   try {
     window.localStorage.setItem(PREFIX + key, JSON.stringify(draft));
   } catch {
     /* storage blocked: the tab opens and says there is nothing to preview */
   }
-  const params = new URLSearchParams({ k: key, ...(teamId ? { team: teamId } : {}) });
+  const params = new URLSearchParams({
+    k: key,
+    ...(opts.teamId ? { team: opts.teamId } : {}),
+    ...(opts.savedSlug ? { event: opts.savedSlug } : {}),
+  });
   window.open(`/preview/event?${params}`, '_blank', 'noopener');
 }
 

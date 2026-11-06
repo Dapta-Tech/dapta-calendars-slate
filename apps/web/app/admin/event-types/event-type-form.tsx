@@ -394,7 +394,7 @@ export function EventTypeForm({
         location: draftLocation,
         bookingFields: draftQuestions as Parameters<typeof openDraftPreview>[0]['bookingFields'],
       },
-      isTeamEvent ? eventTeamId : null,
+      { teamId: isTeamEvent ? eventTeamId : null, savedSlug: !isTeamEvent ? initial?.slug : null },
     );
   const reminderContext = {
     title: title.trim() || heading,

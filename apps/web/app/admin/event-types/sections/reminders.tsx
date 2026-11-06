@@ -138,16 +138,19 @@ export function ReminderCard({
         <span className="text-sm text-muted-foreground">
           {row.kind === 'follow_up' ? m.afterEnd : m.beforeStart}
         </span>
-        {onRemove ? (
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={m.remove}
-            className="ml-auto text-muted-foreground hover:text-destructive"
-          >
-            ×
-          </button>
-        ) : null}
+        <span className="ml-auto flex items-center gap-inline">
+          {preview ? <ReminderEmailPreview row={row} context={preview.context} m={preview.m} /> : null}
+          {onRemove ? (
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label={m.remove}
+              className="cursor-pointer text-muted-foreground hover:text-destructive"
+            >
+              ×
+            </button>
+          ) : null}
+        </span>
       </div>
 
       <input
@@ -176,7 +179,6 @@ export function ReminderCard({
         className="w-full rounded-md border border-input bg-background px-inline py-tight text-sm"
       />
       <p className="text-xs text-muted-foreground">{m.defaultCopyHint}</p>
-      {preview ? <ReminderEmailPreview row={row} context={preview.context} m={preview.m} /> : null}
 
       <div className="flex flex-col gap-tight">
         <span className="text-2xs uppercase tracking-wide text-muted-foreground">{m.variablesLabel}</span>

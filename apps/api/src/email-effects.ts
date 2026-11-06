@@ -861,7 +861,7 @@ export class EmailEffects {
   async previewReminder(
     principal: { accountId: string; memberId: string },
     input: ReminderPreviewInput,
-  ): Promise<{ subject: string; text: string; html: string }> {
+  ): Promise<{ from: string | null; to: string; subject: string; text: string; html: string }> {
     const who = await this.db.get<{
       display_name: string | null;
       email: string | null;
@@ -917,7 +917,11 @@ export class EmailEffects {
       stamp: new Date().toISOString(),
     };
     const r = this.notifier.previewReminder(n, input.kind);
-    return { subject: r.subject, text: r.text, html: r.html };
+    // The sender the transport stamps on every booking email, when configured.
+    const fromEmail = this.env?.MAIL_FROM_EMAIL?.trim();
+    const fromName = this.env?.MAIL_FROM_NAME?.trim();
+    const from = fromEmail ? (fromName ? `${fromName} <${fromEmail}>` : fromEmail) : null;
+    return { from, to: `${n.attendee.name} <${n.attendee.email}>`, subject: r.subject, text: r.text, html: r.html };
   }
 
   private toNotification(

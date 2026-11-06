@@ -9,21 +9,27 @@ import { takeDraftPreview, type DraftPreview } from '@/app/admin/event-types/dra
 type PreviewMessages = ReturnType<typeof getMessages>['admin']['eventTypes']['editor']['preview'];
 
 /**
- * The editor's unsaved draft, drawn as the booking page: the real island with
- * sample times, at full size, inert (a picture of the page: nothing books).
- * The draft is read after mount, from the key the eye button left.
+ * The editor's unsaved draft, drawn as the booking page and fully clickable:
+ * the visitor's month, times and form, with the event's questions. Real times
+ * when the event is saved (`realSlots`), example times otherwise. Picking a
+ * time holds nothing and submitting books nothing (`previewNotice`). The
+ * draft is read after mount, from the key the eye button left.
  */
 export function DraftBookingPreview({
   hostName,
   avatarUrl,
   logoUrl,
   locale,
+  realSlots,
+  timeZone,
   m,
 }: {
   hostName: string;
   avatarUrl: string | null;
   logoUrl: string | null;
   locale: 'en' | 'es';
+  realSlots: { startUtc: string }[] | null;
+  timeZone: string;
   m: PreviewMessages;
 }) {
   const [draft, setDraft] = useState<DraftPreview | null | undefined>(undefined);
@@ -32,6 +38,17 @@ export function DraftBookingPreview({
   }, []);
 
   if (draft === undefined) return null;
+  const sample = previewFlowProps({
+    hostName,
+    avatarUrl,
+    logoUrl,
+    locale,
+    eventTitle: draft?.title || '…',
+    description: draft?.description ?? null,
+    lengthMinutes: draft && draft.lengthMinutes > 0 ? draft.lengthMinutes : 30,
+    location: draft?.location ?? null,
+    bookingFields: draft?.bookingFields ?? [],
+  });
   return (
     <>
       <div
@@ -39,24 +56,21 @@ export function DraftBookingPreview({
         data-testid="draft-preview-banner"
         className="mx-auto mb-group max-w-3xl rounded-md border border-border bg-card px-field py-inline text-center text-sm text-muted-foreground"
       >
-        {draft ? m.pageBanner : m.pageMissing}
+        {!draft ? m.pageMissing : realSlots ? m.pageBannerReal : m.pageBanner}
       </div>
       {draft ? (
-        <div aria-hidden="true" inert>
-          <BookingFlow
-            {...previewFlowProps({
-              hostName,
-              avatarUrl,
-              logoUrl,
-              locale,
-              eventTitle: draft.title || '…',
-              description: draft.description,
-              lengthMinutes: draft.lengthMinutes > 0 ? draft.lengthMinutes : 30,
-              location: draft.location,
-              bookingFields: draft.bookingFields,
-            })}
-          />
-        </div>
+        <BookingFlow
+          {...sample}
+          {...(realSlots
+            ? {
+                slots: realSlots,
+                initialTimeZone: timeZone,
+                followBrowserZone: true,
+                nowUtc: new Date().toISOString(),
+              }
+            : {})}
+          previewNotice={m.bookingDisabled}
+        />
       ) : null}
     </>
   );

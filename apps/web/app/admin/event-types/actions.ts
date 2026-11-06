@@ -233,10 +233,10 @@ export interface ReminderPreviewPayload {
 /** The reminder email as the invitee would receive it, rendered by the API's own email builders. */
 export async function previewReminderAction(
   p: ReminderPreviewPayload,
-): Promise<{ ok: true; subject: string; html: string } | { ok: false; message: string }> {
+): Promise<{ ok: true; from: string | null; to: string; subject: string; html: string } | { ok: false; message: string }> {
   try {
     const r = await adminApi.previewReminder(p);
-    return { ok: true, subject: r.subject, html: r.html };
+    return { ok: true, from: r.from, to: r.to, subject: r.subject, html: r.html };
   } catch (e) {
     unstable_rethrow(e);
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };

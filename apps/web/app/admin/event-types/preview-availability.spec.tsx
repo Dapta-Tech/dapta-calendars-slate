@@ -193,12 +193,14 @@ describe('reminder email preview', () => {
   it('renders the real email for the unsaved reminder, in a sandboxed frame', async () => {
     vi.mocked(previewReminderAction).mockResolvedValueOnce({
       ok: true,
+      from: 'dCal <bookings@example.com>',
+      to: 'Sam Taylor <sam@example.com>',
       subject: 'See you in 1 day(s)',
       html: '<table><tr><td>Discovery call</td></tr></table>',
     });
     const el = await mount(event({ title: 'Discovery call', reminders }));
     await click([...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent === 'Reminders')!);
-    await click([...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === m.editor.preview.emailButton)!);
+    await click(el.querySelector<HTMLButtonElement>('[data-testid="et-email-eye"]')!);
     expect(vi.mocked(previewReminderAction).mock.lastCall?.[0]).toMatchObject({
       kind: 'reminder',
       leadMinutes: 1440,
@@ -207,7 +209,11 @@ describe('reminder email preview', () => {
       title: 'Discovery call',
       lengthMinutes: 30,
     });
+    expect(el.querySelector('[data-testid="et-email-eye"]')!.getAttribute('aria-label')).toBe(m.editor.preview.emailButton);
     expect(document.querySelector('[data-testid="et-email-subject"]')!.textContent).toBe('See you in 1 day(s)');
+    const header = document.querySelector('[data-testid="et-email-preview"] dl')!.textContent;
+    expect(header).toContain('dCal <bookings@example.com>');
+    expect(header).toContain('Sam Taylor <sam@example.com>');
     const frame = document.querySelector<HTMLIFrameElement>('[data-testid="et-email-frame"]')!;
     expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
     expect(frame.getAttribute('srcdoc')).toContain('Discovery call');
@@ -216,7 +222,7 @@ describe('reminder email preview', () => {
   it('says so when the preview cannot be rendered', async () => {
     vi.mocked(previewReminderAction).mockResolvedValueOnce({ ok: false, message: 'down' });
     const el = await mount(event({ reminders }));
-    await click([...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === m.editor.preview.emailButton)!);
+    await click(el.querySelector<HTMLButtonElement>('[data-testid="et-email-eye"]')!);
     expect(document.querySelector('[data-testid="et-email-preview"]')!.textContent).toContain(m.editor.preview.emailError);
   });
 });
