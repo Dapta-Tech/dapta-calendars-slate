@@ -19,8 +19,9 @@ import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 import {
   clearEventCustomHoursSql,
-  deleteEventCustomHours,
+  deleteEventCustomHoursSql,
   getEventCustomHours,
+  getEventCustomHoursMany,
   runAtomically,
   setEventCustomHoursSql,
 } from './event-custom-hours';
@@ -165,14 +166,23 @@ function redirectUrlOrNull(url: string | null | undefined): string | null {
   return url?.trim() || null;
 }
 
-async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
+/**
+ * `customHours`: already read for this row (a list reads them in one batch,
+ * `getEventCustomHoursMany`); undefined reads them here.
+ */
+async function toEventTypeView(
+  db: Db,
+  r: EventTypeDbRow,
+  prefetched?: EventCustomHours | null,
+): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
     sql`SELECT member_id, is_fixed, priority, weight FROM event_type_host WHERE event_type_id = ${r.id}`,
   );
   const conflictCalendars = await db.all<{ connected_calendar_id: string }>(
     sql`SELECT connected_calendar_id FROM event_type_conflict_calendar WHERE event_type_id = ${r.id}`,
   );
-  const customHours = r.schedule_id ? await getEventCustomHours(db, r.id) : null;
+  const customHours =
+    prefetched !== undefined ? prefetched : r.schedule_id ? await getEventCustomHours(db, r.id) : null;
   return {
     id: r.id,
     memberId: r.member_id,
@@ -278,7 +288,11 @@ export async function listEventTypes(
   const rows = await db.all<EventTypeDbRow>(
     sql`SELECT ${ET_COLS} FROM event_type WHERE ${where} ORDER BY created_at ASC`,
   );
-  return Promise.all(rows.map((r) => toEventTypeView(db, r)));
+  const hours = await getEventCustomHoursMany(
+    db,
+    rows.filter((r) => r.schedule_id).map((r) => r.id),
+  );
+  return Promise.all(rows.map((r) => toEventTypeView(db, r, hours.get(r.id) ?? null)));
 }
 
 export async function getEventTypeById(
@@ -586,10 +600,14 @@ export async function deleteEventType(db: Db, accountId: string, id: string): Pr
     sql`SELECT id FROM event_type WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
   );
   if (!owned) return true;
-  await deleteEventCustomHours(db, id);
-  await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${id}`);
-  await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE event_type_id = ${id}`);
-  await db.run(sql`DELETE FROM event_type WHERE account_id = ${accountId} AND id = ${id}`);
+  // One transaction: the event never survives without the custom hours it
+  // pointed at, and its hours never outlive it.
+  await runAtomically(db, [
+    ...deleteEventCustomHoursSql(id),
+    sql`DELETE FROM event_type_host WHERE event_type_id = ${id}`,
+    sql`DELETE FROM event_type_conflict_calendar WHERE event_type_id = ${id}`,
+    sql`DELETE FROM event_type WHERE account_id = ${accountId} AND id = ${id}`,
+  ]);
   return true;
 }
 

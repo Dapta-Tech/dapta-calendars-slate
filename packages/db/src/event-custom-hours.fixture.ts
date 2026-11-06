@@ -16,6 +16,7 @@ import {
   deleteSchedule,
   getEventTypeById,
   getSchedule,
+  listEventTypes,
   listSchedules,
   updateEventType,
 } from './crud';
@@ -191,6 +192,18 @@ export function customHoursSuite(name: string, getDb: () => Promise<Db>): void {
       expect(await isUsableSchedule(db, { accountId, scheduleId: workingHoursId, memberId: 'someone-else' })).toBe(false);
       expect(await isUsableSchedule(db, { accountId: 'another-account', scheduleId: workingHoursId, memberId })).toBe(false);
       expect(await isUsableSchedule(db, { accountId, scheduleId: (await storedScheduleId(e.id))!, memberId })).toBe(false);
+    });
+
+    it('a list of events reads every event’s custom hours in one batch, each its own', async () => {
+      const a = await newEvent({ customHours: WEEKDAYS });
+      const b = await newEvent({ customHours: TUESDAY_MORNING });
+      const c = await newEvent({ scheduleId: workingHoursId });
+      const list = await listEventTypes(db, accountId, { memberId });
+      const byId = new Map(list.map((e) => [e.id, e]));
+      expect(byId.get(a.id)!.customHours).toEqual(WEEKDAYS);
+      expect(byId.get(b.id)!.customHours).toEqual(TUESDAY_MORNING);
+      expect(byId.get(c.id)!.customHours).toBeNull();
+      expect(byId.get(c.id)!.scheduleId).toBe(workingHoursId);
     });
 
     it('deleting the event deletes its custom hours', async () => {

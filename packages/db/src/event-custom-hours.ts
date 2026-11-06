@@ -23,9 +23,14 @@ import { sql, type Db } from './client';
 export async function runAtomically(db: Db, statements: SQL[]): Promise<void> {
   if (db.dialect === 'sqlite') {
     const native = db.sqlite!;
-    native.txn(() => {
-      for (const stmt of statements) native.drizzle.run(stmt);
-    });
+    // IMMEDIATE: take the write lock at BEGIN, so two processes saving the
+    // same event serialize instead of one failing on a stale snapshot.
+    native.txn(
+      () => {
+        for (const stmt of statements) native.drizzle.run(stmt);
+      },
+      { immediate: true },
+    );
     return;
   }
   await db.pg!.drizzle.transaction(async (tx) => {
@@ -43,25 +48,46 @@ function deleteOwnedSql(eventTypeId: string): SQL[] {
 
 /** The event's custom hours, or null when it has none. */
 export async function getEventCustomHours(db: Db, eventTypeId: string): Promise<EventCustomHours | null> {
-  const s = await db.get<{ id: string; time_zone: string }>(
-    sql`SELECT s.id, s.time_zone FROM schedule s
-        JOIN event_type e ON e.schedule_id = s.id
-        WHERE s.event_type_id = ${eventTypeId} AND e.id = ${eventTypeId} LIMIT 1`,
+  return (await getEventCustomHoursMany(db, [eventTypeId])).get(eventTypeId) ?? null;
+}
+
+/**
+ * Custom hours for many events in two queries (their schedules, then all
+ * their rules), so a list of event types does not read them one by one. Only
+ * events that currently POINT at their own hours are in the map.
+ */
+export async function getEventCustomHoursMany(
+  db: Db,
+  eventTypeIds: readonly string[],
+): Promise<Map<string, EventCustomHours>> {
+  const out = new Map<string, EventCustomHours>();
+  if (eventTypeIds.length === 0) return out;
+  const ids = sql.join(eventTypeIds.map((id) => sql`${id}`), sql`, `);
+  const schedules = await db.all<{ id: string; event_type_id: string; time_zone: string }>(
+    sql`SELECT s.id, s.event_type_id, s.time_zone FROM schedule s
+        JOIN event_type e ON e.schedule_id = s.id AND e.id = s.event_type_id
+        WHERE s.event_type_id IN (${ids})`,
   );
-  if (!s) return null;
-  const rows = await db.all<{ days: string | null; start_time: string; end_time: string }>(
-    sql`SELECT days, start_time, end_time FROM availability
-        WHERE schedule_id = ${s.id} AND days IS NOT NULL
+  if (schedules.length === 0) return out;
+  const scheduleIds = sql.join(schedules.map((s) => sql`${s.id}`), sql`, `);
+  const rules = await db.all<{ schedule_id: string; days: string | null; start_time: string; end_time: string }>(
+    sql`SELECT schedule_id, days, start_time, end_time FROM availability
+        WHERE schedule_id IN (${scheduleIds}) AND days IS NOT NULL
         ORDER BY start_time ASC, end_time ASC, id ASC`,
   );
-  return {
-    timeZone: s.time_zone,
-    ranges: rows.map((r) => ({
-      days: [...new Set(JSON.parse(r.days!) as number[])].sort((a, b) => a - b),
-      start: r.start_time,
-      end: r.end_time,
-    })),
-  };
+  for (const s of schedules) {
+    out.set(s.event_type_id, {
+      timeZone: s.time_zone,
+      ranges: rules
+        .filter((r) => r.schedule_id === s.id)
+        .map((r) => ({
+          days: [...new Set(JSON.parse(r.days!) as number[])].sort((a, b) => a - b),
+          start: r.start_time,
+          end: r.end_time,
+        })),
+    });
+  }
+  return out;
 }
 
 /**
@@ -124,7 +150,12 @@ export function clearEventCustomHoursSql(args: { accountId: string; eventTypeId:
   ];
 }
 
-/** Delete an event's custom hours (used when the event itself is deleted). */
+/** The statements that delete an event's custom hours, for a caller deleting the event in the same transaction. */
+export function deleteEventCustomHoursSql(eventTypeId: string): SQL[] {
+  return deleteOwnedSql(eventTypeId);
+}
+
+/** Delete an event's custom hours. */
 export async function deleteEventCustomHours(db: Db, eventTypeId: string): Promise<void> {
   await runAtomically(db, deleteOwnedSql(eventTypeId));
 }
