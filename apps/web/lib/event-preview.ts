@@ -2,25 +2,21 @@ import 'server-only';
 import { adminApi, type Me, type Schedule } from '@/lib/admin-api';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { logoOf } from '@/lib/brand-kit';
-import { bookingLookOf, type BookingAxes } from '@/lib/booking-look';
 
-/** Who and what the event editor's preview draws around the draft. */
+/** Who and what the draft preview page draws around the event. */
 export interface EventPreviewHost {
   hostName: string;
   avatarUrl: string | null;
   logoUrl: string | null;
-  accent: string;
-  axes: BookingAxes;
-  /** The page's address without the event slug (`/acme/alex-rivera`), or null
-   *  when the event has no public address yet (no handle, or a team with no slug). */
-  basePath: string | null;
+  /** The page's own colour and stored style, as `BrandedShell` takes them. */
+  brandColor: string | null;
+  style: Record<string, unknown>;
 }
 
 /**
- * The host's booking-page look and address, for the editor's preview. Read the
- * way the booking-page studio reads it (`bookingLookOf`), so the preview wears
- * the page's real colours. A failed profile read costs the look (defaults are
- * drawn), never the editor.
+ * The host's booking-page look, for the draft preview page. Read the way the
+ * public page reads it, so the preview wears the page's real colours. A failed
+ * profile read costs the look (defaults are drawn), never the page.
  */
 export async function loadEventPreviewHost(
   me: Me | null,
@@ -29,27 +25,16 @@ export async function loadEventPreviewHost(
   const profile = me?.handle ? await adminApi.profile(me.accountCode, me.handle).catch(() => null) : null;
   const displayName = profile?.member.displayName ?? me?.displayName ?? '';
   const style = (profile?.member.style ?? {}) as Record<string, unknown>;
-  const { accent, axes } = bookingLookOf(style, profile?.member.brandColor, displayName);
   const personalAvatar = resolveAvatarUrl(
     profile?.member.avatarUrl,
     style.hideConnectedPhoto === true ? null : profile?.member.connectedAvatarUrl,
   );
-  const basePath = !me?.accountCode
-    ? null
-    : team
-      ? team.slug
-        ? `/${me.accountCode}/team/${team.slug}`
-        : null
-      : me.handle
-        ? `/${me.accountCode}/${me.handle}`
-        : null;
   return {
     hostName: team?.name ?? displayName,
     avatarUrl: team ? team.logoUrl : personalAvatar,
     logoUrl: logoOf(style) ?? null,
-    accent,
-    axes,
-    basePath,
+    brandColor: profile?.member.brandColor ?? null,
+    style,
   };
 }
 

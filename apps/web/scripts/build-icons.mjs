@@ -53,6 +53,7 @@ const MAP = {
   desktop: 'monitor',
   download: 'download',
   'external-link': 'arrow-up-right',
+  eye: 'eye',
   'file-code': 'file-code',
   'file-edit': 'file-pen-line',
   globe: 'globe',

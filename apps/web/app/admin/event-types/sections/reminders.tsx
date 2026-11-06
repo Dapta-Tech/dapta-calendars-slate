@@ -11,6 +11,13 @@ import {
 } from '@slate/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EventTypeMessages } from './shared';
+import { ReminderEmailPreview, type ReminderPreviewContext } from './reminder-email-preview';
+
+/** What a reminder needs to preview its email. */
+export interface ReminderPreviewProps {
+  context: ReminderPreviewContext;
+  m: EventTypeMessages['editor']['preview'];
+}
 
 export type ReminderMessages = EventTypeMessages['reminders'];
 
@@ -67,12 +74,15 @@ export function ReminderCard({
   onRemove,
   fieldNames,
   m,
+  preview,
 }: {
   row: EventReminder;
   onChange: (patch: Partial<EventReminder>) => void;
   onRemove?: () => void;
   fieldNames: string[];
   m: ReminderMessages;
+  /** The editor's draft and copy for "Preview email"; absent, no preview. */
+  preview?: ReminderPreviewProps;
 }) {
   const subjectRef = useRef<HTMLInputElement | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
@@ -166,6 +176,7 @@ export function ReminderCard({
         className="w-full rounded-md border border-input bg-background px-inline py-tight text-sm"
       />
       <p className="text-xs text-muted-foreground">{m.defaultCopyHint}</p>
+      {preview ? <ReminderEmailPreview row={row} context={preview.context} m={preview.m} /> : null}
 
       <div className="flex flex-col gap-tight">
         <span className="text-2xs uppercase tracking-wide text-muted-foreground">{m.variablesLabel}</span>
@@ -215,11 +226,13 @@ export function RemindersSection({
   setRows,
   fieldNames,
   m,
+  preview,
 }: {
   rows: EventReminder[];
   setRows: (fn: (rows: EventReminder[]) => EventReminder[]) => void;
   fieldNames: string[];
   m: ReminderMessages;
+  preview?: ReminderPreviewProps;
 }) {
   const reminders = rows.filter((r) => r.kind === 'reminder');
   const followUp = rows.find((r) => r.kind === 'follow_up');
@@ -257,6 +270,7 @@ export function RemindersSection({
             row={r}
             fieldNames={fieldNames}
             m={m}
+            preview={preview}
             onChange={(p) => patch(r.id, p)}
             onRemove={() => setRows((rs) => rs.filter((x) => x.id !== r.id))}
           />
@@ -301,6 +315,7 @@ export function RemindersSection({
         }
         fieldNames={fieldNames}
         m={m}
+        preview={preview}
         onChange={(p) =>
           setRows((rs) =>
             rs.some((r) => r.kind === 'follow_up')

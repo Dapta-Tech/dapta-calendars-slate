@@ -30,7 +30,7 @@ export function DurationField({
   const errorId = 'et-duration-error';
   const chip = (selected: boolean) =>
     cn(
-      'min-h-control rounded-md border px-field text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      'min-h-control cursor-pointer rounded-md border px-field text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       selected
         ? 'border-signal-edge bg-signal/10 text-foreground'
         : 'border-border bg-card text-muted-foreground hover:border-foreground/20 hover:text-foreground',

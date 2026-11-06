@@ -249,7 +249,7 @@ export function AvailabilityField({
                       onClick={() =>
                         onCustomHours({ ...customHours, ranges: customHours.ranges.filter((_, j) => j !== i) })
                       }
-                      className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
+                      className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
                     >
                       <i aria-hidden className="pi pi-trash" style={{ fontSize: 14 }} />
                     </button>
@@ -263,7 +263,7 @@ export function AvailabilityField({
           <button
             type="button"
             onClick={() => onCustomHours({ ...customHours, ranges: [...customHours.ranges, nextRow(customHours.ranges)] })}
-            className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
+            className="cursor-pointer self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
           >
             + {m.addHours}
           </button>

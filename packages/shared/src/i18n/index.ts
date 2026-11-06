@@ -555,22 +555,18 @@ export interface BookingMessages {
           templateInvalid: string;
         };
         preview: {
-          title: string;
-          open: string;
+          /** The eye button: opens the draft as the booking page in a new tab. */
+          eye: string;
+          pageBanner: string;
+          pageMissing: string;
+          emailButton: string;
+          emailTitle: string;
+          subjectLabel: string;
+          /** Says the design is what mail apps show, and where the written message goes. */
+          emailNote: string;
+          emailLoading: string;
+          emailError: string;
           close: string;
-          /** `{items}` lists draft fields the sample page does not draw. */
-          notShown: string;
-          reminderPick: string;
-          /** `{n}` is the reminder's position. */
-          reminderN: string;
-          followUp: string;
-          noReminders: string;
-          defaultSubject: string;
-          defaultBody: string;
-          /** Sample values the reminder preview fills its variables with. */
-          sampleAttendee: string;
-          sampleAnswer: string;
-          questions: string;
         };
         availability: {
           label: string;
@@ -2437,19 +2433,17 @@ export const en: BookingMessages = {
           templateInvalid: 'This reminder uses a variable that does not exist.',
         },
         preview: {
-          title: 'Preview',
-          open: 'Preview',
-          close: 'Close preview',
-          notShown: 'Not shown in the preview: {items}',
-          reminderPick: 'Reminder to preview',
-          reminderN: 'Reminder {n}',
-          followUp: 'Follow-up',
-          noReminders: 'No reminders yet. Reminders are emailed to attendees before the meeting.',
-          defaultSubject: 'Uses the default subject.',
-          defaultBody: 'Uses the default message.',
-          sampleAttendee: 'Sam Taylor',
-          sampleAnswer: 'Sample answer',
-          questions: 'your questions',
+          eye: 'Preview booking page',
+          pageBanner: 'Preview of your booking page with your unsaved changes. The times are examples, and nothing can be booked here.',
+          pageMissing: 'There is nothing to preview. Open the preview again from the event editor.',
+          emailButton: 'Preview email',
+          emailTitle: 'Email preview',
+          subjectLabel: 'Subject',
+          emailNote:
+            'This is the email an invitee gets, for a sample booking with Sam Taylor tomorrow. Most email apps show this design; your message is sent as its plain-text version.',
+          emailLoading: 'Loading the preview…',
+          emailError: 'The preview could not be loaded. Try again.',
+          close: 'Close',
         },
         availability: {
           label: 'Bookable hours',
@@ -4287,19 +4281,17 @@ export const es: BookingMessages = {
           templateInvalid: 'Este recordatorio usa una variable que no existe.',
         },
         preview: {
-          title: 'Vista previa',
-          open: 'Vista previa',
-          close: 'Cerrar vista previa',
-          notShown: 'No se muestra en la vista previa: {items}',
-          reminderPick: 'Recordatorio a previsualizar',
-          reminderN: 'Recordatorio {n}',
-          followUp: 'Seguimiento',
-          noReminders: 'Aún no hay recordatorios. Los recordatorios se envían por correo a los invitados antes de la reunión.',
-          defaultSubject: 'Usa el asunto predeterminado.',
-          defaultBody: 'Usa el mensaje predeterminado.',
-          sampleAttendee: 'Sam Taylor',
-          sampleAnswer: 'Respuesta de ejemplo',
-          questions: 'tus preguntas',
+          eye: 'Ver página de reservas',
+          pageBanner: 'Vista previa de tu página de reservas con tus cambios sin guardar. Los horarios son de ejemplo y aquí no se puede reservar.',
+          pageMissing: 'No hay nada que mostrar. Abre la vista previa otra vez desde el editor del evento.',
+          emailButton: 'Ver correo',
+          emailTitle: 'Vista previa del correo',
+          subjectLabel: 'Asunto',
+          emailNote:
+            'Este es el correo que recibe un invitado, para una reserva de ejemplo con Sam Taylor mañana. La mayoría de los programas de correo muestran este diseño; tu mensaje se envía como su versión de texto plano.',
+          emailLoading: 'Cargando la vista previa…',
+          emailError: 'No se pudo cargar la vista previa. Inténtalo de nuevo.',
+          close: 'Cerrar',
         },
         availability: {
           label: 'Horario para reservar',

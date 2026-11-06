@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * The editor's live preview (the draft as the booking page, in a browser frame
- * with the event's address; the reminder email on the Reminders tab) and the
- * availability source (working hours, a saved schedule, or the event's own
+ * The editor's previews (the eye button hands the unsaved draft to a new tab
+ * that draws it as the booking page; each reminder previews the real email
+ * the API would send) and the availability source (working hours, a saved schedule, or the event's own
  * custom hours edited as day → from → to rows).
  */
 import { act, type AnchorHTMLAttributes, type ReactNode } from 'react';
@@ -10,7 +10,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getMessages, type Locale } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
-import type { EventPreviewHost } from '@/lib/event-preview';
 
 vi.mock('next/link', () => ({
   default: ({
@@ -28,9 +27,11 @@ vi.mock('./actions', () => ({
   revokeOneOffLinkAction: vi.fn(),
   saveEventTypeAction: vi.fn(),
   refreshCrmPropertiesAction: vi.fn(),
+  previewReminderAction: vi.fn(),
 }));
 
-import { saveEventTypeAction, type EventTypePayload } from './actions';
+import { previewReminderAction, saveEventTypeAction, type EventTypePayload } from './actions';
+import { takeDraftPreview } from './draft-preview';
 import { EventTypeForm } from './event-type-form';
 import { dayKeyOf, daysOfKey, nextRow, rowsFromRules } from './sections/availability';
 
@@ -87,14 +88,6 @@ const event = (over: Partial<EventType> = {}): EventType => ({
   ...over,
 });
 
-const HOST: EventPreviewHost = {
-  hostName: 'Alex Rivera',
-  avatarUrl: null,
-  logoUrl: null,
-  accent: '#2f6fed',
-  axes: {} as EventPreviewHost['axes'],
-  basePath: '/acme/alex-rivera',
-};
 const WORKING = {
   timeZone: 'America/Bogota',
   rules: [1, 2, 3, 4, 5].map((d) => ({ days: [d], startTime: '09:00', endTime: '17:00', date: null })),
@@ -128,7 +121,6 @@ async function mount(
         locale={locale}
         schedules={opts.schedules ?? SCHEDULES}
         workingHours={WORKING}
-        previewHost={HOST}
       />,
     ),
   );
@@ -162,43 +154,70 @@ const rows = (el: HTMLElement) =>
   });
 const save = (el: HTMLElement) => click(el.querySelector<HTMLButtonElement>('button[type="submit"]')!);
 const saved = () => vi.mocked(saveEventTypeAction).mock.lastCall?.[0] as EventTypePayload | undefined;
-const panel = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-testid="et-preview"]')!;
 
-describe('live preview', () => {
-  it('draws the draft as the booking page, in a frame with the event address, as it is typed', async () => {
-    const el = await mount(event());
-    expect(panel(el).textContent).toContain('Intro');
-    expect(el.querySelector('[data-testid="et-preview-address"]')!.textContent).toMatch(/\/acme\/alex-rivera\/intro$/);
+describe('preview booking page (eye button)', () => {
+  it('opens a new tab with the unsaved draft, which the tab reads back', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const el = await mount(event({ bookingFields: [{ name: 'company', label: 'Company', type: 'text', required: true }] }));
     await typeInto(byId(el, 'et-title')!, 'Discovery call');
-    await typeInto(byId<HTMLInputElement>(el, 'et-slug')!, 'discovery');
-    await typeInto(el.querySelector<HTMLTextAreaElement>('textarea')!, 'Thirty minutes to see whether we fit.');
-    expect(panel(el).textContent).toContain('Discovery call');
-    expect(panel(el).textContent).toContain('Thirty minutes to see whether we fit.');
-    expect(el.querySelector('[data-testid="et-preview-address"]')!.textContent).toMatch(/\/acme\/alex-rivera\/discovery$/);
-    // A picture of a page: nothing in it can be focused or clicked.
-    expect(panel(el).querySelector('[aria-hidden="true"][inert]')).not.toBeNull();
+    await typeInto(el.querySelector<HTMLTextAreaElement>('textarea')!, 'Thirty minutes.');
+    const eye = el.querySelector<HTMLButtonElement>('[data-testid="et-preview-page"]')!;
+    expect(eye.getAttribute('aria-label')).toBe(m.editor.preview.eye);
+    await click(eye);
+    expect(open).toHaveBeenCalledTimes(1);
+    const url = new URL(String(open.mock.calls[0]![0]), 'http://x');
+    expect(url.pathname).toBe('/preview/event');
+    expect(open.mock.calls[0]![1]).toBe('_blank');
+    // The draft never rides in the URL.
+    expect(url.search).not.toContain('Discovery');
+    expect(takeDraftPreview(url.searchParams.get('k'))).toMatchObject({
+      title: 'Discovery call',
+      description: 'Thirty minutes.',
+      lengthMinutes: 30,
+      bookingFields: [{ name: 'company', label: 'Company' }],
+    });
+    open.mockRestore();
   });
 
-  it('names what the sample page does not draw', async () => {
-    const el = await mount(event());
-    expect(panel(el).textContent).toContain(m.editor.preview.notShown.replace('{items}', a.label));
+  it('is on the create screen too', async () => {
+    const el = await mount(undefined);
+    expect(el.querySelector('[data-testid="et-preview-page"]')).not.toBeNull();
+  });
+});
+
+describe('reminder email preview', () => {
+  const reminders = [
+    { id: 'r1', kind: 'reminder' as const, enabled: true, leadMinutes: 1440, subject: 'See you {{reminder_lead}}', body: null },
+  ];
+
+  it('renders the real email for the unsaved reminder, in a sandboxed frame', async () => {
+    vi.mocked(previewReminderAction).mockResolvedValueOnce({
+      ok: true,
+      subject: 'See you in 1 day(s)',
+      html: '<table><tr><td>Discovery call</td></tr></table>',
+    });
+    const el = await mount(event({ title: 'Discovery call', reminders }));
+    await click([...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent === 'Reminders')!);
+    await click([...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === m.editor.preview.emailButton)!);
+    expect(vi.mocked(previewReminderAction).mock.lastCall?.[0]).toMatchObject({
+      kind: 'reminder',
+      leadMinutes: 1440,
+      subject: 'See you {{reminder_lead}}',
+      body: null,
+      title: 'Discovery call',
+      lengthMinutes: 30,
+    });
+    expect(document.querySelector('[data-testid="et-email-subject"]')!.textContent).toBe('See you in 1 day(s)');
+    const frame = document.querySelector<HTMLIFrameElement>('[data-testid="et-email-frame"]')!;
+    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
+    expect(frame.getAttribute('srcdoc')).toContain('Discovery call');
   });
 
-  it('on Reminders, shows the reminder email with sample values in its variables', async () => {
-    const reminders = [
-      { id: 'r1', kind: 'reminder' as const, enabled: true, leadMinutes: 1440, subject: 'See you {{reminder_lead}}, {{attendee_name}}', body: null },
-    ];
+  it('says so when the preview cannot be rendered', async () => {
+    vi.mocked(previewReminderAction).mockResolvedValueOnce({ ok: false, message: 'down' });
     const el = await mount(event({ reminders }));
-    await click([...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent === 'Reminders')!);
-    const email = el.querySelector<HTMLElement>('[data-testid="et-preview-email"]')!;
-    expect(email.textContent).toContain(`See you in 1 day(s), ${m.editor.preview.sampleAttendee}`);
-    expect(email.textContent).toContain(m.editor.preview.defaultBody);
-  });
-
-  it('on Reminders with none, says what reminders are', async () => {
-    const el = await mount(event({ reminders: [] }));
-    await click([...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent === 'Reminders')!);
-    expect(panel(el).textContent).toContain(m.editor.preview.noReminders);
+    await click([...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === m.editor.preview.emailButton)!);
+    expect(document.querySelector('[data-testid="et-email-preview"]')!.textContent).toContain(m.editor.preview.emailError);
   });
 });
 

@@ -47,7 +47,7 @@ export function AdvancedSettings({
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => onToggle(!open)}
-        className="-mx-tight flex min-h-control items-start gap-inline rounded-md px-tight text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="-mx-tight flex min-h-control cursor-pointer items-start gap-inline rounded-md px-tight text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="mt-tight text-muted-foreground">
           <ChevronIcon direction={open ? 'up' : 'down'} />

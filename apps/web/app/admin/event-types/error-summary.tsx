@@ -38,7 +38,7 @@ export const ErrorSummary = forwardRef<
             <button
               type="button"
               onClick={() => onGo(e)}
-              className="text-left text-foreground underline underline-offset-4 hover:text-primary"
+              className="cursor-pointer text-left text-foreground underline underline-offset-4 hover:text-primary"
             >
               <span className="font-medium">{tabLabels[e.tab]}:</span> {e.message}
             </button>

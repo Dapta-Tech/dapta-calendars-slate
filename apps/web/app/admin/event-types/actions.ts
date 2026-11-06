@@ -216,3 +216,29 @@ export async function revokeOneOffLinkAction(
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }
+
+/** What the editor sends to preview one reminder: its unsaved copy and the event's draft facts. */
+export interface ReminderPreviewPayload {
+  kind: 'reminder' | 'follow_up';
+  leadMinutes: number;
+  subject: string | null;
+  body: string | null;
+  title: string;
+  description?: string | null;
+  lengthMinutes: number;
+  location?: EventLocationDto | null;
+  questions?: Array<{ name: string; label: string }>;
+}
+
+/** The reminder email as the invitee would receive it, rendered by the API's own email builders. */
+export async function previewReminderAction(
+  p: ReminderPreviewPayload,
+): Promise<{ ok: true; subject: string; html: string } | { ok: false; message: string }> {
+  try {
+    const r = await adminApi.previewReminder(p);
+    return { ok: true, subject: r.subject, html: r.html };
+  } catch (e) {
+    unstable_rethrow(e);
+    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+}

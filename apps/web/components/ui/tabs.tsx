@@ -78,7 +78,7 @@ export function Tabs<T extends string>({
               tabIndex={selected ? 0 : -1}
               onClick={() => onChange(t.id)}
               className={cn(
-                '-mb-px flex min-h-control shrink-0 items-center gap-inline border-b-2 px-tight text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                '-mb-px flex min-h-control shrink-0 cursor-pointer items-center gap-inline border-b-2 px-tight text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 selected
                   ? 'border-signal-edge text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground',

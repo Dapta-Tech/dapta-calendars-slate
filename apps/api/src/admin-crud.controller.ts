@@ -57,6 +57,11 @@ import {
 } from '@slate/db';
 import {
   eventTypeInputSchema,
+  eventLocationSchema,
+  MAX_REMINDER_BODY,
+  MAX_REMINDER_LEAD_MINUTES,
+  MAX_REMINDER_SUBJECT,
+  MIN_REMINDER_LEAD_MINUTES,
   memberInviteSchema,
   memberResendInviteSchema,
   type OneOffLinkView,
@@ -72,7 +77,7 @@ import {
 import type { ServerEnv } from '@slate/config/env';
 import { oneOffLinkPath } from '@slate/engine';
 import { isCompatible, sourceExists, type MappableField } from '@slate/crm/mapping';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import { AnalyticsEffects } from './analytics-effects';
 import { AuthService, type ReqLike } from './auth.service';
 import { requestEntry } from './auth.provider';
@@ -138,6 +143,22 @@ async function assertAvailabilitySource(
     throw new BadRequestException({ error: 'BAD_REQUEST', message: 'That schedule cannot be used.' });
   }
 }
+
+/** The event editor's reminder preview input; bounded like the event type's own fields. */
+const reminderPreviewSchema = z.object({
+  kind: z.enum(['reminder', 'follow_up']),
+  leadMinutes: z.number().int().min(MIN_REMINDER_LEAD_MINUTES).max(MAX_REMINDER_LEAD_MINUTES),
+  subject: z.string().max(MAX_REMINDER_SUBJECT).nullable(),
+  body: z.string().max(MAX_REMINDER_BODY).nullable(),
+  title: z.string().max(200),
+  description: z.string().max(2000).nullable().optional(),
+  lengthMinutes: z.number().int().positive().max(1440),
+  location: eventLocationSchema.nullable().optional(),
+  questions: z
+    .array(z.object({ name: z.string().min(1).max(64), label: z.string().max(200) }))
+    .max(50)
+    .optional(),
+});
 
 function unwrapCrud<T>(r: CrudResult<T>): T {
   if (r.ok) return r.value;
@@ -517,6 +538,21 @@ export class AdminCrudController {
       });
     }
     return updated;
+  }
+
+  /**
+   * One reminder or follow-up as the invitee would receive it (subject, plain
+   * text, branded HTML), from the editor's UNSAVED copy and a sample booking.
+   * Renders only: nothing is stored or sent. Any host may preview their own
+   * copy; the sample reads no booking.
+   */
+  @Post('event-types/reminder-preview')
+  @HttpCode(200)
+  async previewReminder(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    const input = parse(reminderPreviewSchema, body);
+    if (!this.email) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Previews are not available.' });
+    return this.email.previewReminder(p, input);
   }
 
   @Delete('event-types/:id')

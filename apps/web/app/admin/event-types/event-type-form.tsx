@@ -45,9 +45,7 @@ import {
   type AvailabilitySource,
   type ScheduleRule,
 } from './sections/availability';
-import { EventPreview, type PreviewDraft } from './event-preview';
-import type { EventPreviewHost } from '@/lib/event-preview';
-import { Modal } from '@/components/modal';
+import { openDraftPreview } from './draft-preview';
 import { ChevronIcon, EventTypeMessages, FIELD_TYPES, Field, HostCell, HostRow, SCHEDULING_METHODS, SchedulingMethod, TeamMemberOption, errorAria, inputCls } from './sections/shared';
 import { RemindersSection } from './sections/reminders';
 import { CalendarsForEventSection } from './sections/calendars';
@@ -79,7 +77,6 @@ export function EventTypeForm({
   locale = 'en',
   mcpUrl,
   workingHours,
-  previewHost,
 }: {
   initial?: EventType;
   schedules?: Array<{ id: string; name: string; isDefault?: boolean }>;
@@ -139,8 +136,6 @@ export function EventTypeForm({
   /** The host's working hours: shown under "My working hours", and where
    *  custom hours start from. */
   workingHours?: { timeZone: string; rules: ScheduleRule[] } | null;
-  /** Who and what the live preview draws around the draft; no preview without it. */
-  previewHost?: EventPreviewHost;
 }) {
   // Declared before the state that reads it: the mapping list is stored keyed
   // by provider, and with no adapter wired there is no key to read.
@@ -383,32 +378,31 @@ export function EventTypeForm({
     setAvailabilitySource(next);
   };
 
-  // The live preview: the draft as the booking page (or, on Reminders, the
-  // reminder email) shows it. Beside the form on wide screens; behind a
-  // "Preview" button below that.
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const previewDraft: PreviewDraft = {
-    title,
-    slug,
-    description,
-    lengthMinutes,
-    location: locationKind
-      ? { kind: locationKind, detail: locationKind === 'conferencing' ? null : locationDetail.trim() || null }
-      : null,
-    bookingFields: fields.filter((f) => f.name && f.label) as PreviewDraft['bookingFields'],
-    reminders,
+  // What the event looks like right now, unsaved changes included: the eye
+  // button draws it as the booking page in a new tab, and each reminder's
+  // preview renders the real email around it.
+  const draftLocation = locationKind
+    ? { kind: locationKind, detail: locationKind === 'conferencing' ? null : locationDetail.trim() || null }
+    : null;
+  const draftQuestions = fields.filter((f) => f.name && f.label && !isReservedFieldName(f.name));
+  const previewPage = () =>
+    openDraftPreview(
+      {
+        title,
+        description: description.trim() || null,
+        lengthMinutes: Number.isFinite(lengthMinutes) ? lengthMinutes : 30,
+        location: draftLocation,
+        bookingFields: draftQuestions as Parameters<typeof openDraftPreview>[0]['bookingFields'],
+      },
+      isTeamEvent ? eventTeamId : null,
+    );
+  const reminderContext = {
+    title: title.trim() || heading,
+    description: description.trim() || null,
+    lengthMinutes: Number.isFinite(lengthMinutes) && lengthMinutes > 0 ? lengthMinutes : 30,
+    location: draftLocation,
+    questions: draftQuestions.map((f) => ({ name: f.name, label: f.label })),
   };
-  const notShown = [editor.availability.label, ...(previewDraft.bookingFields.length ? [editor.preview.questions] : [])];
-  const preview = previewHost ? (
-    <EventPreview
-      draft={previewDraft}
-      host={previewHost}
-      mode={activeTab === 'reminders' ? 'reminders' : 'page'}
-      locale={locale}
-      m={editor.preview}
-      notShown={notShown}
-    />
-  ) : null;
 
   /** Duration, carrying the slot interval along while it still follows it. */
   const onDuration = (minutes: number) => {
@@ -484,11 +478,16 @@ export function EventTypeForm({
         actions={
           <span className="flex items-center gap-field">
             {headerExtras}
-            {preview ? (
-              <Button type="button" variant="outline" className="xl:hidden" onClick={() => setPreviewOpen(true)}>
-                {editor.preview.open}
-              </Button>
-            ) : null}
+            <button
+              type="button"
+              onClick={previewPage}
+              aria-label={editor.preview.eye}
+              title={editor.preview.eye}
+              data-testid="et-preview-page"
+              className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+            >
+              <i aria-hidden className="pi pi-eye" style={{ fontSize: 15 }} />
+            </button>
             <Button type="submit" disabled={pending}>
               {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
             </Button>
@@ -496,12 +495,6 @@ export function EventTypeForm({
         }
       />
       {dialog}
-      {preview ? (
-        <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={editor.preview.title} labelId="et-preview-title">
-          {previewOpen ? preview : null}
-        </Modal>
-      ) : null}
-      <div className={preview ? 'grid grid-cols-1 items-start gap-card xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : undefined}>
       <div className="flex min-w-0 flex-col gap-card">
         <ErrorSummary
           errors={visibleErrors}
@@ -1052,6 +1045,7 @@ export function EventTypeForm({
               setRows={(fn) => setReminders(fn)}
               fieldNames={fields.filter((f) => f.name && !isReservedFieldName(f.name)).map((f) => f.name)}
               m={m.reminders}
+              preview={{ context: reminderContext, m: editor.preview }}
             />
             {serverErrors
               .filter((e) => e.tab === 'reminders')
@@ -1106,12 +1100,6 @@ export function EventTypeForm({
         {res && !res.ok && !serverErrors.length && !serverPlain.length ? (
           <p className="text-sm text-destructive">{res.message}</p>
         ) : null}
-      </div>
-      {preview ? (
-        <aside aria-label={editor.preview.title} className="sticky top-32 hidden xl:block" data-testid="et-preview">
-          {preview}
-        </aside>
-      ) : null}
       </div>
     </form>
   );
