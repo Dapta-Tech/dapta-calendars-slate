@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-a3e635.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**Open-source scheduling by [Dapta](https://dapta.ai).** Availability, bookings,
+**Calendars for AI agents, open source by [Dapta](https://dapta.ai).** Availability, bookings,
 teams (round-robin & collective), calendar sync, notifications with editable
 templates, and short shareable links — double-booking-safe by construction.
 **Postgres is the source of truth** (CI and production run Postgres); **SQLite
@@ -57,6 +57,14 @@ SQLite-dev path documents where it degrades.
 
 ## What you get
 
+- A **remote MCP endpoint** with 19 tools for agents: find times, book, confirm,
+  move and cancel meetings, or put an event on the host's own calendar. Host
+  events can repeat daily or weekly, request a video link from the connected
+  calendar, and check attendees' free/busy before creation. See
+  [`docs/MCP.md`](docs/MCP.md) for access, scopes and limits.
+- A **tabbed event type editor** with unsaved booking-page and reminder-email
+  previews, custom weekly hours for personal event types, and calendar title
+  and description templates. See [`docs/EVENT-TYPES.md`](docs/EVENT-TYPES.md).
 - A **public booking page** (`/[accountCode]/[handle]/[slug]`) that server-renders
   real availability slots and books them (double-booking-safe).
 - A **pure scheduling engine** (`@slate/engine`) — DST-safe availability→slots,
@@ -81,6 +89,8 @@ packages/
   engine/          pure slot/timezone/host logic (no I/O)
   db/              Drizzle schema + migrations + seed + booking repository
   notifications/   EmailProvider port + adapters
+  calendar/        CalendarProvider port + generic external backend
+  crm/             CrmProvider port + HubSpot adapter
   shared/          timezone/slot/handle utils, i18n, design tokens
   config/          zod env schema + tsconfig/eslint/prettier presets
   types/           zod contracts shared by web + api
@@ -88,8 +98,8 @@ packages/
 
 The web app talks to the API over HTTP — it never imports the database or engine
 directly, so the two deploy independently. See [`ARCHITECTURE.md`](ARCHITECTURE.md)
-for the request flows, the package dependency direction, and the four
-ports/adapters seams (auth, calendar, email, entitlements).
+for the request flows, the package dependency direction, and the five
+ports/adapters seams (auth, calendar, email, entitlements and CRM).
 
 ### Double-booking safety (dual enforcement)
 

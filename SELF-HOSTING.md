@@ -152,8 +152,10 @@ set** boots on the zero-infra path.
 from that domain lands in a customer's account as `admin` instead of `member` —
 otherwise they see an empty account and cannot help — and gets an account picker
 in the admin sidebar so they can reach that customer without signing out. The
-identity service still decides every switch, so this only changes what is
-offered. Unset, nobody is special; set it only if your identity service cannot
+picker shows the organization name returned by the identity service, including
+when the current account is outside its first page of results. A missing name
+falls back to the account code or default picker label. The identity service still decides every
+switch, so this only changes what is offered. Unset, nobody is special; set it only if your identity service cannot
 mint a token for an address at that domain you do not control.
 
 ### Calendar (external free-busy + event write-out)
