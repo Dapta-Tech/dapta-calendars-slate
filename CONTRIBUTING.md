@@ -1,6 +1,6 @@
-# Contributing to Slate
+# Contributing to dCal
 
-Thanks for your interest! Slate is built to be easy to hack on — clone-and-run
+Thanks for your interest! dCal is built to be easy to hack on: clone-and-run
 with zero infrastructure.
 
 ## Getting started
@@ -15,7 +15,7 @@ Requirements: Node ≥ 22.13, pnpm ≥ 10. That's it — no Docker or database n
 ## Repository layout
 
 See the architecture diagram in [`README.md`](README.md). In short: `apps/{web,api}`
-plus `packages/{engine,db,notifications,shared,config,types}`, a Turborepo +
+plus `packages/{engine,db,notifications,calendar,crm,shared,config,types}`, a Turborepo +
 pnpm-workspaces monorepo.
 
 ## Making a change
@@ -33,7 +33,9 @@ pnpm-workspaces monorepo.
 5. Open the feature/fix PR into `develop`. CI runs lint (a single warning fails
    it), typecheck, tests on **SQLite** and a **Postgres** parity job (which
    exercises the double-booking `EXCLUDE` path), builds both apps, and runs the
-   publish-gate secret scan. It runs again on the merged `develop` head.
+   publish-gate secret scan. Browser suites run on SQLite and Postgres; the
+   self-host Compose job builds the production images and checks rendered pages.
+   CI runs again on the merged `develop` head.
 
 Maintainers promote validated releases with a separate `develop` → `main` PR.
 Do not open feature/fix PRs directly into `main`.

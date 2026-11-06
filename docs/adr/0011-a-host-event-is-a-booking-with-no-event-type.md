@@ -11,3 +11,9 @@ Three rules follow from "a booking the host made for themselves":
 - **It rides on `bookings:write`.** Creating an event writes to the host's calendar the way booking does, so it needs the scope that already lets an agent create, move and confirm bookings, not a new one. The difference is that the title, body and time are free text rather than an event type's: a key or connection granted `bookings:write` can now put such an event on its host's calendar and invite any address (`create_booking` guests could already invite any address). Two limits keep that inside what the grant means: a key held to some event types is refused, since an event of the host's own is outside those types; and an API key, which belongs to the workspace rather than a person, acts only for the workspace's owner, never for another member. A separate scope can be split off later without changing the tool.
 
 A sign-in acts for its own member. Later questions this does not answer: checking the attendees' own calendars, all-day events, a location (the calendar port has no field for one), and a webhook trigger of its own (`event.*`) if a subscriber wants host events.
+
+## Follow-up
+
+[ADR 0012](0012-a-repeating-event-is-one-calendar-series-and-dated-bookings.md)
+implements repeating host events and attendee availability. The earlier
+open questions above record the scope when this decision was made.
