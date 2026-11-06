@@ -88,3 +88,40 @@ describe('errorCounts and firstError', () => {
     expect(firstError([...errs].reverse())?.fieldId).toBe(FIELD_IDS.title);
   });
 });
+
+describe('validateDraft: custom hours', () => {
+  const a = m.editor.availability;
+  const hours = (ranges: EventTypeDraft['customHours']['ranges']) => ({
+    availabilitySource: 'custom' as const,
+    customHours: { timeZone: 'UTC', ranges },
+  });
+
+  it('needs at least one row', () => {
+    expect(only(hours([]))).toEqual([{ fieldId: 'et-hours', tab: 'general', section: undefined, message: a.rangesRequired }]);
+  });
+
+  it('flags an end before its start on that row', () => {
+    expect(only(hours([{ days: [1], start: '17:00', end: '09:00' }]))[0]).toMatchObject({
+      fieldId: 'et-hours-0-end',
+      message: a.endAfterStart,
+    });
+  });
+
+  it('flags the later of two rows that overlap once presets are expanded', () => {
+    const errs = only(
+      hours([
+        { days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' },
+        { days: [1], start: '16:00', end: '18:00' },
+      ]),
+    );
+    expect(errs).toEqual([{ fieldId: 'et-hours-1-day', tab: 'general', section: undefined, message: a.overlap }]);
+  });
+
+  it('back-to-back ranges and other sources pass; team events are not checked', () => {
+    expect(check(hours([{ days: [1], start: '09:00', end: '12:00' }, { days: [1], start: '12:00', end: '15:00' }]))).toEqual([]);
+    expect(check({ ...hours([]), availabilitySource: 'working' })).toEqual([]);
+    expect(
+      validateDraft({ ...valid, ...hours([]) }, { m, trackingEnabled: false, trackingKeys: [], isTeamEvent: true }),
+    ).toEqual([]);
+  });
+});

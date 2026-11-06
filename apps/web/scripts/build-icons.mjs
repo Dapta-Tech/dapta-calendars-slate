@@ -78,6 +78,7 @@ const MAP = {
   ticket: 'ticket',
   times: 'x',
   'times-circle': 'circle-x',
+  trash: 'trash-2',
   upload: 'upload',
   users: 'users',
 };

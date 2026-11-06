@@ -29,7 +29,7 @@ import {
   type TemplateLocale,
   type TemplateValue,
 } from '@slate/engine';
-import { isValidTimeZone } from '@slate/shared';
+import { formatLead as formatLeadShared, isValidTimeZone } from '@slate/shared';
 import type { BookingNotification } from './booking-notifier';
 import { escapeHtml } from './util';
 
@@ -176,20 +176,8 @@ export function unknownTokens(text: string, formFields?: readonly string[]): str
 /** Locale-aware "Sat, Aug 1, 11:00 AM EDT" in the given time zone (the engine's formatter). */
 export const formatWhen = formatTemplateTime;
 
-/** "in 24 hour(s)" / "en 30 minutos" — the reminder lead phrase. */
-export function formatLead(leadMinutes: number | undefined, locale: TemplateLocale): string {
-  if (leadMinutes == null) return locale === 'es' ? 'pronto' : 'soon';
-  const day = 1440;
-  if (leadMinutes % day === 0) {
-    const d = leadMinutes / day;
-    return locale === 'es' ? `en ${d} día(s)` : `in ${d} day(s)`;
-  }
-  if (leadMinutes % 60 === 0) {
-    const h = leadMinutes / 60;
-    return locale === 'es' ? `en ${h} hora(s)` : `in ${h} hour(s)`;
-  }
-  return locale === 'es' ? `en ${leadMinutes} minutos` : `in ${leadMinutes} minutes`;
-}
+/** "in 24 hour(s)" / "en 30 minutos" — the reminder lead phrase (shared with the editor's preview). */
+export const formatLead: (leadMinutes: number | undefined, locale: TemplateLocale) => string = formatLeadShared;
 
 /** "30 min", "1 h", "1 h 30 min": the meeting length (the engine's formatter). */
 export const formatDuration = formatTemplateDuration;

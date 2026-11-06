@@ -26,7 +26,7 @@ import { useToast } from '@/components/toast';
 import { TabPanel, Tabs } from '@/components/ui/tabs';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { saveEventTypeAction, type ActionResult } from './actions';
-import { draftReducer, initialDraft, toPayload, type DraftAction, type EventTypeDraft } from './draft';
+import { draftReducer, initialDraft, prefillCustomHours, toPayload, type DraftAction, type EventTypeDraft } from './draft';
 import { ErrorSummary } from './error-summary';
 import {
   EDITOR_TABS,
@@ -40,6 +40,14 @@ import {
 import { AdvancedSettings, advancedSummary } from './sections/advanced';
 import { AgentsTab } from './sections/agents';
 import { DurationField } from './sections/duration';
+import {
+  AvailabilityField,
+  type AvailabilitySource,
+  type ScheduleRule,
+} from './sections/availability';
+import { EventPreview, type PreviewDraft } from './event-preview';
+import type { EventPreviewHost } from '@/lib/event-preview';
+import { Modal } from '@/components/modal';
 import { ChevronIcon, EventTypeMessages, FIELD_TYPES, Field, HostCell, HostRow, SCHEDULING_METHODS, SchedulingMethod, TeamMemberOption, errorAria, inputCls } from './sections/shared';
 import { RemindersSection } from './sections/reminders';
 import { CalendarsForEventSection } from './sections/calendars';
@@ -70,9 +78,11 @@ export function EventTypeForm({
   crmCatalog,
   locale = 'en',
   mcpUrl,
+  workingHours,
+  previewHost,
 }: {
   initial?: EventType;
-  schedules?: Array<{ id: string; name: string }>;
+  schedules?: Array<{ id: string; name: string; isDefault?: boolean }>;
   messages: EventTypeMessages;
   /** Location-kind names (from the shared `location` catalog) — the same copy
    *  the public booking page and the manage page render. */
@@ -126,6 +136,11 @@ export function EventTypeForm({
   /** The MCP server address agents connect to (AI Agents tab); null when this
    *  installation offers no sign-in connection. */
   mcpUrl?: string | null;
+  /** The host's working hours: shown under "My working hours", and where
+   *  custom hours start from. */
+  workingHours?: { timeZone: string; rules: ScheduleRule[] } | null;
+  /** Who and what the live preview draws around the draft; no preview without it. */
+  previewHost?: EventPreviewHost;
 }) {
   // Declared before the state that reads it: the mapping list is stored keyed
   // by provider, and with no adapter wired there is no key to read.
@@ -135,7 +150,7 @@ export function EventTypeForm({
   // editor's parts share it and the save is a pure function of it. The setters
   // below keep the names this component always used.
   const [draft, dispatch] = useReducer(draftReducer, undefined, () =>
-    initialDraft({ initial, crmProvider, teamMembers, connections }),
+    initialDraft({ initial, crmProvider, teamMembers, connections, workingHours }),
   );
   const setter =
     <K extends keyof EventTypeDraft>(key: K) =>
@@ -199,6 +214,8 @@ export function EventTypeForm({
   const setSchedulingType = setter('schedulingType');
   const setRrDistribution = setter('rrDistribution');
   const setHosts = setter('hosts');
+  const setAvailabilitySource = setter('availabilitySource');
+  const setCustomHours = setter('customHours');
 
   // The booking window's error waits for a blur or a save attempt.
   const [windowChecked, setWindowChecked] = useState(false);
@@ -299,7 +316,7 @@ export function EventTypeForm({
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [serverErrors, setServerErrors] = useState<FieldError[]>([]);
   const [serverPlain, setServerPlain] = useState<string[]>([]);
-  const errors = validateDraft(draft, { m, trackingEnabled, trackingKeys });
+  const errors = validateDraft(draft, { m, trackingEnabled, trackingKeys, isTeamEvent });
   const visibleErrors = submitAttempted ? [...errors, ...serverErrors] : serverErrors;
   const counts = errorCounts(visibleErrors);
   const errorFor = (fieldId: string): string | null => {
@@ -357,6 +374,41 @@ export function EventTypeForm({
       router.push(backHref);
     });
   };
+
+  /** The availability source. Custom hours start from the working hours the
+   *  first time; a saved schedule starts on the first one. */
+  const onAvailabilitySource = (next: AvailabilitySource) => {
+    if (next === 'custom' && draft.customHours.ranges.length === 0) setCustomHours(prefillCustomHours(workingHours));
+    if (next === 'saved' && !scheduleId && schedules[0]) setScheduleId(schedules[0].id);
+    setAvailabilitySource(next);
+  };
+
+  // The live preview: the draft as the booking page (or, on Reminders, the
+  // reminder email) shows it. Beside the form on wide screens; behind a
+  // "Preview" button below that.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewDraft: PreviewDraft = {
+    title,
+    slug,
+    description,
+    lengthMinutes,
+    location: locationKind
+      ? { kind: locationKind, detail: locationKind === 'conferencing' ? null : locationDetail.trim() || null }
+      : null,
+    bookingFields: fields.filter((f) => f.name && f.label) as PreviewDraft['bookingFields'],
+    reminders,
+  };
+  const notShown = [editor.availability.label, ...(previewDraft.bookingFields.length ? [editor.preview.questions] : [])];
+  const preview = previewHost ? (
+    <EventPreview
+      draft={previewDraft}
+      host={previewHost}
+      mode={activeTab === 'reminders' ? 'reminders' : 'page'}
+      locale={locale}
+      m={editor.preview}
+      notShown={notShown}
+    />
+  ) : null;
 
   /** Duration, carrying the slot interval along while it still follows it. */
   const onDuration = (minutes: number) => {
@@ -432,6 +484,11 @@ export function EventTypeForm({
         actions={
           <span className="flex items-center gap-field">
             {headerExtras}
+            {preview ? (
+              <Button type="button" variant="outline" className="xl:hidden" onClick={() => setPreviewOpen(true)}>
+                {editor.preview.open}
+              </Button>
+            ) : null}
             <Button type="submit" disabled={pending}>
               {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
             </Button>
@@ -439,7 +496,13 @@ export function EventTypeForm({
         }
       />
       {dialog}
-      <div className="flex flex-col gap-card">
+      {preview ? (
+        <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={editor.preview.title} labelId="et-preview-title">
+          {previewOpen ? preview : null}
+        </Modal>
+      ) : null}
+      <div className={preview ? 'grid grid-cols-1 items-start gap-card xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : undefined}>
+      <div className="flex min-w-0 flex-col gap-card">
         <ErrorSummary
           errors={visibleErrors}
           plain={serverPlain}
@@ -530,19 +593,22 @@ export function EventTypeForm({
 
             <section className="flex flex-col gap-field">
               {sectionHeading(editor.sections.availability)}
+              <AvailabilityField
+                source={draft.availabilitySource}
+                onSource={onAvailabilitySource}
+                scheduleId={scheduleId}
+                onScheduleId={setScheduleId}
+                schedules={schedules}
+                workingHours={workingHours}
+                customHours={draft.customHours}
+                onCustomHours={setCustomHours}
+                isTeam={isTeamEvent}
+                errorFor={errorFor}
+                locale={locale}
+                m={editor.availability}
+                savedLabel={m.fSchedule}
+              />
               <div className="grid grid-cols-1 gap-field sm:grid-cols-2">
-                <Field label={m.fSchedule}>
-                  <select value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} className={inputCls}>
-                    <option value="">
-                      {schedules.length ? m.useDefaultSchedule : m.noSchedules}
-                    </option>
-                    {schedules.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
                 <Field label={m.fMinNotice} error={minNoticeErr.error} errorId={minNoticeErr.errorId}>
                   <input
                     id={FIELD_IDS.minNotice}
@@ -1040,6 +1106,12 @@ export function EventTypeForm({
         {res && !res.ok && !serverErrors.length && !serverPlain.length ? (
           <p className="text-sm text-destructive">{res.message}</p>
         ) : null}
+      </div>
+      {preview ? (
+        <aside aria-label={editor.preview.title} className="sticky top-32 hidden xl:block" data-testid="et-preview">
+          {preview}
+        </aside>
+      ) : null}
       </div>
     </form>
   );

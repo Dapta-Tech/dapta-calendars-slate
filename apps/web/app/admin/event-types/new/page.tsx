@@ -4,6 +4,7 @@ import type { CrmPropertyCatalog } from '@slate/types';
 import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { signInMcpUrl } from '@/lib/mcp-config';
+import { loadEventPreviewHost, loadWorkingHours } from '@/lib/event-preview';
 import { EventTypeForm } from '../event-type-form';
 
 export const dynamic = 'force-dynamic';
@@ -42,9 +43,22 @@ export default async function NewEventType({
       }))
     : undefined;
 
+  const team = teamId ? teams.find((t) => t.id === teamId) : undefined;
+  // The live preview's host and look, and the working hours the availability
+  // section shows and custom hours start from. Neither read can fail the page.
+  const [previewHost, workingHours] = await Promise.all([
+    loadEventPreviewHost(
+      me,
+      team ? { name: team.name, slug: team.slug, logoUrl: team.logoUrl } : undefined,
+    ).catch(() => undefined),
+    loadWorkingHours(schedules).catch(() => null),
+  ]);
+
   return (
-    <div className="mx-auto max-w-4xl px-gutter sm:px-gutter-wide pb-gutter-y">
+    <div className="mx-auto max-w-7xl px-gutter sm:px-gutter-wide pb-gutter-y">
       <EventTypeForm
+        previewHost={previewHost}
+        workingHours={workingHours}
         mcpUrl={signInMcpUrl()}
         schedules={schedules}
         messages={m}

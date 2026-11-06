@@ -9,10 +9,11 @@
  * learns it beside the field instead of from a failed save.
  */
 import { isReservedFieldName } from '@slate/shared';
-import { MAX_BOOKING_WINDOW_DAYS, isSuccessRedirectUrl as isRedirectUrl } from '@slate/types';
+import { MAX_BOOKING_WINDOW_DAYS, eventCustomHoursSchema, isSuccessRedirectUrl as isRedirectUrl } from '@slate/types';
 import type { EventTypeDraft } from './draft';
 import type { EventTypeMessages } from './sections/shared';
 import { invalidTrackingKeys, type TrackingKey } from './sections/tracking';
+import { HOURS_IDS } from './sections/availability';
 
 export const EDITOR_TABS = ['general', 'reminders', 'crm', 'agents'] as const;
 export type EditorTab = (typeof EDITOR_TABS)[number];
@@ -53,13 +54,18 @@ const isWhole = (n: unknown): n is number => typeof n === 'number' && Number.isI
 
 export interface ValidateContext {
   m: EventTypeMessages;
+  /** Team events have no custom hours to check. */
+  isTeamEvent?: boolean;
   /** Tracking is shown (and saved) for this workspace. */
   trackingEnabled: boolean;
   trackingKeys: TrackingKey[];
 }
 
 /** Every problem in the draft, in tab order and, within a tab, in form order. */
-export function validateDraft(d: EventTypeDraft, { m, trackingEnabled, trackingKeys }: ValidateContext): FieldError[] {
+export function validateDraft(
+  d: EventTypeDraft,
+  { m, trackingEnabled, trackingKeys, isTeamEvent = false }: ValidateContext,
+): FieldError[] {
   const e = m.editor.errors;
   const out: FieldError[] = [];
   const general = (fieldId: string, message: string, section?: EditorSection) =>
@@ -73,7 +79,20 @@ export function validateDraft(d: EventTypeDraft, { m, trackingEnabled, trackingK
   if (d.locationKind && d.locationKind !== 'conferencing' && !d.locationDetail.trim())
     general(FIELD_IDS.locationDetail, e.locationDetailRequired);
 
-  // Availability
+  // Availability: custom hours, checked by the same rules the API applies.
+  if (!isTeamEvent && d.availabilitySource === 'custom') {
+    const a = m.editor.availability;
+    const parsed = eventCustomHoursSchema.safeParse(d.customHours);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const [field, index, part] = issue.path;
+        if (field !== 'ranges') continue;
+        if (typeof index !== 'number') general(HOURS_IDS.list, a.rangesRequired);
+        else if (part === 'end') general(HOURS_IDS.end(index), a.endAfterStart);
+        else general(HOURS_IDS.day(index), a.overlap);
+      }
+    }
+  }
   if (!isWhole(d.minNotice) || d.minNotice < 0) general(FIELD_IDS.minNotice, e.minNoticeInvalid);
 
   // Booking form: a reserved name would make the public page ask twice.

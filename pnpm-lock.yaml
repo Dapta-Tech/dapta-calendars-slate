@@ -120,6 +120,9 @@ importers:
       '@slate/crm':
         specifier: workspace:*
         version: link:../../packages/crm
+      '@slate/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@slate/shared':
         specifier: workspace:*
         version: link:../../packages/shared

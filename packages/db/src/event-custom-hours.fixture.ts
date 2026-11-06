@@ -102,6 +102,15 @@ export function customHoursSuite(name: string, getDb: () => Promise<Db>): void {
       ]);
     });
 
+    it('lists the reusable schedules with the default marked', async () => {
+      const second = await createSchedule(db, accountId, memberId, { name: 'Evenings', timeZone: 'UTC' });
+      const list = await listSchedules(db, memberId);
+      expect(list.map((s) => [s.id, s.isDefault])).toEqual([
+        [workingHoursId, true],
+        [second.id, false],
+      ]);
+    });
+
     it('keeps custom hours out of the reusable schedules', async () => {
       const e = await newEvent({ customHours: WEEKDAYS });
       const list = await listSchedules(db, memberId);

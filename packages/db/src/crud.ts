@@ -647,11 +647,18 @@ export interface ScheduleView {
  * schedule with `event_type_id` set) are never listed: they are not the
  * Availability page's to show, nor another event's to pick.
  */
-export async function listSchedules(db: Db, memberId: string): Promise<{ id: string; name: string; timeZone: string }[]> {
-  return db.all<{ id: string; name: string; timeZone: string }>(
-    sql`SELECT id, name, time_zone AS "timeZone" FROM schedule
-        WHERE member_id = ${memberId} AND event_type_id IS NULL ORDER BY created_at ASC`,
+export async function listSchedules(
+  db: Db,
+  memberId: string,
+): Promise<{ id: string; name: string; timeZone: string; isDefault: boolean }[]> {
+  const rows = await db.all<{ id: string; name: string; timeZone: string; is_default: number | boolean | null }>(
+    sql`SELECT s.id, s.name, s.time_zone AS "timeZone",
+               CASE WHEN m.default_schedule_id = s.id THEN 1 ELSE 0 END AS is_default
+        FROM schedule s LEFT JOIN member m ON m.id = s.member_id
+        WHERE s.member_id = ${memberId} AND s.event_type_id IS NULL ORDER BY s.created_at ASC`,
   );
+  // `isDefault`: the member's working hours, what "use my default schedule" means.
+  return rows.map((r) => ({ id: r.id, name: r.name, timeZone: r.timeZone, isDefault: Number(r.is_default) === 1 }));
 }
 
 /** A REUSABLE schedule; an event's private custom hours read as not found (see `listSchedules`). */

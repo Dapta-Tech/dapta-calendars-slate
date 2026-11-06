@@ -554,6 +554,49 @@ export interface BookingMessages {
           slugTaken: string;
           templateInvalid: string;
         };
+        preview: {
+          title: string;
+          open: string;
+          close: string;
+          /** `{items}` lists draft fields the sample page does not draw. */
+          notShown: string;
+          reminderPick: string;
+          /** `{n}` is the reminder's position. */
+          reminderN: string;
+          followUp: string;
+          noReminders: string;
+          defaultSubject: string;
+          defaultBody: string;
+          /** Sample values the reminder preview fills its variables with. */
+          sampleAttendee: string;
+          sampleAnswer: string;
+          questions: string;
+        };
+        availability: {
+          label: string;
+          workingHours: string;
+          workingHoursHint: string;
+          noWorkingHours: string;
+          editWorkingHours: string;
+          saved: string;
+          custom: string;
+          customHint: string;
+          team: string;
+          dayLabel: string;
+          from: string;
+          to: string;
+          addHours: string;
+          remove: string;
+          everyDay: string;
+          weekdays: string;
+          weekends: string;
+          timeZone: string;
+          /** Weekday names, Sunday first. */
+          days: string[];
+          rangesRequired: string;
+          endAfterStart: string;
+          overlap: string;
+        };
         unsaved: { title: string; body: string; confirm: string; cancel: string };
         agents: {
           title: string;
@@ -2393,6 +2436,45 @@ export const en: BookingMessages = {
           slugTaken: 'Another event already uses this link. Choose a different one.',
           templateInvalid: 'This reminder uses a variable that does not exist.',
         },
+        preview: {
+          title: 'Preview',
+          open: 'Preview',
+          close: 'Close preview',
+          notShown: 'Not shown in the preview: {items}',
+          reminderPick: 'Reminder to preview',
+          reminderN: 'Reminder {n}',
+          followUp: 'Follow-up',
+          noReminders: 'No reminders yet. Reminders are emailed to attendees before the meeting.',
+          defaultSubject: 'Uses the default subject.',
+          defaultBody: 'Uses the default message.',
+          sampleAttendee: 'Sam Taylor',
+          sampleAnswer: 'Sample answer',
+          questions: 'your questions',
+        },
+        availability: {
+          label: 'Bookable hours',
+          workingHours: 'My working hours',
+          workingHoursHint: 'Follows the hours on your Availability page.',
+          noWorkingHours: 'You have no working hours yet.',
+          editWorkingHours: 'Edit working hours',
+          saved: 'A saved schedule',
+          custom: 'Custom hours for this event',
+          customHint: 'Only this event uses these hours. They are not added to your Availability page.',
+          team: 'On a team event, each host’s own working hours apply.',
+          dayLabel: 'Days',
+          from: 'from',
+          to: 'to',
+          addHours: 'Add hours',
+          remove: 'Remove these hours',
+          everyDay: 'Every day',
+          weekdays: 'Weekdays',
+          weekends: 'Weekends',
+          timeZone: 'Time zone',
+          days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+          rangesRequired: 'Add at least one time range.',
+          endAfterStart: 'End must be after start.',
+          overlap: 'These hours overlap another row on the same day.',
+        },
         unsaved: {
           title: 'Discard your changes?',
           body: 'You have changes that are not saved. If you leave now, they are lost.',
@@ -4203,6 +4285,45 @@ export const es: BookingMessages = {
           trackingInvalid: 'Este ID no es válido.',
           slugTaken: 'Otro evento ya usa este enlace. Elige uno diferente.',
           templateInvalid: 'Este recordatorio usa una variable que no existe.',
+        },
+        preview: {
+          title: 'Vista previa',
+          open: 'Vista previa',
+          close: 'Cerrar vista previa',
+          notShown: 'No se muestra en la vista previa: {items}',
+          reminderPick: 'Recordatorio a previsualizar',
+          reminderN: 'Recordatorio {n}',
+          followUp: 'Seguimiento',
+          noReminders: 'Aún no hay recordatorios. Los recordatorios se envían por correo a los invitados antes de la reunión.',
+          defaultSubject: 'Usa el asunto predeterminado.',
+          defaultBody: 'Usa el mensaje predeterminado.',
+          sampleAttendee: 'Sam Taylor',
+          sampleAnswer: 'Respuesta de ejemplo',
+          questions: 'tus preguntas',
+        },
+        availability: {
+          label: 'Horario para reservar',
+          workingHours: 'Mi horario de trabajo',
+          workingHoursHint: 'Sigue el horario de tu página de Disponibilidad.',
+          noWorkingHours: 'Aún no tienes horario de trabajo.',
+          editWorkingHours: 'Editar horario de trabajo',
+          saved: 'Un horario guardado',
+          custom: 'Horario propio de este evento',
+          customHint: 'Solo este evento usa este horario. No se agrega a tu página de Disponibilidad.',
+          team: 'En un evento de equipo se aplica el horario de trabajo de cada anfitrión.',
+          dayLabel: 'Días',
+          from: 'de',
+          to: 'a',
+          addHours: 'Agregar horario',
+          remove: 'Quitar este horario',
+          everyDay: 'Todos los días',
+          weekdays: 'Entre semana',
+          weekends: 'Fines de semana',
+          timeZone: 'Zona horaria',
+          days: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
+          rangesRequired: 'Agrega al menos un horario.',
+          endAfterStart: 'La hora final debe ser después de la inicial.',
+          overlap: 'Este horario se cruza con otra fila del mismo día.',
         },
         unsaved: {
           title: '¿Descartar tus cambios?',

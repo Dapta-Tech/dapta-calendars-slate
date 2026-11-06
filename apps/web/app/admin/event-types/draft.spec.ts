@@ -192,3 +192,31 @@ describe('draftReducer', () => {
     expect(same).toBe(base);
   });
 });
+
+describe('toPayload: availability', () => {
+  const ctx = { crmProvider: null, trackingEnabled: false, isTeamEvent: false, hasConnections: false };
+  const custom = { timeZone: 'UTC', ranges: [{ days: [2], start: '10:00', end: '12:00' }] };
+
+  it('custom hours travel without scheduleId', () => {
+    const d = { ...initialDraft({ initial: PERSONAL, crmProvider: null }), availabilitySource: 'custom' as const, customHours: custom };
+    const p = toPayload(d, { ...ctx, initial: PERSONAL });
+    expect(p.customHours).toEqual(custom);
+    expect(p).not.toHaveProperty('scheduleId');
+  });
+
+  it('an event with custom hours opens on them, and leaving them sends null', () => {
+    const withHours = { ...PERSONAL, scheduleId: null, customHours: custom };
+    const d = initialDraft({ initial: withHours, crmProvider: null });
+    expect(d.availabilitySource).toBe('custom');
+    const p = toPayload({ ...d, availabilitySource: 'working' }, { ...ctx, initial: withHours });
+    expect(p).toMatchObject({ customHours: null, scheduleId: null });
+  });
+
+  it('working hours send scheduleId null; an event that never had custom hours sends no customHours', () => {
+    const d = initialDraft({ initial: { ...PERSONAL, scheduleId: null }, crmProvider: null });
+    expect(d.availabilitySource).toBe('working');
+    const p = toPayload(d, { ...ctx, initial: { ...PERSONAL, scheduleId: null } });
+    expect(p.scheduleId).toBeNull();
+    expect(p).not.toHaveProperty('customHours');
+  });
+});

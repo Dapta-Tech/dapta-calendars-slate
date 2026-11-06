@@ -26,6 +26,10 @@ import {
   type TeamMemberOption,
 } from './sections/shared';
 import { trackingDraftOf, type TrackingDraft } from './sections/tracking';
+import { rowsFromRules, type AvailabilitySource, type CustomHoursDraft, type ScheduleRule } from './sections/availability';
+
+/** The hours a new custom-hours editor starts from when there are no working hours. */
+const STARTER_HOURS = [{ days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' }];
 
 export interface EventTypeDraft {
   title: string;
@@ -44,8 +48,13 @@ export interface EventTypeDraft {
   beforeBuf: number;
   afterBuf: number;
   seats: number | '';
-  /** '' is "the host's working hours". */
+  /** The saved schedule picked under "A saved schedule". */
   scheduleId: string;
+  /** Where the bookable hours come from (personal events can have their own). */
+  availabilitySource: AvailabilitySource;
+  /** The event's own hours. Empty until the host first picks custom hours,
+   *  when they are prefilled from the working hours. */
+  customHours: CustomHoursDraft;
   requiresConfirmation: boolean;
   preventDuplicateBookings: boolean;
   hidden: boolean;
@@ -70,10 +79,18 @@ export interface DraftContext {
   crmProvider: string | null;
   teamMembers?: TeamMemberOption[];
   connections?: Connection[];
+  /** The host's working hours: where custom hours start from, and their zone. */
+  workingHours?: { timeZone: string; rules: ScheduleRule[] } | null;
 }
 
 /** The draft an editor opens on: the saved event, or the defaults of a new one. */
-export function initialDraft({ initial, crmProvider, teamMembers, connections }: DraftContext): EventTypeDraft {
+export function initialDraft({
+  initial,
+  crmProvider,
+  teamMembers,
+  connections,
+  workingHours,
+}: DraftContext): EventTypeDraft {
   return {
     title: initial?.title ?? '',
     slug: initial?.slug ?? '',
@@ -93,6 +110,10 @@ export function initialDraft({ initial, crmProvider, teamMembers, connections }:
     afterBuf: initial?.afterEventBuffer ?? 0,
     seats: initial?.seatsPerTimeSlot ?? '',
     scheduleId: initial?.scheduleId ?? '',
+    availabilitySource: initial?.customHours ? 'custom' : initial?.scheduleId ? 'saved' : 'working',
+    customHours: initial?.customHours
+      ? { timeZone: initial.customHours.timeZone, ranges: initial.customHours.ranges.map((r) => ({ ...r })) }
+      : { timeZone: workingHours?.timeZone ?? 'UTC', ranges: [] },
     requiresConfirmation: initial?.requiresConfirmation ?? false,
     // Duplicate-booking guard (#69). Hydrated from the event so that EDITING one
     // cannot silently switch it back off. A new event starts off, which is also
@@ -204,7 +225,7 @@ export function toPayload(d: EventTypeDraft, ctx: PayloadContext): EventTypePayl
     beforeEventBuffer: Number(d.beforeBuf),
     afterEventBuffer: Number(d.afterBuf),
     seatsPerTimeSlot: d.seats === '' ? null : Number(d.seats),
-    scheduleId: d.scheduleId || null,
+    ...availabilityPayload(d, initial, isTeamEvent),
     requiresConfirmation: d.requiresConfirmation,
     // Travels on create AND edit, personal AND team events — both public
     // write paths honour it, so the editor must not offer it on only one.
@@ -278,4 +299,31 @@ export function deliverableMappings(
     .filter((row) => sourceExists(row.source, fields))
     .map((row) => ({ ...row, properties: row.properties.filter((p) => p.trim() !== '') }))
     .filter((row) => row.properties.length > 0);
+}
+
+/**
+ * The availability part of the save. Custom hours travel as `customHours` with
+ * no `scheduleId` (the API takes one or the other); leaving them sends
+ * `customHours: null` so the API deletes them; otherwise `scheduleId` as the
+ * editor always sent it (null = the host's working hours).
+ */
+function availabilityPayload(
+  d: EventTypeDraft,
+  initial: EventType | undefined,
+  isTeamEvent: boolean,
+): Pick<EventTypePayload, 'scheduleId' | 'customHours'> {
+  if (!isTeamEvent && d.availabilitySource === 'custom') {
+    return { customHours: { timeZone: d.customHours.timeZone, ranges: d.customHours.ranges } };
+  }
+  const scheduleId = d.availabilitySource === 'saved' ? d.scheduleId || null : null;
+  return initial?.customHours ? { scheduleId, customHours: null } : { scheduleId };
+}
+
+/** Custom hours to start editing from: the working hours, or Mon–Fri 9–5. */
+export function prefillCustomHours(workingHours: DraftContext['workingHours']): CustomHoursDraft {
+  const rows = workingHours ? rowsFromRules(workingHours.rules) : [];
+  return {
+    timeZone: workingHours?.timeZone ?? 'UTC',
+    ranges: rows.length ? rows : STARTER_HOURS.map((r) => ({ ...r, days: [...r.days] })),
+  };
 }

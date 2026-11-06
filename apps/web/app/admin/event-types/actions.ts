@@ -8,6 +8,7 @@ import type {
   CrmPropertyMappings,
   EventLocationDto,
   EventReminder,
+  EventCustomHours,
   EventTracking,
   OneOffLinkView,
   SuccessRedirectData,
@@ -44,7 +45,11 @@ export interface EventTypePayload {
    *  event. Travels on CREATE and EDIT, personal and team events alike. */
   preventDuplicateBookings: boolean;
   hidden: boolean;
-  scheduleId: string | null;
+  /** Omitted when `customHours` is sent: the API takes one source or the other. */
+  scheduleId?: string | null;
+  /** Personal events: the event's own hours (an object), or null to stop
+   *  using them. Omitted ⇒ the API leaves the availability source alone. */
+  customHours?: EventCustomHours | null;
   bookingFields: Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>;
   /** Reminders + follow-up owned by this event (#68). An empty array is a
    *  deliberate "no reminders", never a reset to the shipped defaults. */
