@@ -25,7 +25,7 @@ import {
   takeInvitationQuota,
   transferOwnership,
   createEventType,
-  isEventOwnedSchedule,
+  isUsableSchedule,
   createSchedule,
   createTeam,
   deleteEventType,
@@ -119,12 +119,14 @@ function parse<T>(schema: { parse: (v: unknown) => T }, body: unknown): T {
  * The availability rules a save must keep (custom hours; see
  * `packages/db/src/event-custom-hours.ts`): custom hours replace a schedule, so
  * a save names one or the other; they exist for personal events only (team
- * hosts follow their own schedules); and no event may point at another event's
- * private hours.
+ * hosts follow their own schedules); and a schedule an event follows must be a
+ * reusable one of the same account and, for a personal event, of its own host
+ * (never another account's, another member's, or an event's private hours).
  */
 async function assertAvailabilitySource(
   db: Db,
   input: { customHours?: unknown; scheduleId?: string | null },
+  owner: { accountId: string; memberId: string | null },
   isTeam: boolean,
 ): Promise<void> {
   if (input.customHours && input.scheduleId !== undefined) {
@@ -139,7 +141,10 @@ async function assertAvailabilitySource(
       message: 'Custom hours are for personal event types; team hosts follow their own schedules.',
     });
   }
-  if (input.scheduleId && (await isEventOwnedSchedule(db, input.scheduleId))) {
+  if (
+    input.scheduleId &&
+    !(await isUsableSchedule(db, { accountId: owner.accountId, scheduleId: input.scheduleId, memberId: owner.memberId }))
+  ) {
     throw new BadRequestException({ error: 'BAD_REQUEST', message: 'That schedule cannot be used.' });
   }
 }
@@ -486,7 +491,12 @@ export class AdminCrudController {
     // A team event-type is a cross-member resource → admin/owner only. A plain
     // member may only create their OWN personal event-type.
     if (input.teamId) assertAdmin(p);
-    await assertAvailabilitySource(this.db, input, Boolean(input.teamId));
+    await assertAvailabilitySource(
+      this.db,
+      input,
+      { accountId: p.accountId, memberId: input.teamId ? null : p.memberId },
+      Boolean(input.teamId),
+    );
     await this.assertTrackingChange(p, input.tracking, null);
     const locale = await this.hostLocale(p);
     if (input.reminders) assertReminderTemplates(input.reminders, [], locale);
@@ -514,7 +524,12 @@ export class AdminCrudController {
     if (!existing) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(eventTypeInputSchema.partial(), body);
-    await assertAvailabilitySource(this.db, input, Boolean(existing.teamId));
+    await assertAvailabilitySource(
+      this.db,
+      input,
+      { accountId: p.accountId, memberId: existing.teamId ? null : existing.memberId },
+      Boolean(existing.teamId),
+    );
     await this.assertTrackingChange(p, input.tracking, existing.tracking);
     const locale = await this.hostLocale(p);
     if (input.reminders) assertReminderTemplates(input.reminders, existing.reminders, locale);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { createDb, migrate, seed, sql, type Db } from '@slate/db';
+import { createDb, createSchedule, migrate, seed, sql, type Db } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
 import { loadServerEnv } from '@slate/config/env';
 import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
@@ -150,6 +150,22 @@ describe('custom hours on event types', () => {
       expect(await refusalOf(crud.updateEventType(REQ, other.id, { scheduleId: await ownedScheduleId() }))).toMatch(
         /cannot be used/,
       );
+    });
+  });
+
+  describe('which schedule an event may follow', () => {
+    it("refuses another member's schedule and another account's", async () => {
+      const jordan = (await db.get<{ id: string; account_id: string }>(sql`SELECT id, account_id FROM member WHERE email='jordan@example.com'`))!;
+      const theirs = (await createSchedule(db, jordan.account_id, jordan.id, { name: 'Jordan hours', timeZone: 'UTC' })).id;
+      expect(await refusalOf(crud.updateEventType(REQ, introId, { scheduleId: theirs }))).toMatch(/cannot be used/);
+      await db.run(sql`INSERT INTO account (id, code, name, created_at) VALUES ('acct-other', 'othr01', 'Other', ${Date.now()})`);
+      await db.run(sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at) VALUES ('sched-foreign', 'acct-other', 'm-x', 'X', 'UTC', ${Date.now()})`);
+      expect(await refusalOf(crud.updateEventType(REQ, introId, { scheduleId: 'sched-foreign' }))).toMatch(/cannot be used/);
+    });
+
+    it("accepts the host's own reusable schedule", async () => {
+      const own = (await crud.listSchedules(REQ))[0]!.id;
+      expect((await crud.updateEventType(REQ, introId, { scheduleId: own })).scheduleId).toBe(own);
     });
   });
 

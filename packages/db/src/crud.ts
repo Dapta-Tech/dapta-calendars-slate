@@ -18,10 +18,11 @@ import {
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 import {
-  clearEventCustomHours,
+  clearEventCustomHoursSql,
   deleteEventCustomHours,
   getEventCustomHours,
-  setEventCustomHours,
+  runAtomically,
+  setEventCustomHoursSql,
 } from './event-custom-hours';
 import {
   defaultEventReminders,
@@ -379,8 +380,7 @@ export async function createEventType(
   const destinationCalendarId = ownerMemberId
     ? await ownedDestinationCalendarId(db, ownerMemberId, input.destinationCalendarId)
     : null;
-  await db.run(
-    sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
+  const insert = sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
           length_minutes, locations, schedule_id, hidden, scheduling_type, rr_distribution, booking_fields, reminders,
           minimum_booking_notice, booking_window_days, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
@@ -400,15 +400,21 @@ export async function createEventType(
           ${templateOrNull(input.calendarTitleTemplate)}, ${templateOrNull(input.calendarDescriptionTemplate)},
           ${redirectUrlOrNull(input.successRedirectUrl)},
           ${redirectUrlOrNull(input.successRedirectUrl) ? redirectDataOrNull(input.successRedirectData) : null},
-          ${jsonParam(db, normalizeEventTracking(input.tracking ?? null))}, ${now})`,
-  );
+          ${jsonParam(db, normalizeEventTracking(input.tracking ?? null))}, ${now})`;
+  // An event created with custom hours is written with them in ONE transaction:
+  // it never exists, even for a moment, without the hours it was created with.
+  if (ownerMemberId && input.customHours) {
+    await runAtomically(db, [
+      insert,
+      ...setEventCustomHoursSql({ accountId, memberId: ownerMemberId, eventTypeId: id, hours: input.customHours }),
+    ]);
+  } else {
+    await db.run(insert);
+  }
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
   if (ownerMemberId && input.conflictCalendarIds) {
     await setEventTypeConflictCalendars(db, id, ownerMemberId, input.conflictCalendarIds);
-  }
-  if (ownerMemberId && input.customHours) {
-    await setEventCustomHours(db, { accountId, memberId: ownerMemberId, eventTypeId: id, hours: input.customHours });
   }
   const view = await getEventTypeById(db, accountId, id);
   return { ok: true, value: view! };
@@ -479,29 +485,29 @@ export async function updateEventType(
   }
 
   // Leaving custom hours — explicitly (`customHours: null`), or by a client
-  // that picks a schedule without knowing about custom hours — deletes them in
-  // the same transaction that re-points the event, so no private schedule is
-  // left behind. The UPDATE below then writes the same `schedule_id` again.
+  // that picks a schedule without knowing about custom hours — deletes them.
+  // Every write about the event's hours and the event's own fields runs in ONE
+  // transaction, so a save lands whole or not at all: no event left pointing
+  // at deleted hours, none with new fields and old hours.
   const leavesCustomHours =
     isPersonal &&
     existing.customHours !== null &&
     (input.customHours === null || (input.customHours === undefined && input.scheduleId !== undefined));
+  const writes: ReturnType<typeof sql>[] = [];
   if (leavesCustomHours) {
-    await clearEventCustomHours(db, { accountId, eventTypeId: id, scheduleId: input.scheduleId ?? null });
+    writes.push(...clearEventCustomHoursSql({ accountId, eventTypeId: id, scheduleId: input.scheduleId ?? null }));
   }
-
   if (sets.length > 0) {
     const assign = sets.reduce((a, c, i) => (i === 0 ? c : sql`${a}, ${c}`));
-    await db.run(sql`UPDATE event_type SET ${assign} WHERE account_id = ${accountId} AND id = ${id}`);
+    writes.push(sql`UPDATE event_type SET ${assign} WHERE account_id = ${accountId} AND id = ${id}`);
   }
   if (isPersonal && input.customHours) {
-    await setEventCustomHours(db, {
-      accountId,
-      memberId: existing.memberId!,
-      eventTypeId: id,
-      hours: input.customHours,
-    });
+    writes.push(
+      ...setEventCustomHoursSql({ accountId, memberId: existing.memberId!, eventTypeId: id, hours: input.customHours }),
+    );
   }
+  if (writes.length === 1) await db.run(writes[0]!);
+  else if (writes.length > 1) await runAtomically(db, writes);
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
   if (isPersonal && input.conflictCalendarIds !== undefined) {

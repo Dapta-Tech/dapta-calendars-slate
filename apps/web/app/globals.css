@@ -364,16 +364,16 @@ body {
    (no blink) with reduced motion. */
 .palette-pulse {
   border-style: solid;
-  border-color: rgb(61 220 132 / 0.55);
+  border-color: color-mix(in srgb, var(--signal-edge) 55%, transparent);
   animation: palette-pulse 1.6s ease-in-out infinite;
 }
 @keyframes palette-pulse {
   0%,
   100% {
-    border-color: rgb(61 220 132 / 0.55);
+    border-color: color-mix(in srgb, var(--signal-edge) 55%, transparent);
   }
   50% {
-    border-color: rgb(61 220 132 / 0.2);
+    border-color: color-mix(in srgb, var(--signal-edge) 20%, transparent);
   }
 }
 @media (prefers-reduced-motion: reduce) {

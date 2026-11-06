@@ -10,7 +10,9 @@
  *
  * Writes are atomic: the old hours, the new ones and the event's pointer change
  * together or not at all, so a failed save never leaves an event pointing at a
- * half-written or deleted schedule.
+ * half-written or deleted schedule. The `…Sql` builders let `createEventType`
+ * and `updateEventType` run them in the SAME transaction as the event's own
+ * write, so a save that changes hours and other fields lands whole or not at all.
  */
 import { randomUUID } from 'node:crypto';
 import type { SQL } from 'drizzle-orm';
@@ -18,7 +20,7 @@ import type { EventCustomHours } from '@slate/types';
 import { sql, type Db } from './client';
 
 /** Run statements in one transaction on either dialect. */
-async function runAtomically(db: Db, statements: SQL[]): Promise<void> {
+export async function runAtomically(db: Db, statements: SQL[]): Promise<void> {
   if (db.dialect === 'sqlite') {
     const native = db.sqlite!;
     native.txn(() => {
@@ -71,6 +73,16 @@ export async function setEventCustomHours(
   db: Db,
   args: { accountId: string; memberId: string; eventTypeId: string; hours: EventCustomHours },
 ): Promise<void> {
+  await runAtomically(db, setEventCustomHoursSql(args));
+}
+
+/** The statements `setEventCustomHours` runs, for a caller that runs them inside a larger transaction. */
+export function setEventCustomHoursSql(args: {
+  accountId: string;
+  memberId: string;
+  eventTypeId: string;
+  hours: EventCustomHours;
+}): SQL[] {
   const scheduleId = randomUUID();
   const statements: SQL[] = [
     ...deleteOwnedSql(args.eventTypeId),
@@ -89,7 +101,7 @@ export async function setEventCustomHours(
     sql`UPDATE event_type SET schedule_id = ${scheduleId}
         WHERE account_id = ${args.accountId} AND id = ${args.eventTypeId}`,
   );
-  await runAtomically(db, statements);
+  return statements;
 }
 
 /**
@@ -100,11 +112,16 @@ export async function clearEventCustomHours(
   db: Db,
   args: { accountId: string; eventTypeId: string; scheduleId: string | null },
 ): Promise<void> {
-  await runAtomically(db, [
+  await runAtomically(db, clearEventCustomHoursSql(args));
+}
+
+/** The statements `clearEventCustomHours` runs, for a caller that runs them inside a larger transaction. */
+export function clearEventCustomHoursSql(args: { accountId: string; eventTypeId: string; scheduleId: string | null }): SQL[] {
+  return [
     sql`UPDATE event_type SET schedule_id = ${args.scheduleId}
         WHERE account_id = ${args.accountId} AND id = ${args.eventTypeId}`,
     ...deleteOwnedSql(args.eventTypeId),
-  ]);
+  ];
 }
 
 /** Delete an event's custom hours (used when the event itself is deleted). */
@@ -112,10 +129,21 @@ export async function deleteEventCustomHours(db: Db, eventTypeId: string): Promi
   await runAtomically(db, deleteOwnedSql(eventTypeId));
 }
 
-/** Whether a schedule id is some event's private custom hours. */
-export async function isEventOwnedSchedule(db: Db, scheduleId: string): Promise<boolean> {
-  const row = await db.get<{ id: string }>(
-    sql`SELECT id FROM schedule WHERE id = ${scheduleId} AND event_type_id IS NOT NULL LIMIT 1`,
+/**
+ * Whether an event may follow this schedule: a REUSABLE schedule of the same
+ * account and, for a personal event, of the event's own member. Another
+ * account's schedule, another member's, and any event's private custom hours
+ * all answer no, so a save cannot point an event at hours that are not its
+ * host's (or learn which ids exist elsewhere).
+ */
+export async function isUsableSchedule(
+  db: Db,
+  args: { accountId: string; scheduleId: string; memberId: string | null },
+): Promise<boolean> {
+  const row = await db.get<{ member_id: string }>(
+    sql`SELECT member_id FROM schedule
+        WHERE id = ${args.scheduleId} AND account_id = ${args.accountId} AND event_type_id IS NULL LIMIT 1`,
   );
-  return !!row;
+  if (!row) return false;
+  return args.memberId === null || row.member_id === args.memberId;
 }

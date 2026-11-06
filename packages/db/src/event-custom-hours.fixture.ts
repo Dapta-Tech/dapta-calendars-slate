@@ -20,6 +20,7 @@ import {
   updateEventType,
 } from './crud';
 import { loadAvailabilityRules } from './repository';
+import { isUsableSchedule } from './event-custom-hours';
 
 const WEEKDAYS: EventCustomHours = {
   timeZone: 'America/Bogota',
@@ -168,6 +169,28 @@ export function customHoursSuite(name: string, getDb: () => Promise<Db>): void {
       expect(r.ok && r.value.customHours).toEqual(TUESDAY_MORNING);
       expect(r.ok && r.value.scheduleId).toBeNull();
       expect(await listSchedules(db, memberId)).toHaveLength(1);
+    });
+
+    it('a save that fails part-way changes nothing: hours and fields land together or not at all', async () => {
+      const taken = await newEvent();
+      const e = await newEvent({ customHours: WEEKDAYS });
+      // The slug clashes with another event's (a unique index): the event's own
+      // UPDATE fails inside the transaction that would also replace its hours.
+      await expect(updateEventType(db, accountId, e.id, { slug: taken.slug, customHours: TUESDAY_MORNING })).rejects.toThrow();
+      const after = await getEventTypeById(db, accountId, e.id);
+      expect(after!.customHours).toEqual(WEEKDAYS);
+      expect(after!.slug).toBe(e.slug);
+      expect(await ownedCount(e.id)).toBe(1);
+      expect(await orphanRules()).toBe(0);
+    });
+
+    it('only the account’s reusable schedules of the event’s own host are usable', async () => {
+      const e = await newEvent({ customHours: WEEKDAYS });
+      expect(await isUsableSchedule(db, { accountId, scheduleId: workingHoursId, memberId })).toBe(true);
+      expect(await isUsableSchedule(db, { accountId, scheduleId: workingHoursId, memberId: null })).toBe(true);
+      expect(await isUsableSchedule(db, { accountId, scheduleId: workingHoursId, memberId: 'someone-else' })).toBe(false);
+      expect(await isUsableSchedule(db, { accountId: 'another-account', scheduleId: workingHoursId, memberId })).toBe(false);
+      expect(await isUsableSchedule(db, { accountId, scheduleId: (await storedScheduleId(e.id))!, memberId })).toBe(false);
     });
 
     it('deleting the event deletes its custom hours', async () => {
