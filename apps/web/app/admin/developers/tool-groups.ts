@@ -12,7 +12,7 @@ export const TOOL_GROUPS = {
   availability: ['find_available_slots', 'find_team_slots'],
   booking: ['book_meeting', 'book_team_meeting', 'create_booking'],
   holds: ['hold_slot'],
-  bookings: ['list_bookings', 'get_booking', 'reschedule_booking', 'cancel_booking'],
+  bookings: ['create_event', 'list_bookings', 'get_booking', 'reschedule_booking', 'cancel_booking'],
   requests: ['list_pending_bookings', 'confirm_booking', 'decline_booking'],
   account: ['whoami', 'list_my_accounts', 'list_event_types', 'get_booking_page_link'],
 } as const;

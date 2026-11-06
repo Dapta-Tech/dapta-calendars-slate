@@ -69,6 +69,7 @@ import {
   type OneOffLinkRecord,
 } from './one-off-link';
 import { loadExternalBusy, primaryAttendeeKey } from './calendar-refs';
+import { busyOutside, hostEventOwnTime } from './host-event';
 import { applyCalendarTemplates } from './calendar-text';
 import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 import { getAccountBranding } from './account-branding';
@@ -1657,7 +1658,10 @@ export async function rescheduleBooking(
   // This path previously skipped the check entirely, so a reschedule could
   // double-book the host over an external event. Run per ASSIGNED host, as the
   // create path conflict-checks every candidate: a co-host's external calendar
-  // is as good a reason to refuse the move as the organizer's.
+  // is as good a reason to refuse the move as the organizer's. A host event's
+  // own calendar copy at its old time does not block its move
+  // (`hostEventOwnTime`), as on the v2 path.
+  const own = await hostEventOwnTime(db, b);
   for (const hostMemberId of assignedHostIds) {
     try {
       const externalBusy = await loadExternalBusy(
@@ -1668,7 +1672,11 @@ export async function rescheduleBooking(
         newEndMs,
         b.event_type_id,
       );
-      if (externalBusy.some((x) => x.start.getTime() < newEndMs && x.end.getTime() > args.newStartMs)) {
+      if (
+        externalBusy.some((x) =>
+          busyOutside(x, own).some(([start, end]) => start < newEndMs && end > args.newStartMs),
+        )
+      ) {
         return { ok: false, reason: 'SLOT_TAKEN' };
       }
     } catch {

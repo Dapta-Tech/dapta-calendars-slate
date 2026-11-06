@@ -481,6 +481,12 @@ export class CalV2Service {
     );
   }
 
+  /**
+   * One booking in the v2 shape. Also a host's own event (`createHostEvent`,
+   * no event type): its `eventTypeId` and `eventType` are null, its duration
+   * and description its own. A booking whose event type was deleted stays
+   * unreadable here, as it always was.
+   */
   async bookingResponse(
     accountId: string,
     uid: string,
@@ -499,10 +505,12 @@ export class CalV2Service {
       utm: unknown;
       created_at: number;
       updated_at: number;
-      event_type_id: string;
-      event_slug: string;
+      /** Null for a host's own event (`createHostEvent`), which has no event type. */
+      event_type_id: string | null;
+      event_slug: string | null;
       event_description: string | null;
-      length_minutes: number;
+      calendar_description: string | null;
+      length_minutes: number | null;
       destination_calendar_id: string | null;
       meeting_url: string | null;
       cancellation_reason: string | null;
@@ -514,22 +522,27 @@ export class CalV2Service {
     }>(
       sql`SELECT b.id, b.uid, b.title, b.status, b.start_ms, b.end_ms, b.location,
                  b.responses, b.metadata, b.utm, b.created_at, b.updated_at, b.event_type_id,
-                 et.slug AS event_slug, et.description AS event_description,
+                 et.slug AS event_slug, et.description AS event_description, b.calendar_description,
                  et.length_minutes, et.destination_calendar_id, b.cancellation_reason,
                  b.cancelled_by, b.rescheduled_from_uid, b.rescheduled_to_uid,
                  b.rescheduling_reason, b.rescheduled_by_email,
                  (SELECT br.meeting_url FROM booking_reference br
                   WHERE br.booking_id = b.id AND br.meeting_url IS NOT NULL LIMIT 1) AS meeting_url
           FROM booking b
-          JOIN event_type et ON et.id = b.event_type_id
-          WHERE b.account_id = ${accountId} AND b.uid = ${uid} LIMIT 1`,
+          LEFT JOIN event_type et ON et.id = b.event_type_id
+          WHERE b.account_id = ${accountId} AND b.uid = ${uid}
+            AND (et.id IS NOT NULL OR b.event_type_id IS NULL)
+          LIMIT 1`,
     );
     if (!booking) v2Error(404, "RESOURCE_NOT_FOUND", "Booking not found.");
+    // A key held to some event types reaches none of a host's own events.
     if (
       allowedEventTypeIds &&
-      !allowedEventTypeIds.includes(booking.event_type_id)
+      (booking.event_type_id === null ||
+        !allowedEventTypeIds.includes(booking.event_type_id))
     )
       v2Error(404, "RESOURCE_NOT_FOUND", "Booking not found.");
+    const eventTypeId = booking.event_type_id;
 
     const hosts = await this.db.all<{
       id: string;
@@ -587,7 +600,11 @@ export class CalV2Service {
       id: compatibilityId(booking.id),
       uid: booking.uid,
       title: booking.title,
-      description: booking.event_description,
+      // A host event has no event type: its own body is its description.
+      description:
+        eventTypeId === null
+          ? booking.calendar_description
+          : booking.event_description,
       hosts: hosts.map((host) => ({
         id: compatibilityId(host.id),
         name: host.name,
@@ -599,12 +616,15 @@ export class CalV2Service {
       status: booking.status,
       start: new Date(Number(booking.start_ms)).toISOString(),
       end: new Date(Number(booking.end_ms)).toISOString(),
-      duration: booking.length_minutes,
-      eventTypeId: compatibilityId(booking.event_type_id),
-      eventType: {
-        id: compatibilityId(booking.event_type_id),
-        slug: booking.event_slug,
-      },
+      // A host event's length is its own (any length; no event type).
+      duration:
+        booking.length_minutes ??
+        Math.round((Number(booking.end_ms) - Number(booking.start_ms)) / 60_000),
+      eventTypeId: eventTypeId === null ? null : compatibilityId(eventTypeId),
+      eventType:
+        eventTypeId === null
+          ? null
+          : { id: compatibilityId(eventTypeId), slug: booking.event_slug },
       location: booking.location,
       absentHost: false,
       createdAt: new Date(Number(booking.created_at)).toISOString(),

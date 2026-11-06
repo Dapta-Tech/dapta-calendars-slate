@@ -174,7 +174,7 @@ try {
   const c = await connect(token);
   clients.push(c);
   const tools = (await c.listTools()).tools.map((t) => t.name);
-  check(tools.length === 17 && tools.includes('list_my_accounts') && tools.includes('hold_slot'), `tools/list -> ${tools.length} tools`);
+  check(tools.length === 18 && tools.includes('list_my_accounts') && tools.includes('hold_slot'), `tools/list -> ${tools.length} tools`);
   const who = (await c.callTool({ name: 'whoami', arguments: {} })).structuredContent;
   check(who.account.code === 'acme' && who.key.prefix === `login:${alex.slice(0, 8)}` && who.key.scopes.length === 5, `whoami -> ${who.account.code}, ${who.key.prefix}, ${who.key.scopes.length} scopes`);
   const mine = (await c.callTool({ name: 'list_my_accounts', arguments: {} })).structuredContent.accounts;

@@ -42,7 +42,7 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
-| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, status, times, event type, invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
+| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
 | `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
@@ -50,12 +50,14 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
 | `decline_booking` | `bookings:write` | **destructive**, emails the invitee | Declines a pending request and frees its time. Never touches an accepted booking. |
 | `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. |
+| `create_event` | `bookings:write`, a key with no event-type allowlist | write, writes to the host's calendar | Puts an event of the host's own on their calendar: any title, start and length, 0 to 10 attendees. See [Host events](#host-events). |
 
 Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint`, an input schema, and an output schema with `structuredContent`
 (plus a short text summary). Destructive means the tool cancels, declines or
 replaces a booking; open world means it emails people or writes to a host's
-calendar. Descriptions and the server instructions say what a tool does and
+calendar (`create_event` does not email; it writes to the host's calendar, which
+invites the attendees). Descriptions and the server instructions say what a tool does and
 never give the model orders, as the Claude and ChatGPT connector directories
 require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
 exposed over MCP: webhooks, API keys, team administration, event-type edits.
@@ -141,6 +143,47 @@ Either can still take a held time.
   call that did answer).
 - **One-host events only.** A team event picks its host when it is booked, so
   call `book_team_meeting` directly.
+
+### Host events
+
+`create_event` is for the host's own calendar rather than an event type: a block
+of focus time with nobody else, a 1:1, a call with a few people. It takes a
+`title`, a `start` (ISO-8601 with offset, any time: no offered slot needed), an
+`end` or `duration_minutes` (5 minutes to 24 hours), `attendees` (0 to 10
+emails; the host's own address and repeats are dropped), an optional
+`description`, `video_link: true` to have the connected calendar add a video
+meeting link, `time_zone` and the usual `idempotency_key`.
+
+- **Whose calendar.** A sign-in acts for the signed-in member; an API key, which
+  belongs to the workspace rather than a person, acts for the owner `whoami`
+  names. A key held to some event types is refused (`INSUFFICIENT_SCOPE`).
+- **Busy times first.** The host's dCal bookings, other callers' holds and the
+  connected calendar's busy times are read before anything is written (the
+  calendar fresh, and fail closed: unreadable is `CALENDAR_UNAVAILABLE`). Busy
+  time on the calendar or a hold answers `CONFLICT`, listing what is there, and
+  nothing is created, so the agent can ask the person; `allow_conflicts: true`
+  creates it anyway and lists what it overlaps in `conflicts_ignored`. Another
+  dCal booking of the host is never overlapped (`SLOT_TAKEN`), whatever
+  `allow_conflicts` says: the event is written under the same lock and the same
+  `booking_no_overlap` constraint as every booking.
+- **Who is told.** dCal sends no email about an event, ever. The calendar write
+  goes through the outbox, and the host's connected calendar invites the
+  attendees (and later updates and cancels them). With no calendar to write
+  to, attendees or `video_link` answer `NO_CALENDAR`; an event with neither
+  still blocks the time in dCal (`calendar: "not_connected"`).
+- **Afterwards it is a booking with no event type.** `list_bookings` and its
+  `updated_since` feed list it with `kind: "event"`, its own `title` and an empty
+  `event_type_id`; `get_booking` reads it (`event_type_id: null`) with its
+  attendees; `reschedule_booking` moves it to any time with the same length;
+  `cancel_booking` removes it from the calendar. A key held to some event types
+  does not see it. Booking webhooks and the CRM leave it out. Why it is a booking
+  and rides on `bookings:write`: [ADR 0011](adr/0011-a-host-event-is-a-booking-with-no-event-type.md).
+- **Moving it.** Once its copy is on the calendar, the calendar reports that
+  copy as busy at the old time; a move leaves the old time out of the busy
+  check so the event does not block itself. The free/busy read cannot tell one
+  event from another, so anything else inside the old time is left out too.
+- Not in this version: checking the attendees' own free time, all-day events,
+  and a location other than the video link.
 
 ### Requests that wait for the host
 

@@ -16,6 +16,7 @@ import {
   tagCalendarChangeWithInviteeEmail,
   findCalendarChangeForInviteeEmail,
   hasReinviteFor,
+  isHostEvent,
   bookingCalendarUid,
   oldestLiveChainUid,
   parseJsonColumn,
@@ -482,6 +483,7 @@ export class EmailEffects {
     opts: { manageUrl?: string; now?: number } = {},
   ): Promise<void> {
     try {
+      if (await this.calendarNotifies(uid, 'reminder')) return;
       const ctx = await loadBookingNotificationContext(this.db, uid);
       if (!ctx) return;
       const settings = await getNotificationSettings(this.db, ctx.accountId);
@@ -561,6 +563,7 @@ export class EmailEffects {
     opts: { manageUrl?: string; now?: number } = {},
   ): Promise<void> {
     try {
+      if (await this.calendarNotifies(uid, 'follow_up')) return;
       const ctx = await loadBookingNotificationContext(this.db, uid);
       if (!ctx) return;
       const settings = await getNotificationSettings(this.db, ctx.accountId);
@@ -656,6 +659,20 @@ export class EmailEffects {
     });
   }
 
+  /**
+   * True for a host's own event (`createHostEvent`): this service emails
+   * nobody about it, ever (no confirmation, move, cancellation, reminder or
+   * follow-up, to the attendees or the host). The host made it, and the
+   * connected calendar invites, updates and cancels its attendees itself: with
+   * no invitee email queued, every calendar write of it has the provider
+   * notify (`CalendarEffects.providerInvites`).
+   */
+  private async calendarNotifies(uid: string, kind: EmailKind): Promise<boolean> {
+    if (!(await isHostEvent(this.db, uid))) return false;
+    this.log.log(`skip ${kind} email — ${uid} is a host event; its calendar notifies the attendees`);
+    return true;
+  }
+
   /** The .ics SEQUENCE change number for this email, or null when it carries the fixed one. */
   private async claimSequenceFor(kind: Exclude<EmailKind, 'reminder'>, uid: string): Promise<number | null> {
     if (kind !== 'reschedule' && kind !== 'cancellation' && kind !== 'confirmation') return null;
@@ -683,6 +700,7 @@ export class EmailEffects {
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
   ): Promise<void> {
     try {
+      if (await this.calendarNotifies(uid, kind)) return;
       // The .ics SEQUENCE of this change, claimed ONCE so both sides' copies
       // carry the same number: a move, a cancellation, and a confirmation of a
       // booking that took over a moved meeting. It starts above the fixed 1 / 2

@@ -385,9 +385,14 @@ export const openapiSpec = {
           start: isoUtc,
           end: isoUtc,
           duration: { type: 'integer' },
-          eventTypeId: { type: 'integer' },
+          eventTypeId: {
+            type: ['integer', 'null'],
+            description:
+              'Null for an event a host put on their own calendar (the MCP create_event tool), which has no event type.',
+          },
           eventType: {
-            type: 'object',
+            type: ['object', 'null'],
+            description: 'Null for a host\'s own event, as eventTypeId.',
             required: ['id', 'slug'],
             properties: { id: { type: 'integer' }, slug: { type: 'string' } },
           },

@@ -1,4 +1,4 @@
-import { enqueueWebhookDeliveries, getBookingUtm, type Db } from '@slate/db';
+import { enqueueWebhookDeliveries, getBookingUtm, isHostEvent, type Db } from '@slate/db';
 import type { BookingUtm } from '@slate/types';
 
 /**
@@ -24,6 +24,10 @@ export type BookingWebhookData = { uid: string; utm?: BookingUtm } & Record<stri
  * right after writing it); any other reads it from the booking. A failed read
  * sends the event without `utm` rather than no event: the campaign is
  * attribution, never a reason to drop a delivery.
+ *
+ * A host's own event (`createHostEvent`, no event type) sends none: these
+ * events are about meetings someone booked, and a subscriber reading them
+ * (a CRM, a lead sheet) must not get the host's focus blocks and 1:1s.
  */
 export async function enqueueBookingWebhook(
   db: Db,
@@ -31,6 +35,8 @@ export async function enqueueBookingWebhook(
   event: string,
   data: { uid: string; utm?: BookingUtm | null } & Record<string, unknown>,
 ): Promise<number> {
+  // An unreadable kind sends the event, as an unreadable campaign does.
+  if (await isHostEvent(db, data.uid).catch(() => false)) return 0;
   const { utm: given, ...rest } = data;
   const utm = given !== undefined ? given : await getBookingUtm(db, data.uid).catch(() => null);
   const payload: BookingWebhookData = utm ? { ...rest, uid: data.uid, utm } : { ...rest, uid: data.uid };

@@ -498,6 +498,7 @@ describe('the MCP door with OAuth on', () => {
       ['book_team_meeting', { event_type_id: 'x' }, 'bookings:write'],
       ['confirm_booking', { booking_uid: 'x', idempotency_key: 'k-confirm-1' }, 'bookings:write'],
       ['decline_booking', { booking_uid: 'x', idempotency_key: 'k-decline-1' }, 'bookings:write'],
+      ['create_event', { title: 'Focus', start: '2031-01-06T15:00:00Z', duration_minutes: 60, idempotency_key: 'k-event-1' }, 'bookings:write'],
     ] as const) {
       const res = await callTool(h, name, args, reader);
       expect(res.status, name).toBe(403);

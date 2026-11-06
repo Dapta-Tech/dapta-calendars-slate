@@ -15,6 +15,7 @@ import {
   crmDestination,
   enqueueOutbox,
   fillBookingReference,
+  isHostEventRow,
   loadBookingForCrmWrite,
   loadBookingReferences,
   loadEncryptionKey,
@@ -125,10 +126,13 @@ export class CrmEffects {
   private enqueue(action: CrmAction, uid: string): void {
     if (!this.crm.enabled) return;
     void (async () => {
-      const booking = await this.db.get<{ account_id: string }>(
-        sql`SELECT account_id FROM booking WHERE uid = ${uid} LIMIT 1`,
+      const booking = await this.db.get<{ account_id: string; event_type_id: string | null }>(
+        sql`SELECT account_id, event_type_id FROM booking WHERE uid = ${uid} LIMIT 1`,
       );
       if (!booking) throw new Error(`booking ${uid} not found — cannot enqueue a CRM row for it`);
+      // A host's own event (`createHostEvent`) is not a meeting someone booked:
+      // it never reaches the CRM, so no contact is made for its attendees.
+      if (isHostEventRow(booking)) return;
       await enqueueOutbox(this.db, {
         kind: 'crm',
         action,
