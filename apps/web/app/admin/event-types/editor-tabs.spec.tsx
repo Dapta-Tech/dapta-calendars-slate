@@ -215,6 +215,38 @@ describe('Advanced settings', () => {
   });
 });
 
+describe('minimum notice', () => {
+  const select = (el: HTMLElement) => el.querySelector<HTMLSelectElement>('#et-min-notice')!;
+  const options = (el: HTMLElement) => [...select(el).options].map((o) => o.textContent);
+
+  it('is a choice from 1 hour to 5 days, and saves minutes', async () => {
+    const el = await mount(event({ minimumBookingNotice: 120 }));
+    expect(select(el).tagName).toBe('SELECT');
+    expect(options(el)).toEqual(['1 hour', '2 hours', '6 hours', '12 hours', '1 day', '2 days', '3 days', '4 days', '5 days']);
+    expect(select(el).value).toBe('120');
+    await act(async () => {
+      select(el).value = '2880';
+      select(el).dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await save(el);
+    expect(saved()?.minimumBookingNotice).toBe(2880);
+  });
+
+  it('keeps a stored notice that is not one of the options, and saves it unchanged', async () => {
+    const el = await mount(event({ minimumBookingNotice: 30 }));
+    expect(options(el)[0]).toBe('30 minutes');
+    expect(select(el).value).toBe('30');
+    await save(el);
+    expect(saved()?.minimumBookingNotice).toBe(30);
+  });
+
+  it('is in Spanish on a Spanish editor', async () => {
+    const el = await mount(event({ minimumBookingNotice: 1440 }), { locale: 'es' });
+    expect(options(el)).toContain('1 día');
+    expect(options(el)).toContain('12 horas');
+  });
+});
+
 describe('duration', () => {
   it('a preset is one click, and the slot interval follows it while it matched', async () => {
     const el = await mount(event());

@@ -40,6 +40,7 @@ import {
 import { AdvancedSettings, advancedSummary } from './sections/advanced';
 import { AgentsTab } from './sections/agents';
 import { DurationField } from './sections/duration';
+import { NoticeField } from './sections/notice';
 import { CALENDAR_TEXT_IDS, CalendarTextSection } from './sections/calendar-text';
 import {
   AvailabilityField,
@@ -636,18 +637,13 @@ export function EventTypeForm({
                 savedLabel={m.fSchedule}
               />
               <div className="grid grid-cols-1 gap-field sm:grid-cols-2">
-                <Field label={m.fMinNotice} error={minNoticeErr.error} errorId={minNoticeErr.errorId}>
-                  <input
-                    id={FIELD_IDS.minNotice}
-                    type="number"
-                    min={0}
-                    value={Number.isFinite(minNotice) ? minNotice : ''}
-                    onChange={(e) => setMinNotice(e.target.value === '' ? Number.NaN : Number(e.target.value))}
-                    onBlur={() => touch(FIELD_IDS.minNotice)}
-                    className={inputCls}
-                    {...minNoticeErr.aria}
-                  />
-                </Field>
+                <NoticeField
+                  id={FIELD_IDS.minNotice}
+                  value={minNotice}
+                  onChange={setMinNotice}
+                  error={minNoticeErr.error}
+                  m={editor.notice}
+                />
               </div>
             </section>
 

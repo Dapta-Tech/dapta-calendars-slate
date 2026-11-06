@@ -528,6 +528,17 @@ export interface BookingMessages {
           visibility: string;
         };
         duration: { label: string; custom: string; customLabel: string; minutes: string };
+        /** Minimum notice as a choice of spans; `{n}` is the count. */
+        notice: {
+          label: string;
+          hint: string;
+          minute: string;
+          minutes: string;
+          hour: string;
+          hours: string;
+          day: string;
+          days: string;
+        };
         advanced: {
           title: string;
           hint: string;
@@ -2431,6 +2442,16 @@ export const en: BookingMessages = {
           visibility: 'Visibility and sharing',
         },
         duration: { label: 'Duration', custom: 'Custom', customLabel: 'Custom duration (minutes)', minutes: 'min' },
+        notice: {
+          label: 'Minimum notice',
+          hint: 'How soon before a meeting invitees can still book it.',
+          minute: '1 minute',
+          minutes: '{n} minutes',
+          hour: '1 hour',
+          hours: '{n} hours',
+          day: '1 day',
+          days: '{n} days',
+        },
         advanced: {
           title: 'Advanced settings',
           hint: 'Buffers, group seats, how far ahead people can book, and how often times start.',
@@ -4307,6 +4328,16 @@ export const es: BookingMessages = {
           visibility: 'Visibilidad y enlaces',
         },
         duration: { label: 'Duración', custom: 'Otra', customLabel: 'Otra duración (minutos)', minutes: 'min' },
+        notice: {
+          label: 'Antelación mínima',
+          hint: 'Con cuánta antelación los invitados aún pueden reservar una reunión.',
+          minute: '1 minuto',
+          minutes: '{n} minutos',
+          hour: '1 hora',
+          hours: '{n} horas',
+          day: '1 día',
+          days: '{n} días',
+        },
         advanced: {
           title: 'Ajustes avanzados',
           hint: 'Márgenes, cupos por grupo, con cuánta anticipación se puede reservar y cada cuánto empiezan los horarios.',
