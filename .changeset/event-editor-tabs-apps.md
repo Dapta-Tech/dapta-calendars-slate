@@ -1,6 +1,5 @@
 ---
 "@slate/web": minor
-"@slate/shared": minor
 ---
 
 The event type editor is split into tabs (General, Booking form, Reminders, CRM Connection, AI Agents) that share one unsaved draft; the active tab is kept in the URL (`?tab=`), and CRM Connection shows only when a CRM adapter or tracking is available. General groups its settings under Basics, Availability, Hosts and calendars, After booking, and Visibility and sharing, and the questions invitees answer have their own Booking form tab; buffers, seats per time, booking window and slot interval sit behind "Advanced settings", which opens on its own when one of them is set or has an error. Duration is chosen with 15/30/45/60-minute chips or Custom, and the slot interval follows the duration while it matched it. Minimum notice is a choice from 1 hour to 5 days (a stored value outside the list stays as an extra choice, so it never changes on save).

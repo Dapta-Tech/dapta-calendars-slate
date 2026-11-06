@@ -1,9 +1,6 @@
 ---
 "@slate/web": minor
-"@slate/shared": minor
-"@slate/db": minor
 "@slate/api": minor
-"@slate/notifications": minor
 ---
 
 The event type editor has an eye button (create and edit) that opens the unsaved draft as the booking page in a new tab (`/preview/event`), in the host's own look and fully clickable: a saved personal event shows its real times (the host's own availability read), new and team events show example times, and the form shows the event's questions. In preview mode (`BookingFlow`'s new `previewNotice`) picking a time holds nothing and a valid submit books nothing; it says so instead. The draft travels through localStorage, never the URL.

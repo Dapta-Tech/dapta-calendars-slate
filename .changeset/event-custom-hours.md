@@ -1,7 +1,6 @@
 ---
 "@slate/db": minor
 "@slate/types": minor
-"@slate/api": minor
 ---
 
 A personal event type can have its own weekly hours ("custom hours") instead of following a schedule. A new nullable column, `schedule.event_type_id` (Postgres migration 0040, SQLite 0039, additive, bounded by `lock_timeout`), marks a schedule as private to one event type; NULL, every existing schedule, is a reusable one as before.
