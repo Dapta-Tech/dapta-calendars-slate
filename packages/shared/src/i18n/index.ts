@@ -507,6 +507,143 @@ export interface BookingMessages {
       integrations: string;
     };
     eventTypes: {
+      /** The tabbed editor's own copy (tabs, required marks, errors, advanced, agents). */
+      editor: {
+        tabsLabel: string;
+        tabs: { general: string; form: string; reminders: string; crm: string; agents: string };
+        /** Accessible badge on a tab: `{count}` fields in it need attention. */
+        tabErrorsOne: string;
+        tabErrorsMany: string;
+        /** The slug field, named for what it is to a host. */
+        slugLabel: string;
+        requiredLegend: string;
+        /** Appended to a required field's accessible name. */
+        required: string;
+        sections: {
+          basics: string;
+          availability: string;
+          hosts: string;
+          bookingForm: string;
+          afterBooking: string;
+          visibility: string;
+        };
+        duration: { label: string; custom: string; customLabel: string; minutes: string };
+        /** Minimum notice as a choice of spans; `{n}` is the count. */
+        notice: {
+          label: string;
+          hint: string;
+          minute: string;
+          minutes: string;
+          hour: string;
+          hours: string;
+          day: string;
+          days: string;
+        };
+        advanced: {
+          title: string;
+          hint: string;
+          /** Collapsed summary when every advanced value is its default. */
+          allDefault: string;
+          bufferBefore: string;
+          bufferAfter: string;
+          seats: string;
+          window: string;
+          interval: string;
+        };
+        errors: {
+          summaryOne: string;
+          summaryMany: string;
+          titleRequired: string;
+          slugRequired: string;
+          durationInvalid: string;
+          locationDetailRequired: string;
+          minNoticeInvalid: string;
+          bufferInvalid: string;
+          seatsInvalid: string;
+          intervalInvalid: string;
+          trackingInvalid: string;
+          slugTaken: string;
+          templateInvalid: string;
+        };
+        preview: {
+          /** The eye button: opens the draft as the booking page in a new tab. */
+          eye: string;
+          /** New and team events: example times. */
+          pageBanner: string;
+          /** Saved events: their real times as saved. */
+          pageBannerReal: string;
+          pageMissing: string;
+          /** Shown when the preview's form is submitted: nothing was booked. */
+          bookingDisabled: string;
+          emailButton: string;
+          emailTitle: string;
+          subjectLabel: string;
+          fromLabel: string;
+          toLabel: string;
+          /** Says the design is what mail apps show, and where the written message goes. */
+          emailNote: string;
+          emailLoading: string;
+          emailError: string;
+          close: string;
+        };
+        availability: {
+          label: string;
+          workingHours: string;
+          workingHoursHint: string;
+          noWorkingHours: string;
+          editWorkingHours: string;
+          saved: string;
+          custom: string;
+          customHint: string;
+          team: string;
+          dayLabel: string;
+          from: string;
+          to: string;
+          addHours: string;
+          remove: string;
+          everyDay: string;
+          weekdays: string;
+          weekends: string;
+          timeZone: string;
+          /** Weekday names, Sunday first. */
+          days: string[];
+          rangesRequired: string;
+          endAfterStart: string;
+          overlap: string;
+        };
+        calendarText: {
+          section: string;
+          titleLabel: string;
+          titleHint: string;
+          titlePlaceholder: string;
+          descriptionLabel: string;
+          descriptionHint: string;
+          /** Above the variable chips: drag one into a field, or click to add it at the cursor. */
+          paletteHint: string;
+          groupForm: string;
+          groups: { invitee: string; host: string; event: string; time: string; links: string; booking: string };
+          /** `{text}` is the rendered sample. */
+          preview: string;
+          noQuestions: string;
+          /** Shown on events with seats: one calendar event is shared by everyone. */
+          seatedNote: string;
+        };
+        unsaved: { title: string; body: string; confirm: string; cancel: string };
+        agents: {
+          title: string;
+          intro: string;
+          eventIdLabel: string;
+          eventIdPending: string;
+          promptLabel: string;
+          /** `{title}` is the event's title. */
+          prompt: string;
+          mcpLabel: string;
+          mcpUnavailable: string;
+          connectLink: string;
+          copy: string;
+          copied: string;
+        };
+      };
       title: string;
       newEventType: string;
       emptyList: string;
@@ -2288,6 +2425,138 @@ export const en: BookingMessages = {
       integrations: 'Integrations',
     },
     eventTypes: {
+      editor: {
+        tabsLabel: 'Event settings',
+        tabs: { general: 'General', form: 'Booking form', reminders: 'Reminders', crm: 'CRM Connection', agents: 'AI Agents' },
+        tabErrorsOne: '1 field needs attention',
+        tabErrorsMany: '{count} fields need attention',
+        slugLabel: 'Event link',
+        requiredLegend: 'Fields marked * are required.',
+        required: 'required',
+        sections: {
+          basics: 'Basics',
+          availability: 'Availability',
+          hosts: 'Hosts and calendars',
+          bookingForm: 'Booking form',
+          afterBooking: 'After booking',
+          visibility: 'Visibility and sharing',
+        },
+        duration: { label: 'Duration', custom: 'Custom', customLabel: 'Custom duration (minutes)', minutes: 'min' },
+        notice: {
+          label: 'Minimum notice',
+          hint: 'How soon before a meeting invitees can still book it.',
+          minute: '1 minute',
+          minutes: '{n} minutes',
+          hour: '1 hour',
+          hours: '{n} hours',
+          day: '1 day',
+          days: '{n} days',
+        },
+        advanced: {
+          title: 'Advanced settings',
+          hint: 'Buffers, group seats, how far ahead people can book, and how often times start.',
+          allDefault: 'Default settings',
+          bufferBefore: '{n} min before',
+          bufferAfter: '{n} min after',
+          seats: '{n} seats per time',
+          window: 'up to {n} days ahead',
+          interval: 'starts every {n} min',
+        },
+        errors: {
+          summaryOne: 'Fix 1 field before saving',
+          summaryMany: 'Fix {count} fields before saving',
+          titleRequired: 'Add a title.',
+          slugRequired: 'Add an event link.',
+          durationInvalid: 'Use a whole number of minutes from 1 to 1440.',
+          locationDetailRequired: 'Add the details for this location, or choose another one.',
+          minNoticeInvalid: 'Use 0 or more minutes.',
+          bufferInvalid: 'Use 0 or more minutes.',
+          seatsInvalid: 'Use a whole number of 1 or more, or leave it empty.',
+          intervalInvalid: 'Use a whole number of minutes of 1 or more.',
+          trackingInvalid: 'This ID is not valid.',
+          slugTaken: 'Another event already uses this link. Choose a different one.',
+          templateInvalid: 'This reminder uses a variable that does not exist.',
+        },
+        preview: {
+          eye: 'Preview booking page',
+          pageBanner:
+            'Preview of your booking page with your unsaved changes. The times are examples until you create the event. Nothing you do here books a meeting.',
+          pageBannerReal:
+            'Preview of your booking page with your unsaved changes. The times are your real availability as last saved. Nothing you do here books a meeting.',
+          bookingDisabled: 'This is a preview, so no meeting was booked. Invitees see their confirmation here.',
+          pageMissing: 'There is nothing to preview. Open the preview again from the event editor.',
+          emailButton: 'Preview email',
+          emailTitle: 'Email preview',
+          subjectLabel: 'Subject',
+          fromLabel: 'From',
+          toLabel: 'To',
+          emailNote:
+            'This is the email an invitee gets, for a sample booking with Sam Taylor tomorrow. Most email apps show this design; your message is sent as its plain-text version.',
+          emailLoading: 'Loading the preview…',
+          emailError: 'The preview could not be loaded. Try again.',
+          close: 'Close',
+        },
+        availability: {
+          label: 'Bookable hours',
+          workingHours: 'My working hours',
+          workingHoursHint: 'Follows the hours on your Availability page.',
+          noWorkingHours: 'You have no working hours yet.',
+          editWorkingHours: 'Edit working hours',
+          saved: 'A saved schedule',
+          custom: 'Custom hours for this event',
+          customHint: 'Only this event uses these hours. They are not added to your Availability page.',
+          team: 'On a team event, each host’s own working hours apply.',
+          dayLabel: 'Days',
+          from: 'from',
+          to: 'to',
+          addHours: 'Add hours',
+          remove: 'Remove these hours',
+          everyDay: 'Every day',
+          weekdays: 'Weekdays',
+          weekends: 'Weekends',
+          timeZone: 'Time zone',
+          days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+          rangesRequired: 'Add at least one time range.',
+          endAfterStart: 'End must be after start.',
+          overlap: 'These hours overlap another row on the same day.',
+        },
+        calendarText: {
+          section: 'In the calendar',
+          titleLabel: 'Calendar event title',
+          titleHint:
+            'What the meeting is called in your calendar, your invitee’s and the booking emails. Add the invitee’s details or their answers so you know who it is at a glance. Leave it empty to use the event title.',
+          titlePlaceholder: 'e.g. {{event_title}} with {{attendee_name}}',
+          descriptionLabel: 'Calendar event description',
+          descriptionHint: 'Written into the calendar event. Leave it empty for none.',
+          paletteHint: 'Drag a variable into the title or description, or click it to add it where your cursor is.',
+          groupForm: 'Answers from your booking form',
+          groups: { invitee: 'Invitee', host: 'Host', event: 'Event', time: 'Time', links: 'Links', booking: 'Booking' },
+          preview: 'Example: {text}',
+          noQuestions: 'Add questions to the booking form to use their answers here.',
+          seatedNote:
+            'This event has seats, so everyone who books shares one calendar event: it can’t show one invitee’s details or answers.',
+        },
+        unsaved: {
+          title: 'Discard your changes?',
+          body: 'You have changes that are not saved. If you leave now, they are lost.',
+          confirm: 'Discard changes',
+          cancel: 'Keep editing',
+        },
+        agents: {
+          title: 'How AI agents book this event',
+          intro:
+            'Agents connected to your account (Claude, ChatGPT and others) can find times and book this event for you. They use the event ID below, or its booking page.',
+          eventIdLabel: 'Event ID',
+          eventIdPending: 'The event ID appears here after you create the event.',
+          promptLabel: 'Try asking your agent',
+          prompt: 'Find a time next week for “{title}” with me and book it.',
+          mcpLabel: 'MCP server address',
+          mcpUnavailable: 'Connecting an agent is not set up on this installation.',
+          connectLink: 'Connect an agent',
+          copy: 'Copy',
+          copied: 'Copied',
+        },
+      },
       title: 'Events',
       newEventType: 'New event',
       emptyList: 'No events yet — create one below.',
@@ -3063,6 +3332,7 @@ export const en: BookingMessages = {
         confirm_booking: 'Accept a booking request and tell the invitee.',
         decline_booking: 'Turn down a booking request and tell the invitee.',
         cancel_booking: 'Cancel a booking and tell the invitee.',
+        create_event: 'Put an event of your own on your calendar, with or without guests. Safe to retry.',
       },
       scopeLabels: {
         'event-types:read': 'See event types',
@@ -3383,7 +3653,7 @@ export const en: BookingMessages = {
         availability: { title: 'Open times', body: 'Find free times on your event types and with a team, the same times your booking page offers.' },
         booking: { title: 'Booking', body: 'Book meetings on your event types, on public booking pages and with a team. The invitee gets the confirmation email.' },
         holds: { title: 'Holds', body: 'Keep a time for a few minutes while the person decides, so nobody else takes it.' },
-        bookings: { title: 'Your bookings', body: 'See your meetings, read their details, move them to another time or cancel them.' },
+        bookings: { title: 'Your bookings', body: 'Put events of your own on your calendar, see your meetings, read their details, move them to another time or cancel them.' },
         requests: { title: 'Booking requests', body: 'See the requests waiting for your answer, then accept or decline them.' },
         account: { title: 'Account and event types', body: 'Who is connected, the workspaces you can work in, your event types and their links.' },
       },
@@ -3398,6 +3668,10 @@ export const en: BookingMessages = {
         get_booking: { what: 'Open one meeting and read what the invitee wrote.', ask: 'What did Sarah write when she booked?' },
         reschedule_booking: { what: 'Move a meeting to another time. The invitee is told.', ask: 'Move my call with Sarah to Friday at 11:00' },
         cancel_booking: { what: 'Cancel a meeting and tell the invitee.', ask: 'Cancel my 4:00 call on Friday and tell them I am traveling' },
+        create_event: {
+          what: 'Put an event of your own on your calendar: any title, time and length, alone or with up to 10 guests. Your calendar invites them.',
+          ask: 'Put a one-hour call called Planning with Sarah and Tom on my calendar tomorrow at 3 pm',
+        },
         list_pending_bookings: { what: 'See the booking requests waiting for your answer.', ask: 'Which booking requests are waiting for me?' },
         confirm_booking: { what: 'Accept a booking request and tell the invitee.', ask: 'Accept the request for Thursday' },
         decline_booking: { what: 'Decline a booking request, free its time and tell the invitee.', ask: 'Decline the request for Saturday and say I am away' },
@@ -4036,6 +4310,144 @@ export const es: BookingMessages = {
       integrations: 'Integraciones',
     },
     eventTypes: {
+      editor: {
+        tabsLabel: 'Ajustes del evento',
+        tabs: {
+          general: 'General',
+          form: 'Formulario de reserva',
+          reminders: 'Recordatorios',
+          crm: 'Conexión con el CRM',
+          agents: 'Agentes de IA',
+        },
+        tabErrorsOne: '1 campo necesita atención',
+        tabErrorsMany: '{count} campos necesitan atención',
+        slugLabel: 'Enlace del evento',
+        requiredLegend: 'Los campos marcados con * son obligatorios.',
+        required: 'obligatorio',
+        sections: {
+          basics: 'Lo básico',
+          availability: 'Disponibilidad',
+          hosts: 'Anfitriones y calendarios',
+          bookingForm: 'Formulario de reserva',
+          afterBooking: 'Después de reservar',
+          visibility: 'Visibilidad y enlaces',
+        },
+        duration: { label: 'Duración', custom: 'Otra', customLabel: 'Otra duración (minutos)', minutes: 'min' },
+        notice: {
+          label: 'Antelación mínima',
+          hint: 'Con cuánta antelación los invitados aún pueden reservar una reunión.',
+          minute: '1 minuto',
+          minutes: '{n} minutos',
+          hour: '1 hora',
+          hours: '{n} horas',
+          day: '1 día',
+          days: '{n} días',
+        },
+        advanced: {
+          title: 'Ajustes avanzados',
+          hint: 'Márgenes, cupos por grupo, con cuánta anticipación se puede reservar y cada cuánto empiezan los horarios.',
+          allDefault: 'Ajustes predeterminados',
+          bufferBefore: '{n} min antes',
+          bufferAfter: '{n} min después',
+          seats: '{n} cupos por horario',
+          window: 'hasta {n} días antes',
+          interval: 'empieza cada {n} min',
+        },
+        errors: {
+          summaryOne: 'Corrige 1 campo antes de guardar',
+          summaryMany: 'Corrige {count} campos antes de guardar',
+          titleRequired: 'Agrega un título.',
+          slugRequired: 'Agrega un enlace para el evento.',
+          durationInvalid: 'Usa un número entero de minutos, de 1 a 1440.',
+          locationDetailRequired: 'Agrega los datos de este lugar o elige otro.',
+          minNoticeInvalid: 'Usa 0 minutos o más.',
+          bufferInvalid: 'Usa 0 minutos o más.',
+          seatsInvalid: 'Usa un número entero de 1 o más, o déjalo vacío.',
+          intervalInvalid: 'Usa un número entero de minutos, de 1 o más.',
+          trackingInvalid: 'Este ID no es válido.',
+          slugTaken: 'Otro evento ya usa este enlace. Elige uno diferente.',
+          templateInvalid: 'Este recordatorio usa una variable que no existe.',
+        },
+        preview: {
+          eye: 'Ver página de reservas',
+          pageBanner:
+            'Vista previa de tu página de reservas con tus cambios sin guardar. Los horarios son de ejemplo hasta que crees el evento. Nada de lo que hagas aquí reserva una reunión.',
+          pageBannerReal:
+            'Vista previa de tu página de reservas con tus cambios sin guardar. Los horarios son tu disponibilidad real según lo último que guardaste. Nada de lo que hagas aquí reserva una reunión.',
+          bookingDisabled: 'Esto es una vista previa, así que no se reservó ninguna reunión. Los invitados ven aquí su confirmación.',
+          pageMissing: 'No hay nada que mostrar. Abre la vista previa otra vez desde el editor del evento.',
+          emailButton: 'Ver correo',
+          emailTitle: 'Vista previa del correo',
+          subjectLabel: 'Asunto',
+          fromLabel: 'De',
+          toLabel: 'Para',
+          emailNote:
+            'Este es el correo que recibe un invitado, para una reserva de ejemplo con Sam Taylor mañana. La mayoría de los programas de correo muestran este diseño; tu mensaje se envía como su versión de texto plano.',
+          emailLoading: 'Cargando la vista previa…',
+          emailError: 'No se pudo cargar la vista previa. Inténtalo de nuevo.',
+          close: 'Cerrar',
+        },
+        availability: {
+          label: 'Horario para reservar',
+          workingHours: 'Mi horario de trabajo',
+          workingHoursHint: 'Sigue el horario de tu página de Disponibilidad.',
+          noWorkingHours: 'Aún no tienes horario de trabajo.',
+          editWorkingHours: 'Editar horario de trabajo',
+          saved: 'Un horario guardado',
+          custom: 'Horario propio de este evento',
+          customHint: 'Solo este evento usa este horario. No se agrega a tu página de Disponibilidad.',
+          team: 'En un evento de equipo se aplica el horario de trabajo de cada anfitrión.',
+          dayLabel: 'Días',
+          from: 'de',
+          to: 'a',
+          addHours: 'Agregar horario',
+          remove: 'Quitar este horario',
+          everyDay: 'Todos los días',
+          weekdays: 'Entre semana',
+          weekends: 'Fines de semana',
+          timeZone: 'Zona horaria',
+          days: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
+          rangesRequired: 'Agrega al menos un horario.',
+          endAfterStart: 'La hora final debe ser después de la inicial.',
+          overlap: 'Este horario se cruza con otra fila del mismo día.',
+        },
+        calendarText: {
+          section: 'En el calendario',
+          titleLabel: 'Título del evento en el calendario',
+          titleHint:
+            'Cómo se llama la reunión en tu calendario, en el del invitado y en los correos de la reserva. Agrega los datos del invitado o sus respuestas para saber de un vistazo quién es. Déjalo vacío para usar el título del evento.',
+          titlePlaceholder: 'p. ej. {{event_title}} con {{attendee_name}}',
+          descriptionLabel: 'Descripción del evento en el calendario',
+          descriptionHint: 'Se escribe en el evento del calendario. Déjala vacía si no quieres ninguna.',
+          paletteHint: 'Arrastra una variable al título o a la descripción, o haz clic para agregarla donde está el cursor.',
+          groupForm: 'Respuestas de tu formulario de reserva',
+          groups: { invitee: 'Invitado', host: 'Anfitrión', event: 'Evento', time: 'Horario', links: 'Enlaces', booking: 'Reserva' },
+          preview: 'Ejemplo: {text}',
+          noQuestions: 'Agrega preguntas al formulario de reserva para usar sus respuestas aquí.',
+          seatedNote:
+            'Este evento tiene cupos, así que todos los que reservan comparten un mismo evento en el calendario: no puede mostrar los datos ni las respuestas de un invitado.',
+        },
+        unsaved: {
+          title: '¿Descartar tus cambios?',
+          body: 'Tienes cambios sin guardar. Si sales ahora, se pierden.',
+          confirm: 'Descartar cambios',
+          cancel: 'Seguir editando',
+        },
+        agents: {
+          title: 'Cómo reservan este evento los agentes de IA',
+          intro:
+            'Los agentes conectados a tu cuenta (Claude, ChatGPT y otros) pueden buscar horarios y reservar este evento por ti. Usan el ID del evento que ves abajo, o su página de reservas.',
+          eventIdLabel: 'ID del evento',
+          eventIdPending: 'El ID del evento aparece aquí cuando crees el evento.',
+          promptLabel: 'Prueba a pedirle a tu agente',
+          prompt: 'Busca un horario la próxima semana para «{title}» conmigo y resérvalo.',
+          mcpLabel: 'Dirección del servidor MCP',
+          mcpUnavailable: 'Conectar un agente no está configurado en esta instalación.',
+          connectLink: 'Conectar un agente',
+          copy: 'Copiar',
+          copied: 'Copiado',
+        },
+      },
       title: 'Eventos',
       newEventType: 'Nuevo evento',
       emptyList: 'Aún no hay eventos — crea uno abajo.',
@@ -4813,6 +5225,7 @@ export const es: BookingMessages = {
         confirm_booking: 'Acepta una solicitud de reserva y avisa al invitado.',
         decline_booking: 'Rechaza una solicitud de reserva y avisa al invitado.',
         cancel_booking: 'Cancela una reserva y avisa al invitado.',
+        create_event: 'Pone un evento propio en tu calendario, con o sin invitados. Se puede reintentar sin riesgo.',
       },
       scopeLabels: {
         'event-types:read': 'Ver tipos de evento',
@@ -5133,7 +5546,7 @@ export const es: BookingMessages = {
         availability: { title: 'Horarios libres', body: 'Busca horarios libres en tus tipos de evento y con un equipo, los mismos que ofrece tu página de reservas.' },
         booking: { title: 'Reservas nuevas', body: 'Agenda reuniones en tus tipos de evento, en páginas públicas de reserva y con un equipo. El invitado recibe el correo de confirmación.' },
         holds: { title: 'Horarios apartados', body: 'Aparta un horario unos minutos mientras la persona decide, para que nadie más lo tome.' },
-        bookings: { title: 'Tus reservas', body: 'Mira tus reuniones, lee sus detalles, muévelas a otro horario o cancélalas.' },
+        bookings: { title: 'Tus reservas', body: 'Pon eventos propios en tu calendario, mira tus reuniones, lee sus detalles, muévelas a otro horario o cancélalas.' },
         requests: { title: 'Solicitudes de reserva', body: 'Mira las solicitudes que esperan tu respuesta y acéptalas o recházalas.' },
         account: { title: 'Cuenta y tipos de evento', body: 'Quién está conectado, en qué espacios puedes trabajar, tus tipos de evento y sus enlaces.' },
       },
@@ -5148,6 +5561,10 @@ export const es: BookingMessages = {
         get_booking: { what: 'Abre una reunión y lee lo que escribió el invitado.', ask: '¿Qué escribió Sarah cuando reservó?' },
         reschedule_booking: { what: 'Mueve una reunión a otro horario. Se le avisa al invitado.', ask: 'Mueve mi llamada con Sarah al viernes a las 11:00' },
         cancel_booking: { what: 'Cancela una reunión y avísale al invitado.', ask: 'Cancela mi llamada del viernes a las 4:00 y dile que estoy de viaje' },
+        create_event: {
+          what: 'Pon un evento propio en tu calendario: cualquier título, hora y duración, solo o con hasta 10 invitados. Tu calendario los invita.',
+          ask: 'Pon en mi calendario una llamada de una hora llamada Planeación con Sarah y Tom mañana a las 3 p. m.',
+        },
         list_pending_bookings: { what: 'Mira las solicitudes de reserva que esperan tu respuesta.', ask: '¿Qué solicitudes de reserva me están esperando?' },
         confirm_booking: { what: 'Acepta una solicitud de reserva y avísale al invitado.', ask: 'Acepta la solicitud del jueves' },
         decline_booking: { what: 'Rechaza una solicitud de reserva, libera su horario y avísale al invitado.', ask: 'Rechaza la solicitud del sábado y avisa que no estaré' },

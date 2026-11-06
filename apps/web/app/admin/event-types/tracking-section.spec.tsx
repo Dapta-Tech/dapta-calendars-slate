@@ -212,10 +212,10 @@ describe('Tracking and pixels, in the event type editor', () => {
       await typeInto(field(el, 'metaLabel', locale), '12ab34');
       await typeInto(field(el, 'ga4Label', locale), 'UA-1234-5');
       await typeInto(field(el, 'gtmLabel', locale), 'GTM 12');
-      expect(el.querySelector('[role="alert"]')).toBeNull();
+      expect(el.querySelector('[role="alert"]:not([data-testid="et-error-summary"])')).toBeNull();
       await save(el);
       expect(saveEventTypeAction).not.toHaveBeenCalled();
-      const alerts = [...el.querySelectorAll('[role="alert"]')].map((a) => a.textContent);
+      const alerts = [...el.querySelectorAll('[role="alert"]:not([data-testid="et-error-summary"])')].map((a) => a.textContent);
       expect(alerts).toEqual([m.metaInvalid, m.gtmInvalid, m.ga4Invalid]);
       expect(document.activeElement).toBe(field(el, 'metaLabel', locale));
       await typeInto(field(el, 'metaLabel', locale), '123456789');
@@ -230,9 +230,9 @@ describe('Tracking and pixels, in the event type editor', () => {
     const el = await mount(event());
     const input = field(el, 'hubspotLabel');
     await typeInto(input, '12 34');
-    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(el.querySelector('[role="alert"]:not([data-testid="et-error-summary"])')).toBeNull();
     await act(async () => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe(getMessages('en').admin.eventTypes.tracking.hubspotInvalid);
+    expect(el.querySelector('[role="alert"]:not([data-testid="et-error-summary"])')?.textContent).toBe(getMessages('en').admin.eventTypes.tracking.hubspotInvalid);
     expect(input.getAttribute('aria-invalid')).toBe('true');
   });
 

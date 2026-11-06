@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@slate/crm": "workspace:*",
+    "@slate/engine": "workspace:*",
     "@slate/shared": "workspace:*",
     "@slate/types": "workspace:*",
     "class-variance-authority": "^0.7.1",

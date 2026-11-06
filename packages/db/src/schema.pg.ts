@@ -129,6 +129,8 @@ export const schedule = pgTable('schedule', {
   name: text('name').notNull(),
   timeZone: text('time_zone').notNull().default('UTC'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  /** Set when the schedule is one event type's private custom hours; NULL = reusable. */
+  eventTypeId: text('event_type_id'),
 });
 
 export const availability = pgTable('availability', {

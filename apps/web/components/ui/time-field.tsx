@@ -57,11 +57,16 @@ export function TimeField({
   onChange,
   className,
   'aria-label': ariaLabel,
+  id,
+  invalid,
 }: {
   value: string;
   onChange: (value: string) => void;
   className?: string;
   'aria-label'?: string;
+  /** On the trigger button, so a form can point at (and focus) this field. */
+  id?: string;
+  invalid?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -92,8 +97,10 @@ export function TimeField({
   return (
     <div ref={wrapRef} className={cn('relative', className)}>
       <button
+        id={id}
         type="button"
         aria-label={ariaLabel}
+        aria-invalid={invalid ? true : undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}

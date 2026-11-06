@@ -686,7 +686,11 @@ export async function loadBusyForHost(
    */
   excludeBookingId?: string,
 ): Promise<Interval[]> {
-  const exclude = excludeEventTypeId ? sql` AND b.event_type_id <> ${excludeEventTypeId}` : sql``;
+  // A host's own event (no event type) is never one of the event's own seats:
+  // `<>` alone would drop it, NULL comparing as unknown.
+  const exclude = excludeEventTypeId
+    ? sql` AND (b.event_type_id IS NULL OR b.event_type_id <> ${excludeEventTypeId})`
+    : sql``;
   const excludeBooking = excludeBookingId ? sql` AND b.id <> ${excludeBookingId}` : sql``;
   // A member is busy for a booking whether they're the primary host_member_id OR
   // an assigned co-host (collective / fixed_round_robin) recorded in booking_host.
@@ -923,8 +927,10 @@ async function seatsTakenByStart(
  * as an assigned co-host (`booking_host`). The co-host half matters because
  * the Postgres EXCLUDE covers `host_member_id` only: a host's seat on a team
  * booking is invisible to it, so this check is the only guard for it.
+ *
+ * @internal Shared by the guarded writes (`createBooking`, `createHostEvent`); not a query for callers.
  */
-function hostOverlapSql(hostMemberId: string, startMs: number, endMs: number) {
+export function hostOverlapSql(hostMemberId: string, startMs: number, endMs: number) {
   return sql`SELECT b.id FROM booking b
       WHERE b.status IN ('accepted','pending')
         AND b.start_ms < ${endMs} AND b.end_ms > ${startMs}

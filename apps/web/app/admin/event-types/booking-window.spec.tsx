@@ -153,7 +153,7 @@ describe('Booking window, in the event type editor', () => {
         await typeInto(input, bad);
         await save(el);
         expect(saveEventTypeAction).not.toHaveBeenCalled();
-        expect(el.querySelector('[role="alert"]')?.textContent).toBe(invalid);
+        expect(el.querySelector('[role="alert"]:not([data-testid="et-error-summary"])')?.textContent).toBe(invalid);
         expect(input.getAttribute('aria-invalid')).toBe('true');
         // Focus goes to the field: it sits far below the Save button.
         expect(document.activeElement).toBe(input);
@@ -171,9 +171,9 @@ describe('Booking window, in the event type editor', () => {
     const el = await mount(event({ bookingWindowDays: 7 }));
     const input = field(el);
     await typeInto(input, '0');
-    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(el.querySelector('[role="alert"]:not([data-testid="et-error-summary"])')).toBeNull();
     await act(async () => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
-    expect(el.querySelector('[role="alert"]')).not.toBeNull();
+    expect(el.querySelector('[role="alert"]:not([data-testid="et-error-summary"])')).not.toBeNull();
     await typeInto(input, '');
     await save(el);
     expect(saved()?.bookingWindowDays).toBeNull();

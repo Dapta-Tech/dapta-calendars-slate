@@ -67,6 +67,7 @@ describe('connector directory review', () => {
         'cancel_booking',
         'confirm_booking',
         'create_booking',
+        'create_event',
         'decline_booking',
         'reschedule_booking',
       ].sort(),

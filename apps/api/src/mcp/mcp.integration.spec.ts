@@ -39,7 +39,7 @@ async function firstSlot(client: Awaited<ReturnType<Harness['connect']>>, nth = 
 }
 
 describe('catalog', () => {
-  it('lists seventeen tools with titles, annotations and output schemas, in a stable order', async () => {
+  it('lists eighteen tools with titles, annotations and output schemas, in a stable order', async () => {
     const client = await h.connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
@@ -60,6 +60,7 @@ describe('catalog', () => {
       'confirm_booking',
       'decline_booking',
       'cancel_booking',
+      'create_event',
     ]);
     for (const t of tools) {
       expect(t.name.length).toBeLessThan(64);
@@ -79,6 +80,9 @@ describe('catalog', () => {
     expect(by['create_booking']!.idempotentHint).toBe(true);
     expect(by['book_meeting']!.openWorldHint).toBe(true);
     expect(by['list_my_accounts']!.readOnlyHint).toBe(true);
+    expect(by['create_event']!.destructiveHint).toBe(false);
+    expect(by['create_event']!.openWorldHint).toBe(true);
+    expect(by['create_event']!.idempotentHint).toBe(true);
     // Every tool that acts on the caller's account takes `account_id`; the
     // public booking tool and the account list do not.
     const props = (name: string) => Object.keys((tools.find((t) => t.name === name)!.inputSchema as { properties?: object }).properties ?? {});
@@ -98,6 +102,7 @@ describe('catalog', () => {
       'confirm_booking',
       'decline_booking',
       'cancel_booking',
+      'create_event',
     ])
       expect(props(name), name).toContain('account_id');
     expect(props('book_meeting')).not.toContain('account_id');
@@ -509,6 +514,7 @@ describe('scope denial per tool', () => {
     ],
     ['reschedule_booking', 'bookings:write', { booking_uid: 'x', start: '2031-01-01T10:00:00Z', idempotency_key: idem('scope-denial-02') }],
     ['cancel_booking', 'bookings:cancel', { booking_uid: 'x' }],
+    ['create_event', 'bookings:write', { title: 'Focus', start: '2031-01-01T10:00:00Z', duration_minutes: 60, idempotency_key: idem('scope-denial-03') }],
   ];
   it.each(calls)('%s needs %s', async (name, scope, args) => {
     const others = ALL.filter((s) => s !== scope && !(scope === 'bookings:cancel' && s === 'bookings:write'));

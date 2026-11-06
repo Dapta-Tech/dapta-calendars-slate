@@ -5,6 +5,7 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability, getAccountByCode } from './repository';
+import { createHostEvent } from './host-event';
 import {
   addGuestsToBooking,
   claimApiIdempotency,
@@ -105,6 +106,39 @@ describePg('repository (real Postgres — the tested truth)', () => {
     try {
       // Overlaps [start, end) → must violate the EXCLUDE constraint.
       await rawInsert(randomUUID(), randomUUID(), start + 10 * 60_000, end + 10 * 60_000);
+    } catch (err) {
+      threw = true;
+      expect(isExclusionViolation(err)).toBe(true);
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('a host event (no event type) is held by the same guards: app-level and EXCLUDE', async () => {
+    // This run's own host, as above; a member row, because createHostEvent acts
+    // only for an active member of the account.
+    const account = await getAccountByCode(db, 'acme');
+    const host = randomUUID();
+    const now = Date.now();
+    await db.run(sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, created_at)
+      VALUES (${host}, ${account!.id}, ${`pg-events-${run}`}, ${'PG Host'}, ${`pg-events-${run}@example.com`}, ${'UTC'}, ${now})`);
+    const start = Math.ceil((now + 30 * 86_400_000) / 3_600_000) * 3_600_000;
+    const event = (startMs: number, endMs: number) =>
+      createHostEvent(db, { accountId: account!.id, memberId: host, title: 'Focus', startMs, endMs, attendees: [], timeZone: 'UTC' });
+
+    const first = await event(start, start + 4 * 3_600_000);
+    expect(first.ok).toBe(true);
+    const row = await db.get<{ event_type_id: string | null }>(
+      sql`SELECT event_type_id FROM booking WHERE uid = ${(first as { uid: string }).uid}`,
+    );
+    expect(row!.event_type_id).toBeNull();
+    // The app-level check, under the host's lock.
+    expect(await event(start + 3_600_000, start + 2 * 3_600_000)).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    // And the EXCLUDE behind it: a raw overlapping row with no event type is refused by Postgres itself.
+    let threw = false;
+    try {
+      await db.run(sql`INSERT INTO booking (id, account_id, uid, host_member_id, title, start_ms, end_ms, status, created_at, updated_at)
+        VALUES (${randomUUID()}, ${account!.id}, ${randomUUID()}, ${host}, ${'Direct'}, ${start + 3_600_000},
+          ${start + 2 * 3_600_000}, 'accepted', ${now}, ${now})`);
     } catch (err) {
       threw = true;
       expect(isExclusionViolation(err)).toBe(true);

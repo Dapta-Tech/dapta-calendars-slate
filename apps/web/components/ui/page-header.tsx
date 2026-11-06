@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 
 /**
  * The admin screen header system. Consistent shapes so every admin surface
@@ -97,11 +97,15 @@ export function FormHeader({
   title,
   actions,
   gutter = 'lg',
+  onBack,
 }: {
   backHref: string;
   backLabel: string;
   title: ReactNode;
   actions?: ReactNode;
+  /** Runs before the back link navigates; `preventDefault()` keeps the page
+   *  (an editor asking about unsaved changes first). */
+  onBack?: (e: MouseEvent<HTMLAnchorElement>) => void;
   /**
    * Which container padding this header bleeds to. `lg` is the original
    * full-gutter-everywhere container; `responsive` matches a
@@ -122,6 +126,7 @@ export function FormHeader({
     >
       <Link
         href={backHref}
+        onClick={onBack}
         className="-ml-tight inline-flex min-h-control items-center gap-tight px-tight text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
