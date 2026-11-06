@@ -1,16 +1,20 @@
 'use client';
 
-import { useRef, type RefObject } from 'react';
+import { useId, useRef, useState } from 'react';
 import {
   TEMPLATE_VARIABLE_GROUPS,
   formVariable,
+  isFormVariable,
   renderTemplate,
+  templateVariable,
   variablesFor,
   type TemplateContext,
   type TemplateValues,
 } from '@slate/engine';
 import { MAX_CALENDAR_DESCRIPTION_TEMPLATE, MAX_CALENDAR_TITLE_TEMPLATE } from '@slate/types';
-import { errorAria, inputCls, type EventTypeMessages } from './shared';
+import { cn } from '@/lib/cn';
+import type { EventTypeMessages } from './shared';
+import { TemplateField, chipClass, type ChipLook, type TemplateFieldHandle } from './template-field';
 
 export interface CalendarTextQuestion {
   name: string;
@@ -36,91 +40,11 @@ function sampleValues(locale: 'en' | 'es', eventTitle: string, questions: readon
   return values;
 }
 
-/** Insert `{{token}}` at the caret (or over the selection) of a text field. */
-function insertAt(
-  ref: RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
-  current: string,
-  token: string,
-  onChange: (next: string) => void,
-) {
-  const el = ref.current;
-  const start = el?.selectionStart ?? current.length;
-  const end = el?.selectionEnd ?? start;
-  const text = `{{${token}}}`;
-  onChange(`${current.slice(0, start)}${text}${current.slice(end)}`);
-  requestAnimationFrame(() => {
-    el?.focus();
-    const at = start + text.length;
-    el?.setSelectionRange(at, at);
-  });
-}
-
-/** The "Insert variable" menu: the form's answers first, then the catalog by group. */
-function InsertVariable({
-  context,
-  questions,
-  seated,
-  locale,
-  onPick,
-  m,
-  label,
-}: {
-  context: TemplateContext;
-  questions: readonly CalendarTextQuestion[];
-  seated: boolean;
-  locale: 'en' | 'es';
-  onPick: (token: string) => void;
-  m: EventTypeMessages['editor']['calendarText'];
-  /** Which field it inserts into, for assistive technology. */
-  label: string;
-}) {
-  // An event with seats shares ONE calendar event: no one invitee's data in it.
-  const vars = variablesFor(context, 'invitee').filter((d) => !(seated && d.perInvitee));
-  return (
-    <select
-      value=""
-      aria-label={`${m.insert} — ${label}`}
-      onChange={(e) => {
-        if (e.target.value) onPick(e.target.value);
-      }}
-      className="cursor-pointer self-start rounded-md border border-input bg-background px-inline py-tight text-sm text-muted-foreground"
-    >
-      <option value="">+ {m.insert}</option>
-      {!seated ? (
-        <optgroup label={m.groupForm}>
-          {questions.length ? (
-            questions.map((q) => (
-              <option key={q.name} value={formVariable(q.name)}>
-                {q.label || q.name}
-              </option>
-            ))
-          ) : (
-            <option disabled value="-">
-              {m.noQuestions}
-            </option>
-          )}
-        </optgroup>
-      ) : null}
-      {TEMPLATE_VARIABLE_GROUPS.map((g) => {
-        const inGroup = vars.filter((d) => d.group === g);
-        return inGroup.length ? (
-          <optgroup key={g} label={m.groups[g]}>
-            {inGroup.map((d) => (
-              <option key={d.name} value={d.name}>
-                {d.label[locale]}
-              </option>
-            ))}
-          </optgroup>
-        ) : null;
-      })}
-    </select>
-  );
-}
-
 /**
  * "In the calendar": what the calendar event is called and what it says, as
- * templates that can carry who booked and what they answered
- * (`Intro call – {{attendee_name}} ({{form.company}})`). Rendered once per
+ * templates that can carry who booked and what they answered. Variables are
+ * chips: dragged from the palette into either field, clicked to add at the
+ * caret of the field last used, or typed as `{{name}}`. Rendered once per
  * booking by the API; empty keeps the event's own title and no description.
  * Each field shows what it renders to with sample values.
  */
@@ -153,41 +77,68 @@ export function CalendarTextSection({
   locale: 'en' | 'es';
   m: EventTypeMessages['editor']['calendarText'];
 }) {
-  const titleRef = useRef<HTMLInputElement>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<TemplateFieldHandle>(null);
+  const descriptionRef = useRef<TemplateFieldHandle>(null);
+  // The palette follows the field last used: the title allows fewer variables.
+  const [target, setTarget] = useState<TemplateContext>('title');
+  const ids = { titleLabel: useId(), descriptionLabel: useId(), palette: useId() };
+
+  const look = (token: string): ChipLook => {
+    if (isFormVariable(token)) {
+      const q = questions.find((x) => formVariable(x.name) === token);
+      return { label: q ? q.label || q.name : token.slice(5), kind: q ? 'answer' : 'unknown' };
+    }
+    const d = templateVariable(token);
+    return d ? { label: d.label[locale], kind: 'builtin' } : { label: token, kind: 'unknown' };
+  };
+
+  // An event with seats shares ONE calendar event: no one invitee's data in it.
+  const builtins = variablesFor(target, 'invitee').filter((d) => !(seated && d.perInvitee));
   const values = sampleValues(locale, eventTitle, questions);
   const titleExample = title.trim() ? renderTemplate(title, values, { mode: 'line', locale }) : '';
   const descriptionExample = description.trim() ? renderTemplate(description, values, { mode: 'text', locale }) : '';
   const titleErrorId = `${CALENDAR_TEXT_IDS.title}-error`;
   const descriptionErrorId = `${CALENDAR_TEXT_IDS.description}-error`;
 
+  const chip = (token: string, label: string, kind: ChipLook['kind']) => (
+    <button
+      key={token}
+      type="button"
+      draggable
+      data-token={token}
+      onDragStart={(e) => {
+        // Dropped as text, which the field turns into a chip where it lands.
+        e.dataTransfer.setData('text/plain', `{{${token}}}`);
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onClick={() => (target === 'title' ? titleRef : descriptionRef).current?.insert(token)}
+      className={cn(chipClass(kind), 'cursor-grab active:cursor-grabbing hover:border-foreground/40')}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div className="flex flex-col gap-field">
       {seated ? <p className="text-xs text-muted-foreground">{m.seatedNote}</p> : null}
 
       <div className="flex flex-col gap-tight">
-        <label htmlFor={CALENDAR_TEXT_IDS.title} className="text-sm text-muted-foreground">
+        <span id={ids.titleLabel} className="text-sm text-muted-foreground">
           {m.titleLabel}
-        </label>
-        <input
+        </span>
+        <TemplateField
           id={CALENDAR_TEXT_IDS.title}
           ref={titleRef}
           value={title}
+          onChange={onTitle}
+          onBlur={onTitleBlur}
+          look={look}
           maxLength={MAX_CALENDAR_TITLE_TEMPLATE}
           placeholder={m.titlePlaceholder}
-          onChange={(e) => onTitle(e.target.value)}
-          onBlur={onTitleBlur}
-          className={inputCls}
-          {...errorAria(titleError, titleErrorId)}
-        />
-        <InsertVariable
-          context="title"
-          questions={questions}
-          seated={seated}
-          locale={locale}
-          onPick={(token) => insertAt(titleRef, title, token, onTitle)}
-          m={m}
-          label={m.titleLabel}
+          labelledBy={ids.titleLabel}
+          describedBy={titleError ? titleErrorId : undefined}
+          invalid={!!titleError}
+          onFocus={() => setTarget('title')}
         />
         {titleError ? (
           <p id={titleErrorId} className="text-xs text-destructive">
@@ -203,28 +154,22 @@ export function CalendarTextSection({
       </div>
 
       <div className="flex flex-col gap-tight">
-        <label htmlFor={CALENDAR_TEXT_IDS.description} className="text-sm text-muted-foreground">
+        <span id={ids.descriptionLabel} className="text-sm text-muted-foreground">
           {m.descriptionLabel}
-        </label>
-        <textarea
+        </span>
+        <TemplateField
           id={CALENDAR_TEXT_IDS.description}
           ref={descriptionRef}
           value={description}
-          rows={3}
-          maxLength={MAX_CALENDAR_DESCRIPTION_TEMPLATE}
-          onChange={(e) => onDescription(e.target.value)}
+          onChange={onDescription}
           onBlur={onDescriptionBlur}
-          className={inputCls}
-          {...errorAria(descriptionError, descriptionErrorId)}
-        />
-        <InsertVariable
-          context="description"
-          questions={questions}
-          seated={seated}
-          locale={locale}
-          onPick={(token) => insertAt(descriptionRef, description, token, onDescription)}
-          m={m}
-          label={m.descriptionLabel}
+          look={look}
+          multiline
+          maxLength={MAX_CALENDAR_DESCRIPTION_TEMPLATE}
+          labelledBy={ids.descriptionLabel}
+          describedBy={descriptionError ? descriptionErrorId : undefined}
+          invalid={!!descriptionError}
+          onFocus={() => setTarget('description')}
         />
         {descriptionError ? (
           <p id={descriptionErrorId} className="text-xs text-destructive">
@@ -237,6 +182,33 @@ export function CalendarTextSection({
           </p>
         ) : null}
         <p className="text-xs text-muted-foreground">{m.descriptionHint}</p>
+      </div>
+
+      <div
+        id={ids.palette}
+        data-testid="et-variable-palette"
+        className="flex flex-col gap-inline rounded-md border border-dashed border-border bg-background/40 p-card"
+      >
+        <p className="text-xs text-muted-foreground">{m.paletteHint}</p>
+        {!seated ? (
+          <div className="flex flex-wrap items-center gap-tight">
+            <span className="mr-tight text-xs font-medium text-muted-foreground">{m.groupForm}</span>
+            {questions.length ? (
+              questions.map((q) => chip(formVariable(q.name), q.label || q.name, 'answer'))
+            ) : (
+              <span className="text-xs text-muted-foreground">{m.noQuestions}</span>
+            )}
+          </div>
+        ) : null}
+        {TEMPLATE_VARIABLE_GROUPS.map((g) => {
+          const inGroup = builtins.filter((d) => d.group === g);
+          return inGroup.length ? (
+            <div key={g} className="flex flex-wrap items-center gap-tight">
+              <span className="mr-tight text-xs font-medium text-muted-foreground">{m.groups[g]}</span>
+              {inGroup.map((d) => chip(d.name, d.label[locale], 'builtin'))}
+            </div>
+          ) : null;
+        })}
       </div>
     </div>
   );

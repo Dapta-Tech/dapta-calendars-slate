@@ -384,52 +384,90 @@ describe('AI Agents tab', () => {
 describe('calendar event title and description', () => {
   const ct = m.editor.calendarText;
   const withCompany = { bookingFields: [{ name: 'company', label: 'Company', type: 'text', required: true }] };
+  const field = (el: HTMLElement, id = 'et-calendar-title') => el.querySelector<HTMLElement>(`#${id}`)!;
+  const chips = (f: HTMLElement) => [...f.querySelectorAll<HTMLElement>('[data-token]')].map((c) => [c.textContent, c.dataset.token]);
+  /** Type into the chip field the way the browser does: change its text, then fire `input`. */
+  const typeText = async (f: HTMLElement, text: string) =>
+    act(async () => {
+      f.replaceChildren(document.createTextNode(text));
+      f.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  const paletteChip = (el: HTMLElement, label: string) =>
+    [...el.querySelectorAll<HTMLButtonElement>('[data-testid="et-variable-palette"] button')].find((b) => b.textContent === label)!;
 
-  it('opens on the stored templates and saves them; blank saves none', async () => {
-    const el = await mount(event({ calendarTitleTemplate: 'Intro – {{attendee_name}}', calendarDescriptionTemplate: null }));
-    expect(byId(el, 'et-calendar-title').value).toBe('Intro – {{attendee_name}}');
+  it('shows a stored template with its variables as chips, and saves it unchanged', async () => {
+    const el = await mount(event({ ...withCompany, calendarTitleTemplate: 'Intro – {{attendee_name}} ({{form.company}})' }));
+    const f = field(el);
+    expect(f.getAttribute('role')).toBe('textbox');
+    expect(chips(f)).toEqual([
+      ['Invitee name', 'attendee_name'],
+      ['Company', 'form.company'],
+    ]);
     await save(el);
-    expect(saved()).toMatchObject({ calendarTitleTemplate: 'Intro – {{attendee_name}}', calendarDescriptionTemplate: null });
-    await typeInto(byId(el, 'et-calendar-title'), '   ');
+    expect(saved()).toMatchObject({
+      calendarTitleTemplate: 'Intro – {{attendee_name}} ({{form.company}})',
+      calendarDescriptionTemplate: null,
+    });
+  });
+
+  it('typing {{name}} turns it into a chip; blank saves none', async () => {
+    const el = await mount(event());
+    await typeText(field(el), 'Call with {{first_name}}');
+    expect(chips(field(el))).toEqual([['Invitee first name', 'first_name']]);
+    await save(el);
+    expect(saved()?.calendarTitleTemplate).toBe('Call with {{first_name}}');
+    await typeText(field(el), '  ');
     await save(el);
     expect(saved()?.calendarTitleTemplate).toBeNull();
   });
 
-  it('inserts a booking-form answer at the caret and shows what it renders to', async () => {
+  it('a palette chip is draggable as {{name}} and, clicked, lands in the field last used', async () => {
     const el = await mount(event(withCompany));
-    const input = byId(el, 'et-calendar-title');
-    await typeInto(input, 'Intro with ');
-    input.setSelectionRange(11, 11);
-    const menu = input.parentElement!.querySelector<HTMLSelectElement>('select')!;
-    expect([...menu.querySelectorAll('optgroup')].map((g) => g.label)).toContain(ct.groupForm);
-    await act(async () => {
-      menu.value = 'form.company';
-      menu.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(input.value).toBe('Intro with {{form.company}}');
+    const company = paletteChip(el, 'Company');
+    expect(company.draggable).toBe(true);
+    const data = new Map<string, string>();
+    const drag = new Event('dragstart', { bubbles: true }) as DragEvent;
+    Object.defineProperty(drag, 'dataTransfer', { value: { setData: (k: string, v: string) => data.set(k, v), effectAllowed: '' } });
+    await act(async () => company.dispatchEvent(drag));
+    expect(data.get('text/plain')).toBe('{{form.company}}');
+
+    await typeText(field(el), 'Intro with ');
+    await click(company);
+    expect(chips(field(el))).toEqual([['Company', 'form.company']]);
     expect(el.querySelector('[data-testid="et-calendar-title-example"]')!.textContent).toBe(
       ct.preview.replace('{text}', 'Intro with [Company]'),
     );
+    // Focus the description: the next click goes there.
+    await act(async () => field(el, 'et-calendar-description').dispatchEvent(new FocusEvent('focus')));
+    await act(async () => field(el, 'et-calendar-description').dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+    await click(paletteChip(el, 'Duration'));
+    expect(chips(field(el, 'et-calendar-description'))).toEqual([['Duration', 'duration']]);
     await save(el);
-    expect(saved()?.calendarTitleTemplate).toBe('Intro with {{form.company}}');
+    expect(saved()).toMatchObject({
+      calendarTitleTemplate: 'Intro with {{form.company}}',
+      calendarDescriptionTemplate: '{{duration}}',
+    });
   });
 
-  it('offers only what the title can show: no links, nothing about one invitee on an event with seats', async () => {
+  it('offers only what the title can show: nothing about one invitee on an event with seats', async () => {
     const el = await mount(event({ ...withCompany, seatsPerTimeSlot: 5 }));
-    const menu = byId(el, 'et-calendar-title').parentElement!.querySelector<HTMLSelectElement>('select')!;
-    const values = [...menu.querySelectorAll('option')].map((o) => o.value);
-    expect(values).not.toContain('manage_url');
-    expect(values).not.toContain('attendee_name');
-    expect(values).not.toContain('form.company');
+    const tokens = [...el.querySelectorAll<HTMLButtonElement>('[data-testid="et-variable-palette"] button')].map(
+      (b) => b.dataset.token,
+    );
+    expect(tokens).not.toContain('attendee_name');
+    expect(tokens).not.toContain('form.company');
+    expect(tokens).not.toContain('manage_url');
+    expect(tokens).toContain('host_name');
     expect(el.textContent).toContain(ct.seatedNote);
   });
 
-  it('refuses an unknown variable beside the field, the way the API would', async () => {
+  it('an unknown variable shows as a flagged chip and is refused beside the field, the way the API would', async () => {
     const el = await mount(event());
-    await typeInto(byId(el, 'et-calendar-title'), 'Call with {{nmae}}');
+    await typeText(field(el), 'Call with {{nmae}}');
+    expect(field(el).querySelector('[data-token="nmae"]')!.className).toContain('text-destructive');
     await save(el);
     expect(saveEventTypeAction).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(byId(el, 'et-calendar-title'));
-    expect(byId(el, 'et-calendar-title').getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(field(el));
+    expect(field(el).getAttribute('aria-invalid')).toBe('true');
   });
 });

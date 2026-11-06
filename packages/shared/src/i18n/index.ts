@@ -607,7 +607,8 @@ export interface BookingMessages {
           titlePlaceholder: string;
           descriptionLabel: string;
           descriptionHint: string;
-          insert: string;
+          /** Above the variable chips: drag one into a field, or click to add it at the cursor. */
+          paletteHint: string;
           groupForm: string;
           groups: { invitee: string; host: string; event: string; time: string; links: string; booking: string };
           /** `{text}` is the rendered sample. */
@@ -2506,7 +2507,7 @@ export const en: BookingMessages = {
           titlePlaceholder: 'e.g. {{event_title}} with {{attendee_name}}',
           descriptionLabel: 'Calendar event description',
           descriptionHint: 'Written into the calendar event. Leave it empty for none.',
-          insert: 'Insert variable',
+          paletteHint: 'Drag a variable into the title or description, or click it to add it where your cursor is.',
           groupForm: 'Answers from your booking form',
           groups: { invitee: 'Invitee', host: 'Host', event: 'Event', time: 'Time', links: 'Links', booking: 'Booking' },
           preview: 'Example: {text}',
@@ -4376,7 +4377,7 @@ export const es: BookingMessages = {
           titlePlaceholder: 'p. ej. {{event_title}} con {{attendee_name}}',
           descriptionLabel: 'Descripción del evento en el calendario',
           descriptionHint: 'Se escribe en el evento del calendario. Déjala vacía si no quieres ninguna.',
-          insert: 'Insertar variable',
+          paletteHint: 'Arrastra una variable al título o a la descripción, o haz clic para agregarla donde está el cursor.',
           groupForm: 'Respuestas de tu formulario de reserva',
           groups: { invitee: 'Invitado', host: 'Anfitrión', event: 'Evento', time: 'Horario', links: 'Enlaces', booking: 'Reserva' },
           preview: 'Ejemplo: {text}',
