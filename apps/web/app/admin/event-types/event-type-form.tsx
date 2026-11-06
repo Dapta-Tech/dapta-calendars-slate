@@ -519,7 +519,7 @@ export function EventTypeForm({
 
         {/* --- General ------------------------------------------------------ */}
         <TabPanel id="general" idPrefix="et" active={activeTab === 'general'}>
-          <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card">
+          <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card sm:p-group">
             <section className="flex flex-col gap-field">
               {sectionHeading(editor.sections.basics)}
               <p className="text-xs text-muted-foreground">{editor.requiredLegend}</p>
@@ -1038,7 +1038,7 @@ export function EventTypeForm({
 
         {/* --- Reminders ---------------------------------------------------- */}
         <TabPanel id="reminders" idPrefix="et" active={activeTab === 'reminders'}>
-          <div className="flex flex-col gap-card rounded-md border border-border bg-card p-card">
+          <div className="flex flex-col gap-card rounded-md border border-border bg-card p-card sm:p-group">
             {/* Their {{form.*}} variables read the questions defined in General. */}
             <RemindersSection
               rows={reminders}
@@ -1060,7 +1060,7 @@ export function EventTypeForm({
         {/* --- CRM Connection ----------------------------------------------- */}
         {crmTabShown ? (
           <TabPanel id="crm" idPrefix="et" active={activeTab === 'crm'}>
-            <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card">
+            <div className="flex flex-col gap-section rounded-md border border-border bg-card p-card sm:p-group">
               {/* CRM property mapping (H2 / #108). Absent entirely when no CRM
                   adapter is wired on this deployment. */}
               {crmCatalog && crmProvider ? (
@@ -1092,7 +1092,7 @@ export function EventTypeForm({
 
         {/* --- AI Agents ---------------------------------------------------- */}
         <TabPanel id="agents" idPrefix="et" active={activeTab === 'agents'}>
-          <div className="rounded-md border border-border bg-card p-card">
+          <div className="rounded-md border border-border bg-card p-card sm:p-group">
             <AgentsTab eventTypeId={initial?.id} title={title} mcpUrl={mcpUrl} m={editor.agents} />
           </div>
         </TabPanel>

@@ -74,7 +74,7 @@ export default async function EditEventType({
   const workingHours = await loadWorkingHours(schedules).catch(() => null);
 
   return (
-    <div className="mx-auto max-w-7xl px-gutter sm:px-gutter-wide pb-gutter-y">
+    <div className="mx-auto max-w-4xl px-gutter sm:px-gutter-wide pb-gutter-y">
       <EventTypeForm
         workingHours={workingHours}
         mcpUrl={signInMcpUrl()}
