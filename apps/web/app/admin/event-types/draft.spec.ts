@@ -46,6 +46,8 @@ const PERSONAL: EventType = {
   successRedirectUrl: 'https://example.com/thanks',
   successRedirectData: null,
   tracking: { metaPixelId: '1234567890' } as EventType['tracking'],
+  calendarTitleTemplate: 'Intro – {{attendee_name}} ({{form.company}})',
+  calendarDescriptionTemplate: null,
 };
 
 const TEAM: EventType = {
@@ -89,6 +91,8 @@ describe('toPayload: an unchanged event saves what it already has', () => {
       title: 'Intro Call',
       slug: 'intro-call',
       description: 'A first conversation.',
+      calendarTitleTemplate: 'Intro – {{attendee_name}} ({{form.company}})',
+      calendarDescriptionTemplate: null,
       location: { kind: 'phone', detail: '+57 300 000 0000' },
       lengthMinutes: 45,
       minimumBookingNotice: 240,

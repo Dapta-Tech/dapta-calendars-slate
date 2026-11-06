@@ -458,6 +458,10 @@ export interface EventType {
   successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page; null ⇒ none. Optional on the wire. */
   tracking?: EventTracking | null;
+  /** The calendar event's title and description templates; null ⇒ the event
+   *  title and no description. Optional on the wire. */
+  calendarTitleTemplate?: string | null;
+  calendarDescriptionTemplate?: string | null;
 }
 export interface Schedule {
   id: string;

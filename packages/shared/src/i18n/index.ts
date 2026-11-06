@@ -600,6 +600,22 @@ export interface BookingMessages {
           endAfterStart: string;
           overlap: string;
         };
+        calendarText: {
+          section: string;
+          titleLabel: string;
+          titleHint: string;
+          titlePlaceholder: string;
+          descriptionLabel: string;
+          descriptionHint: string;
+          insert: string;
+          groupForm: string;
+          groups: { invitee: string; host: string; event: string; time: string; links: string; booking: string };
+          /** `{text}` is the rendered sample. */
+          preview: string;
+          noQuestions: string;
+          /** Shown on events with seats: one calendar event is shared by everyone. */
+          seatedNote: string;
+        };
         unsaved: { title: string; body: string; confirm: string; cancel: string };
         agents: {
           title: string;
@@ -2482,6 +2498,22 @@ export const en: BookingMessages = {
           endAfterStart: 'End must be after start.',
           overlap: 'These hours overlap another row on the same day.',
         },
+        calendarText: {
+          section: 'In the calendar',
+          titleLabel: 'Calendar event title',
+          titleHint:
+            'What the meeting is called in your calendar, your invitee’s and the booking emails. Add the invitee’s details or their answers so you know who it is at a glance. Leave it empty to use the event title.',
+          titlePlaceholder: 'e.g. {{event_title}} with {{attendee_name}}',
+          descriptionLabel: 'Calendar event description',
+          descriptionHint: 'Written into the calendar event. Leave it empty for none.',
+          insert: 'Insert variable',
+          groupForm: 'Answers from your booking form',
+          groups: { invitee: 'Invitee', host: 'Host', event: 'Event', time: 'Time', links: 'Links', booking: 'Booking' },
+          preview: 'Example: {text}',
+          noQuestions: 'Add questions to the booking form to use their answers here.',
+          seatedNote:
+            'This event has seats, so everyone who books shares one calendar event: it can’t show one invitee’s details or answers.',
+        },
         unsaved: {
           title: 'Discard your changes?',
           body: 'You have changes that are not saved. If you leave now, they are lost.',
@@ -4335,6 +4367,22 @@ export const es: BookingMessages = {
           rangesRequired: 'Agrega al menos un horario.',
           endAfterStart: 'La hora final debe ser después de la inicial.',
           overlap: 'Este horario se cruza con otra fila del mismo día.',
+        },
+        calendarText: {
+          section: 'En el calendario',
+          titleLabel: 'Título del evento en el calendario',
+          titleHint:
+            'Cómo se llama la reunión en tu calendario, en el del invitado y en los correos de la reserva. Agrega los datos del invitado o sus respuestas para saber de un vistazo quién es. Déjalo vacío para usar el título del evento.',
+          titlePlaceholder: 'p. ej. {{event_title}} con {{attendee_name}}',
+          descriptionLabel: 'Descripción del evento en el calendario',
+          descriptionHint: 'Se escribe en el evento del calendario. Déjala vacía si no quieres ninguna.',
+          insert: 'Insertar variable',
+          groupForm: 'Respuestas de tu formulario de reserva',
+          groups: { invitee: 'Invitado', host: 'Anfitrión', event: 'Evento', time: 'Horario', links: 'Enlaces', booking: 'Reserva' },
+          preview: 'Ejemplo: {text}',
+          noQuestions: 'Agrega preguntas al formulario de reserva para usar sus respuestas aquí.',
+          seatedNote:
+            'Este evento tiene cupos, así que todos los que reservan comparten un mismo evento en el calendario: no puede mostrar los datos ni las respuestas de un invitado.',
         },
         unsaved: {
           title: '¿Descartar tus cambios?',

@@ -380,3 +380,56 @@ describe('AI Agents tab', () => {
     expect(el.querySelector('#et-panel-agents')!.textContent).toContain(es.agents.title);
   });
 });
+
+describe('calendar event title and description', () => {
+  const ct = m.editor.calendarText;
+  const withCompany = { bookingFields: [{ name: 'company', label: 'Company', type: 'text', required: true }] };
+
+  it('opens on the stored templates and saves them; blank saves none', async () => {
+    const el = await mount(event({ calendarTitleTemplate: 'Intro – {{attendee_name}}', calendarDescriptionTemplate: null }));
+    expect(byId(el, 'et-calendar-title').value).toBe('Intro – {{attendee_name}}');
+    await save(el);
+    expect(saved()).toMatchObject({ calendarTitleTemplate: 'Intro – {{attendee_name}}', calendarDescriptionTemplate: null });
+    await typeInto(byId(el, 'et-calendar-title'), '   ');
+    await save(el);
+    expect(saved()?.calendarTitleTemplate).toBeNull();
+  });
+
+  it('inserts a booking-form answer at the caret and shows what it renders to', async () => {
+    const el = await mount(event(withCompany));
+    const input = byId(el, 'et-calendar-title');
+    await typeInto(input, 'Intro with ');
+    input.setSelectionRange(11, 11);
+    const menu = input.parentElement!.querySelector<HTMLSelectElement>('select')!;
+    expect([...menu.querySelectorAll('optgroup')].map((g) => g.label)).toContain(ct.groupForm);
+    await act(async () => {
+      menu.value = 'form.company';
+      menu.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(input.value).toBe('Intro with {{form.company}}');
+    expect(el.querySelector('[data-testid="et-calendar-title-example"]')!.textContent).toBe(
+      ct.preview.replace('{text}', 'Intro with [Company]'),
+    );
+    await save(el);
+    expect(saved()?.calendarTitleTemplate).toBe('Intro with {{form.company}}');
+  });
+
+  it('offers only what the title can show: no links, nothing about one invitee on an event with seats', async () => {
+    const el = await mount(event({ ...withCompany, seatsPerTimeSlot: 5 }));
+    const menu = byId(el, 'et-calendar-title').parentElement!.querySelector<HTMLSelectElement>('select')!;
+    const values = [...menu.querySelectorAll('option')].map((o) => o.value);
+    expect(values).not.toContain('manage_url');
+    expect(values).not.toContain('attendee_name');
+    expect(values).not.toContain('form.company');
+    expect(el.textContent).toContain(ct.seatedNote);
+  });
+
+  it('refuses an unknown variable beside the field, the way the API would', async () => {
+    const el = await mount(event());
+    await typeInto(byId(el, 'et-calendar-title'), 'Call with {{nmae}}');
+    await save(el);
+    expect(saveEventTypeAction).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(byId(el, 'et-calendar-title'));
+    expect(byId(el, 'et-calendar-title').getAttribute('aria-invalid')).toBe('true');
+  });
+});

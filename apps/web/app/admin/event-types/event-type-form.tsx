@@ -40,6 +40,7 @@ import {
 import { AdvancedSettings, advancedSummary } from './sections/advanced';
 import { AgentsTab } from './sections/agents';
 import { DurationField } from './sections/duration';
+import { CALENDAR_TEXT_IDS, CalendarTextSection } from './sections/calendar-text';
 import {
   AvailabilityField,
   type AvailabilitySource,
@@ -185,6 +186,8 @@ export function EventTypeForm({
   const setSlug = setter('slug');
   const setSlugTouched = setter('slugTouched');
   const setDescription = setter('description');
+  const setCalendarTitle = setter('calendarTitle');
+  const setCalendarDescription = setter('calendarDescription');
   const setLocationKind = setter('locationKind');
   const setLocationDetail = setter('locationDetail');
   const setLength = setter('lengthMinutes');
@@ -311,7 +314,7 @@ export function EventTypeForm({
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [serverErrors, setServerErrors] = useState<FieldError[]>([]);
   const [serverPlain, setServerPlain] = useState<string[]>([]);
-  const errors = validateDraft(draft, { m, trackingEnabled, trackingKeys, isTeamEvent });
+  const errors = validateDraft(draft, { m, trackingEnabled, trackingKeys, isTeamEvent, locale });
   const visibleErrors = submitAttempted ? [...errors, ...serverErrors] : serverErrors;
   const counts = errorCounts(visibleErrors);
   const errorFor = (fieldId: string): string | null => {
@@ -593,6 +596,25 @@ export function EventTypeForm({
                 m={m}
                 locationLabels={locationLabels}
                 locale={locale}
+              />
+            </section>
+
+            <section className="flex flex-col gap-field">
+              {sectionHeading(editor.calendarText.section)}
+              <CalendarTextSection
+                title={draft.calendarTitle}
+                description={draft.calendarDescription}
+                onTitle={setCalendarTitle}
+                onDescription={setCalendarDescription}
+                onTitleBlur={() => touch(CALENDAR_TEXT_IDS.title)}
+                onDescriptionBlur={() => touch(CALENDAR_TEXT_IDS.description)}
+                titleError={errorFor(CALENDAR_TEXT_IDS.title)}
+                descriptionError={errorFor(CALENDAR_TEXT_IDS.description)}
+                eventTitle={title}
+                questions={draftQuestions.map((f) => ({ name: f.name, label: f.label }))}
+                seated={seats !== '' && Number(seats) > 1}
+                locale={locale}
+                m={editor.calendarText}
               />
             </section>
 
@@ -1125,6 +1147,14 @@ export function EventTypeForm({
 function serverFieldErrors(r: ActionResult, e: EventTypeMessages['editor']['errors']): FieldError[] {
   if (r.code === 'SLUG_TAKEN') return [{ fieldId: FIELD_IDS.slug, tab: 'general', message: e.slugTaken }];
   if (r.code === 'INVALID_TEMPLATE' && r.issues?.length) {
+    const calendar = r.issues.filter((i) => i.field === 'calendarTitleTemplate' || i.field === 'calendarDescriptionTemplate');
+    if (calendar.length) {
+      return calendar.map((i) => ({
+        fieldId: i.field === 'calendarTitleTemplate' ? CALENDAR_TEXT_IDS.title : CALENDAR_TEXT_IDS.description,
+        tab: 'general' as const,
+        message: i.message ?? r.message ?? e.templateInvalid,
+      }));
+    }
     return r.issues
       .filter((i) => i.reminderId && (i.field === 'subject' || i.field === 'body'))
       .map((i) => ({

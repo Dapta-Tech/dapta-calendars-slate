@@ -72,6 +72,9 @@ export interface EventTypePayload {
   successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page; null clears every id. */
   tracking?: EventTracking | null;
+  /** The calendar event's title and description, as templates; null ⇒ none. */
+  calendarTitleTemplate?: string | null;
+  calendarDescriptionTemplate?: string | null;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {

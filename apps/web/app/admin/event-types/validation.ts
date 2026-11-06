@@ -8,12 +8,14 @@
  * Pure: no React, no DOM. The checks mirror what the API refuses, so the host
  * learns it beside the field instead of from a failed save.
  */
+import { templateErrors, templateIssueMessage } from '@slate/engine';
 import { isReservedFieldName } from '@slate/shared';
 import { MAX_BOOKING_WINDOW_DAYS, eventCustomHoursSchema, isSuccessRedirectUrl as isRedirectUrl } from '@slate/types';
 import type { EventTypeDraft } from './draft';
 import type { EventTypeMessages } from './sections/shared';
 import { invalidTrackingKeys, type TrackingKey } from './sections/tracking';
 import { HOURS_IDS } from './sections/availability';
+import { CALENDAR_TEXT_IDS } from './sections/calendar-text';
 
 export const EDITOR_TABS = ['general', 'reminders', 'crm', 'agents'] as const;
 export type EditorTab = (typeof EDITOR_TABS)[number];
@@ -56,6 +58,8 @@ export interface ValidateContext {
   m: EventTypeMessages;
   /** Team events have no custom hours to check. */
   isTeamEvent?: boolean;
+  /** The language template messages are written in. */
+  locale?: 'en' | 'es';
   /** Tracking is shown (and saved) for this workspace. */
   trackingEnabled: boolean;
   trackingKeys: TrackingKey[];
@@ -64,7 +68,7 @@ export interface ValidateContext {
 /** Every problem in the draft, in tab order and, within a tab, in form order. */
 export function validateDraft(
   d: EventTypeDraft,
-  { m, trackingEnabled, trackingKeys, isTeamEvent = false }: ValidateContext,
+  { m, trackingEnabled, trackingKeys, isTeamEvent = false, locale = 'en' }: ValidateContext,
 ): FieldError[] {
   const e = m.editor.errors;
   const out: FieldError[] = [];
@@ -78,6 +82,19 @@ export function validateDraft(
     general(FIELD_IDS.duration, e.durationInvalid);
   if (d.locationKind && d.locationKind !== 'conferencing' && !d.locationDetail.trim())
     general(FIELD_IDS.locationDetail, e.locationDetailRequired);
+
+  // In the calendar: the title and description templates, checked exactly as
+  // the API checks them (unknown or misplaced variables, broken braces; on an
+  // event with seats, no one invitee's data).
+  const seated = d.seats !== '' && Number(d.seats) > 1;
+  for (const [text, context, fieldId] of [
+    [d.calendarTitle, 'title', CALENDAR_TEXT_IDS.title],
+    [d.calendarDescription, 'description', CALENDAR_TEXT_IDS.description],
+  ] as const) {
+    if (!text.trim()) continue;
+    const issue = templateErrors(text, { context, audience: 'invitee', seated })[0];
+    if (issue) general(fieldId, templateIssueMessage(issue, locale));
+  }
 
   // Availability: custom hours, checked by the same rules the API applies.
   if (!isTeamEvent && d.availabilitySource === 'custom') {

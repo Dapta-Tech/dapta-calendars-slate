@@ -37,6 +37,9 @@ export interface EventTypeDraft {
   /** The host typed the slug: titles stop rewriting it. */
   slugTouched: boolean;
   description: string;
+  /** The calendar event's title and description templates; '' is "none". */
+  calendarTitle: string;
+  calendarDescription: string;
   /** '' is "not specified" — the same absent value the column always had. */
   locationKind: LocationKind | '';
   locationDetail: string;
@@ -96,6 +99,8 @@ export function initialDraft({
     slug: initial?.slug ?? '',
     slugTouched: !!initial,
     description: initial?.description ?? '',
+    calendarTitle: initial?.calendarTitleTemplate ?? '',
+    calendarDescription: initial?.calendarDescriptionTemplate ?? '',
     locationKind: initial?.location?.kind ?? '',
     locationDetail: initial?.location?.detail ?? '',
     lengthMinutes: initial?.lengthMinutes ?? 30,
@@ -210,6 +215,9 @@ export function toPayload(d: EventTypeDraft, ctx: PayloadContext): EventTypePayl
     title: d.title,
     slug: d.slug,
     description: d.description.trim() || null,
+    // Blank is "none": the event's own title, and no description.
+    calendarTitleTemplate: d.calendarTitle.trim() || null,
+    calendarDescriptionTemplate: d.calendarDescription.trim() || null,
     location: d.locationKind
       ? {
           kind: d.locationKind,
