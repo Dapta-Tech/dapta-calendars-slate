@@ -70,6 +70,10 @@ export function previewFlowProps({
   eventTitle,
   locale,
   logoUrl = null,
+  description = null,
+  lengthMinutes = 30,
+  location = null,
+  bookingFields = [],
 }: {
   hostName: string;
   avatarUrl: string | null;
@@ -77,6 +81,12 @@ export function previewFlowProps({
   locale: string;
   /** The brand kit's logo, when the page being previewed wears one. */
   logoUrl?: string | null;
+  /** The event editor's draft: what the event page says about the event. The
+   *  studio passes none of these and gets the sample it always showed. */
+  description?: string | null;
+  lengthMinutes?: number;
+  location?: { kind: string; detail?: string | null } | null;
+  bookingFields?: BookingField[];
 }) {
   return {
     // The preview is inert and never reaches the confirmation; the profile
@@ -86,16 +96,17 @@ export function previewFlowProps({
     ownerSlug: 'preview',
     slug: 'preview',
     slots: previewSlots(),
-    bookingFields: [] as BookingField[],
+    bookingFields,
     initialTimeZone: 'UTC',
     followBrowserZone: false,
     locale,
     eventTitle,
-    lengthMinutes: 30,
+    lengthMinutes,
+    description,
     hostName,
     avatarUrl,
     logoUrl,
-    location: null,
+    location,
     nowUtc: PREVIEW_NOW,
   };
 }
@@ -137,6 +148,10 @@ export function BookingPreview({
   locale,
   device,
   logoUrl = null,
+  description = null,
+  lengthMinutes = 30,
+  location = null,
+  bookingFields,
 }: {
   hostName: string;
   avatarUrl: string | null;
@@ -144,10 +159,25 @@ export function BookingPreview({
   locale: string;
   device: 'desktop' | 'mobile';
   logoUrl?: string | null;
+  description?: string | null;
+  lengthMinutes?: number;
+  location?: { kind: string; detail?: string | null } | null;
+  bookingFields?: BookingField[];
 }) {
   const props = useMemo(
-    () => previewFlowProps({ hostName, avatarUrl, eventTitle, locale, logoUrl }),
-    [hostName, avatarUrl, eventTitle, locale, logoUrl],
+    () =>
+      previewFlowProps({
+        hostName,
+        avatarUrl,
+        eventTitle,
+        locale,
+        logoUrl,
+        description,
+        lengthMinutes,
+        location,
+        bookingFields: bookingFields ?? [],
+      }),
+    [hostName, avatarUrl, eventTitle, locale, logoUrl, description, lengthMinutes, location, bookingFields],
   );
   const flow = <BookingFlow {...props} />;
   return (

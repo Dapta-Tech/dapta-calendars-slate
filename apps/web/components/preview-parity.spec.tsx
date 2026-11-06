@@ -339,3 +339,43 @@ describe('the brand kit preview renders what a page wearing the kit renders', ()
     expect(alone).not.toContain('bp-cover');
   });
 });
+
+describe('the event editor preview renders the event draft as the public page does', () => {
+  const EVENT = {
+    ...SAMPLE,
+    eventTitle: 'Discovery call',
+    description: 'Thirty minutes to see whether we fit.',
+    lengthMinutes: 45,
+    location: { kind: 'phone', detail: '+57 300 000 0000' },
+    bookingFields: [{ name: 'company', label: 'Company', type: 'text' as const, required: true }],
+  };
+
+  it('same page markup for the same draft, and the draft is on it', () => {
+    const preview = parse(
+      renderToStaticMarkup(
+        <PreviewFrame accent={ACCENT} axes={BASE as never} device="desktop" wide>
+          <BookingPreview {...EVENT} device="desktop" />
+        </PreviewFrame>,
+      ),
+    );
+    const live = parse(
+      renderToStaticMarkup(
+        <BrandedShell brandColor={ACCENT} style={BASE}>
+          <main>
+            <BookingFlow {...previewFlowProps(EVENT)} />
+          </main>
+        </BrandedShell>,
+      ),
+    );
+    expect(page(preview)).toBe(page(live));
+    const text = preview.body.textContent ?? '';
+    expect(text).toContain('Discovery call');
+    expect(text).toContain('Thirty minutes to see whether we fit.');
+    expect(text).toContain('45');
+  });
+
+  it('without draft fields, the studio sample is unchanged', () => {
+    const before = previewFlowProps(SAMPLE);
+    expect(before).toMatchObject({ lengthMinutes: 30, location: null, bookingFields: [], description: null });
+  });
+});

@@ -11,11 +11,20 @@ import {
   normalizeEventTracking,
   type BookingUtm,
   type CrmPropertyMappings,
+  type EventCustomHours,
   type EventTracking,
   type SuccessRedirectData,
 } from '@slate/types';
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
+import {
+  clearEventCustomHoursSql,
+  deleteEventCustomHoursSql,
+  getEventCustomHours,
+  getEventCustomHoursMany,
+  runAtomically,
+  setEventCustomHoursSql,
+} from './event-custom-hours';
 import {
   defaultEventReminders,
   effectiveReminders,
@@ -52,7 +61,12 @@ export interface EventTypeView {
   lengthMinutes: number;
   /** Normalized from `event_type.locations`, which may still hold legacy text. */
   location: EventLocation | null;
+  /** A REUSABLE schedule this event follows; null ⇒ the host's working hours,
+   *  or custom hours when `customHours` is set (their schedule is private and
+   *  never surfaces here). */
   scheduleId: string | null;
+  /** Weekly hours private to this event; null ⇒ it follows `scheduleId`. */
+  customHours: EventCustomHours | null;
   hidden: boolean;
   schedulingType: string | null;
   /** Round robin only: 'availability' (NULL) or 'equal'. */
@@ -152,13 +166,23 @@ function redirectUrlOrNull(url: string | null | undefined): string | null {
   return url?.trim() || null;
 }
 
-async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
+/**
+ * `customHours`: already read for this row (a list reads them in one batch,
+ * `getEventCustomHoursMany`); undefined reads them here.
+ */
+async function toEventTypeView(
+  db: Db,
+  r: EventTypeDbRow,
+  prefetched?: EventCustomHours | null,
+): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
     sql`SELECT member_id, is_fixed, priority, weight FROM event_type_host WHERE event_type_id = ${r.id}`,
   );
   const conflictCalendars = await db.all<{ connected_calendar_id: string }>(
     sql`SELECT connected_calendar_id FROM event_type_conflict_calendar WHERE event_type_id = ${r.id}`,
   );
+  const customHours =
+    prefetched !== undefined ? prefetched : r.schedule_id ? await getEventCustomHours(db, r.id) : null;
   return {
     id: r.id,
     memberId: r.member_id,
@@ -168,7 +192,8 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     description: r.description,
     lengthMinutes: r.length_minutes,
     location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
-    scheduleId: r.schedule_id,
+    scheduleId: customHours ? null : r.schedule_id,
+    customHours,
     hidden: !!r.hidden,
     schedulingType: r.scheduling_type,
     rrDistribution: r.rr_distribution,
@@ -263,7 +288,11 @@ export async function listEventTypes(
   const rows = await db.all<EventTypeDbRow>(
     sql`SELECT ${ET_COLS} FROM event_type WHERE ${where} ORDER BY created_at ASC`,
   );
-  return Promise.all(rows.map((r) => toEventTypeView(db, r)));
+  const hours = await getEventCustomHoursMany(
+    db,
+    rows.filter((r) => r.schedule_id).map((r) => r.id),
+  );
+  return Promise.all(rows.map((r) => toEventTypeView(db, r, hours.get(r.id) ?? null)));
 }
 
 export async function getEventTypeById(
@@ -285,6 +314,10 @@ export interface EventTypeInputRepo {
   /** The kind object, or a legacy free-text string — both are normalized on write. */
   location?: EventLocationInput | string | null;
   scheduleId?: string | null;
+  /** Personal events only. UNDEFINED ⇒ the availability source is unchanged;
+   *  an object ⇒ the event uses these hours; null ⇒ it stops using custom hours
+   *  (follows `scheduleId`) and they are deleted. Validated by the API. */
+  customHours?: EventCustomHours | null;
   hidden?: boolean;
   schedulingType?: string | null;
   rrDistribution?: string | null;
@@ -361,8 +394,7 @@ export async function createEventType(
   const destinationCalendarId = ownerMemberId
     ? await ownedDestinationCalendarId(db, ownerMemberId, input.destinationCalendarId)
     : null;
-  await db.run(
-    sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
+  const insert = sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
           length_minutes, locations, schedule_id, hidden, scheduling_type, rr_distribution, booking_fields, reminders,
           minimum_booking_notice, booking_window_days, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
@@ -382,8 +414,17 @@ export async function createEventType(
           ${templateOrNull(input.calendarTitleTemplate)}, ${templateOrNull(input.calendarDescriptionTemplate)},
           ${redirectUrlOrNull(input.successRedirectUrl)},
           ${redirectUrlOrNull(input.successRedirectUrl) ? redirectDataOrNull(input.successRedirectData) : null},
-          ${jsonParam(db, normalizeEventTracking(input.tracking ?? null))}, ${now})`,
-  );
+          ${jsonParam(db, normalizeEventTracking(input.tracking ?? null))}, ${now})`;
+  // An event created with custom hours is written with them in ONE transaction:
+  // it never exists, even for a moment, without the hours it was created with.
+  if (ownerMemberId && input.customHours) {
+    await runAtomically(db, [
+      insert,
+      ...setEventCustomHoursSql({ accountId, memberId: ownerMemberId, eventTypeId: id, hours: input.customHours }),
+    ]);
+  } else {
+    await db.run(insert);
+  }
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
   if (ownerMemberId && input.conflictCalendarIds) {
@@ -457,10 +498,30 @@ export async function updateEventType(
     set('destination_calendar_id', sql`${validated}`);
   }
 
+  // Leaving custom hours — explicitly (`customHours: null`), or by a client
+  // that picks a schedule without knowing about custom hours — deletes them.
+  // Every write about the event's hours and the event's own fields runs in ONE
+  // transaction, so a save lands whole or not at all: no event left pointing
+  // at deleted hours, none with new fields and old hours.
+  const leavesCustomHours =
+    isPersonal &&
+    existing.customHours !== null &&
+    (input.customHours === null || (input.customHours === undefined && input.scheduleId !== undefined));
+  const writes: ReturnType<typeof sql>[] = [];
+  if (leavesCustomHours) {
+    writes.push(...clearEventCustomHoursSql({ accountId, eventTypeId: id, scheduleId: input.scheduleId ?? null }));
+  }
   if (sets.length > 0) {
     const assign = sets.reduce((a, c, i) => (i === 0 ? c : sql`${a}, ${c}`));
-    await db.run(sql`UPDATE event_type SET ${assign} WHERE account_id = ${accountId} AND id = ${id}`);
+    writes.push(sql`UPDATE event_type SET ${assign} WHERE account_id = ${accountId} AND id = ${id}`);
   }
+  if (isPersonal && input.customHours) {
+    writes.push(
+      ...setEventCustomHoursSql({ accountId, memberId: existing.memberId!, eventTypeId: id, hours: input.customHours }),
+    );
+  }
+  if (writes.length === 1) await db.run(writes[0]!);
+  else if (writes.length > 1) await runAtomically(db, writes);
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
   if (isPersonal && input.conflictCalendarIds !== undefined) {
@@ -539,9 +600,14 @@ export async function deleteEventType(db: Db, accountId: string, id: string): Pr
     sql`SELECT id FROM event_type WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
   );
   if (!owned) return true;
-  await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${id}`);
-  await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE event_type_id = ${id}`);
-  await db.run(sql`DELETE FROM event_type WHERE account_id = ${accountId} AND id = ${id}`);
+  // One transaction: the event never survives without the custom hours it
+  // pointed at, and its hours never outlive it.
+  await runAtomically(db, [
+    ...deleteEventCustomHoursSql(id),
+    sql`DELETE FROM event_type_host WHERE event_type_id = ${id}`,
+    sql`DELETE FROM event_type_conflict_calendar WHERE event_type_id = ${id}`,
+    sql`DELETE FROM event_type WHERE account_id = ${accountId} AND id = ${id}`,
+  ]);
   return true;
 }
 
@@ -600,15 +666,30 @@ export interface ScheduleView {
   rules: Array<{ id: string; days: number[] | null; startTime: string; endTime: string; date: string | null }>;
 }
 
-export async function listSchedules(db: Db, memberId: string): Promise<{ id: string; name: string; timeZone: string }[]> {
-  return db.all<{ id: string; name: string; timeZone: string }>(
-    sql`SELECT id, name, time_zone AS "timeZone" FROM schedule WHERE member_id = ${memberId} ORDER BY created_at ASC`,
+/**
+ * The member's REUSABLE schedules. An event type's private custom hours (a
+ * schedule with `event_type_id` set) are never listed: they are not the
+ * Availability page's to show, nor another event's to pick.
+ */
+export async function listSchedules(
+  db: Db,
+  memberId: string,
+): Promise<{ id: string; name: string; timeZone: string; isDefault: boolean }[]> {
+  const rows = await db.all<{ id: string; name: string; timeZone: string; is_default: number | boolean | null }>(
+    sql`SELECT s.id, s.name, s.time_zone AS "timeZone",
+               CASE WHEN m.default_schedule_id = s.id THEN 1 ELSE 0 END AS is_default
+        FROM schedule s LEFT JOIN member m ON m.id = s.member_id
+        WHERE s.member_id = ${memberId} AND s.event_type_id IS NULL ORDER BY s.created_at ASC`,
   );
+  // `isDefault`: the member's working hours, what "use my default schedule" means.
+  return rows.map((r) => ({ id: r.id, name: r.name, timeZone: r.timeZone, isDefault: Number(r.is_default) === 1 }));
 }
 
+/** A REUSABLE schedule; an event's private custom hours read as not found (see `listSchedules`). */
 export async function getSchedule(db: Db, accountId: string, id: string): Promise<ScheduleView | null> {
   const s = await db.get<{ id: string; member_id: string; name: string; time_zone: string }>(
-    sql`SELECT id, member_id, name, time_zone FROM schedule WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
+    sql`SELECT id, member_id, name, time_zone FROM schedule
+        WHERE account_id = ${accountId} AND id = ${id} AND event_type_id IS NULL LIMIT 1`,
   );
   if (!s) return null;
   const rules = await db.all<{ id: string; days: string | null; start_time: string; end_time: string; date: string | null }>(
@@ -728,7 +809,8 @@ export async function deleteSchedule(db: Db, accountId: string, id: string): Pro
   // Ownership check first — it also gates the reference re-pointing below so a
   // cross-tenant id can never touch another account's rows.
   const sched = await db.get<{ member_id: string }>(
-    sql`SELECT member_id FROM schedule WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
+    sql`SELECT member_id FROM schedule
+        WHERE account_id = ${accountId} AND id = ${id} AND event_type_id IS NULL LIMIT 1`,
   );
   if (!sched) return;
 
@@ -741,7 +823,7 @@ export async function deleteSchedule(db: Db, accountId: string, id: string): Pro
   );
   await db.run(sql`UPDATE event_type_host SET schedule_id = NULL WHERE schedule_id = ${id}`);
   const fallback = await db.get<{ id: string }>(
-    sql`SELECT id FROM schedule WHERE member_id = ${sched.member_id} AND id <> ${id}
+    sql`SELECT id FROM schedule WHERE member_id = ${sched.member_id} AND id <> ${id} AND event_type_id IS NULL
         ORDER BY created_at ASC, id ASC LIMIT 1`,
   );
   await db.run(

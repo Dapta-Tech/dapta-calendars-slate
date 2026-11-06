@@ -8,13 +8,22 @@ import type {
   CrmPropertyMappings,
   EventLocationDto,
   EventReminder,
+  EventCustomHours,
   EventTracking,
   OneOffLinkView,
   SuccessRedirectData,
 } from '@slate/types';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, ApiError } from '@/lib/admin-api';
 
-export type ActionResult = { ok: boolean; message?: string };
+export type ActionResult = {
+  ok: boolean;
+  message?: string;
+  /** The API's error code (`SLUG_TAKEN`, `INVALID_TEMPLATE`, …), so the editor
+   *  can point at the field the refusal is about. */
+  code?: string;
+  /** `INVALID_TEMPLATE` only: which reminder field each issue is in. */
+  issues?: Array<{ field: string; reminderId?: string; message?: string }>;
+};
 
 export interface EventTypePayload {
   id?: string;
@@ -36,7 +45,11 @@ export interface EventTypePayload {
    *  event. Travels on CREATE and EDIT, personal and team events alike. */
   preventDuplicateBookings: boolean;
   hidden: boolean;
-  scheduleId: string | null;
+  /** Omitted when `customHours` is sent: the API takes one source or the other. */
+  scheduleId?: string | null;
+  /** Personal events: the event's own hours (an object), or null to stop
+   *  using them. Omitted ⇒ the API leaves the availability source alone. */
+  customHours?: EventCustomHours | null;
   bookingFields: Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>;
   /** Reminders + follow-up owned by this event (#68). An empty array is a
    *  deliberate "no reminders", never a reset to the shipped defaults. */
@@ -59,6 +72,9 @@ export interface EventTypePayload {
   successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page; null clears every id. */
   tracking?: EventTracking | null;
+  /** The calendar event's title and description, as templates; null ⇒ none. */
+  calendarTitleTemplate?: string | null;
+  calendarDescriptionTemplate?: string | null;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {
@@ -73,6 +89,19 @@ export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionRe
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
+    if (e instanceof ApiError) {
+      const raw = e.details?.issues;
+      const issues = Array.isArray(raw)
+        ? raw
+            .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object')
+            .map((i) => ({
+              field: String(i.field ?? ''),
+              ...(typeof i.reminderId === 'string' ? { reminderId: i.reminderId } : {}),
+              ...(typeof i.message === 'string' ? { message: i.message } : {}),
+            }))
+        : undefined;
+      return { ok: false, message: e.message, ...(e.code ? { code: e.code } : {}), ...(issues ? { issues } : {}) };
+    }
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }
@@ -187,6 +216,32 @@ export async function revokeOneOffLinkAction(
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
+/** What the editor sends to preview one reminder: its unsaved copy and the event's draft facts. */
+export interface ReminderPreviewPayload {
+  kind: 'reminder' | 'follow_up';
+  leadMinutes: number;
+  subject: string | null;
+  body: string | null;
+  title: string;
+  description?: string | null;
+  lengthMinutes: number;
+  location?: EventLocationDto | null;
+  questions?: Array<{ name: string; label: string }>;
+}
+
+/** The reminder email as the invitee would receive it, rendered by the API's own email builders. */
+export async function previewReminderAction(
+  p: ReminderPreviewPayload,
+): Promise<{ ok: true; from: string | null; to: string; subject: string; html: string } | { ok: false; message: string }> {
+  try {
+    const r = await adminApi.previewReminder(p);
+    return { ok: true, from: r.from, to: r.to, subject: r.subject, html: r.html };
+  } catch (e) {
+    unstable_rethrow(e);
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }

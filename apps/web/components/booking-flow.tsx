@@ -163,6 +163,12 @@ interface Props {
    * picture that must render the same on the server and after hydration.
    */
   followBrowserZone?: boolean;
+  /**
+   * A host previewing their own event (the editor's eye button): the page is
+   * fully clickable, but picking a time holds nothing and a valid submit books
+   * nothing; it shows this text instead. Absent on every public page.
+   */
+  previewNotice?: string;
 }
 
 /**
@@ -225,6 +231,7 @@ export function BookingFlow({
   utm = null,
   showBranding,
   followBrowserZone = true,
+  previewNotice,
 }: Props) {
   const messages = getMessages(locale);
   const m = messages.booking;
@@ -297,6 +304,8 @@ export function BookingFlow({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
+  /** Preview only: a valid submit was made, and booked nothing. */
+  const [previewSubmitted, setPreviewSubmitted] = useState(false);
 
   /** The half of "choose a time" a phone is on. The two-pane layout shows both. */
   const [step, setStep] = useState<'calendar' | 'times'>('calendar');
@@ -605,6 +614,8 @@ export function BookingFlow({
     // Group events (capacity > 1) fill seats on ONE booking; a per-person hold
     // would blank the whole slot, so skip the hold for group slots.
     if ((slot.capacity ?? 1) > 1) return;
+    // A host's preview holds nothing: the time stays open to real invitees.
+    if (previewNotice) return;
     const reserving = reserveAction({ accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc }, oneOffToken);
     pendingReserve.current = reserving;
     const r = await reserving;
@@ -1022,6 +1033,13 @@ export function BookingFlow({
               // Client-side gate: block the submit (and the field wipe it used
               // to cause) instead of round-tripping a guaranteed 400.
               onSubmit={(e) => {
+                if (previewNotice) {
+                  // A preview books nothing: the form is checked like a real
+                  // one, then says it was only a preview.
+                  e.preventDefault();
+                  if (validateAll()) setPreviewSubmitted(true);
+                  return;
+                }
                 if (!validateAll()) e.preventDefault();
                 else {
                   submittedHold.current = hold?.uid ?? null;
@@ -1184,6 +1202,12 @@ export function BookingFlow({
               {submitTrouble && !pending ? (
                 <p role="alert" className="bp-error">
                   {submitTrouble}
+                </p>
+              ) : null}
+
+              {previewNotice && previewSubmitted ? (
+                <p role="status" data-testid="bp-preview-notice" className="bp-muted">
+                  {previewNotice}
                 </p>
               ) : null}
 

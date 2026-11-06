@@ -850,6 +850,80 @@ export class EmailEffects {
     };
   }
 
+  /**
+   * A reminder or follow-up of an event type as an invitee would receive it:
+   * the real subject (the host's copy, or the shipped default when blank), the
+   * plain text, and the branded HTML with this deployment's footer — rendered
+   * by the notifier's own builders, never sent. The booking is a SAMPLE (an
+   * invitee called Sam Taylor, tomorrow at 15:00 UTC) around the host's real
+   * name, workspace and language, so nothing about a real booking is read.
+   */
+  async previewReminder(
+    principal: { accountId: string; memberId: string },
+    input: ReminderPreviewInput,
+  ): Promise<{ from: string | null; to: string; subject: string; text: string; html: string }> {
+    const who = await this.db.get<{
+      display_name: string | null;
+      email: string | null;
+      time_zone: string | null;
+      locale: string | null;
+      code: string;
+      name: string | null;
+    }>(
+      sql`SELECT m.display_name, m.email, m.time_zone, m.locale, a.code, a.name
+          FROM member m JOIN account a ON a.id = m.account_id
+          WHERE m.id = ${principal.memberId} AND m.account_id = ${principal.accountId} LIMIT 1`,
+    );
+    const locale: 'en' | 'es' = who?.locale === 'es' ? 'es' : 'en';
+    const zone = who?.time_zone || 'UTC';
+    const start = new Date(Date.now() + 86_400_000);
+    start.setUTCHours(15, 0, 0, 0);
+    const end = new Date(start.getTime() + input.lengthMinutes * 60_000);
+    const kind = input.location?.kind ?? null;
+    const base = this.env ? publicBookingBase(this.env) : '';
+    const template = resolveTemplate(
+      input.kind === 'reminder' ? 'attendee_reminder' : 'follow_up',
+      { subject: input.subject, body: input.body },
+      locale,
+    );
+    const n: BookingNotification & { reminderLeadMinutes?: number } = {
+      accountId: principal.accountId,
+      uid: 'preview',
+      title: input.title,
+      eventName: input.title,
+      eventDescription: input.description ?? null,
+      workspaceName: who?.name ?? null,
+      teamName: null,
+      startUtc: start.toISOString(),
+      endUtc: end.toISOString(),
+      host: { name: who?.display_name ?? null, email: who?.email ?? null, timeZone: zone },
+      coHosts: [],
+      attendee: { name: 'Sam Taylor', email: 'sam@example.com', timeZone: zone },
+      location: formatBookingLocation(kind, input.location?.detail ?? null, getMessages(locale)),
+      locationKind: kind,
+      meetingUrl: kind === 'conferencing' ? 'https://meet.example.com/abc-defg-hij' : null,
+      manageUrl: `${base}/booking/preview`,
+      cancellationReason: null,
+      previousStartUtc: null,
+      accountCode: who?.code ?? null,
+      bookingLink: null,
+      audience: 'attendee',
+      template,
+      templateLocale: locale,
+      pending: false,
+      formAnswers: Object.fromEntries((input.questions ?? []).map((q) => [q.name, q.label])),
+      showBranding: await this.gate.showBranding(principal.accountId),
+      reminderLeadMinutes: input.leadMinutes,
+      stamp: new Date().toISOString(),
+    };
+    const r = this.notifier.previewReminder(n, input.kind);
+    // The sender the transport stamps on every booking email, when configured.
+    const fromEmail = this.env?.MAIL_FROM_EMAIL?.trim();
+    const fromName = this.env?.MAIL_FROM_NAME?.trim();
+    const from = fromEmail ? (fromName ? `${fromName} <${fromEmail}>` : fromEmail) : null;
+    return { from, to: `${n.attendee.name} <${n.attendee.email}>`, subject: r.subject, text: r.text, html: r.html };
+  }
+
   private toNotification(
     ctx: BookingNotificationContext,
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null; icsSequence?: number },
@@ -1112,4 +1186,18 @@ export class EmailEffects {
         throw new Error(`unknown email kind: ${kind}`);
     }
   }
+}
+
+/** What the event editor sends to preview one reminder (see `previewReminder`). */
+export interface ReminderPreviewInput {
+  kind: 'reminder' | 'follow_up';
+  leadMinutes: number;
+  subject: string | null;
+  body: string | null;
+  title: string;
+  description?: string | null;
+  lengthMinutes: number;
+  location?: { kind: string; detail?: string | null } | null;
+  /** The event's questions: `{{form.<name>}}` previews as the question's label. */
+  questions?: Array<{ name: string; label: string }>;
 }

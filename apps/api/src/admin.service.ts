@@ -212,7 +212,7 @@ export class AdminService {
     if (schedules.length > 0) {
       const rule = await this.db.get<{ n: number }>(
         sql`SELECT COUNT(*) AS n FROM availability WHERE schedule_id IN (
-              SELECT id FROM schedule WHERE member_id = ${p.memberId}
+              SELECT id FROM schedule WHERE member_id = ${p.memberId} AND event_type_id IS NULL
             )`,
       );
       hasWorkingHours = Number(rule?.n ?? 0) > 0;

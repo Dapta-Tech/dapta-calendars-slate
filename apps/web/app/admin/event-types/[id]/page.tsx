@@ -4,6 +4,8 @@ import type { CrmPropertyCatalog } from '@slate/types';
 import { adminApi, ApiError, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventRowActions } from '../event-row-actions';
+import { signInMcpUrl } from '@/lib/mcp-config';
+import { loadWorkingHours } from '@/lib/event-preview';
 import { EventTypeForm } from '../event-type-form';
 
 export const dynamic = 'force-dynamic';
@@ -67,9 +69,15 @@ export default async function EditEventType({
     }
   }
 
+  // The working hours the availability section shows and custom hours start
+  // from. A failed read costs that summary, never the page.
+  const workingHours = await loadWorkingHours(schedules).catch(() => null);
+
   return (
     <div className="mx-auto max-w-4xl px-gutter sm:px-gutter-wide pb-gutter-y">
       <EventTypeForm
+        workingHours={workingHours}
+        mcpUrl={signInMcpUrl()}
         initial={et}
         schedules={schedules}
         messages={m}

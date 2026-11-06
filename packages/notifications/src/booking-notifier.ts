@@ -330,22 +330,8 @@ export class BookingNotifier {
    * `reminderLeadMinutes` so the copy can say "starts in X".
    */
   sendReminder(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, recipientTimeZone(n));
     const lead = n.reminderLeadMinutes;
-    const inWord =
-      lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
-    const rendered = this.copy(n, 'reminder', () => ({
-      subject: `Reminder: ${n.title} — ${when}`,
-      lines: [
-        `Hi ${n.attendee.name},`,
-        ``,
-        `Reminder: "${n.title}" starts ${inWord}.`,
-        `When: ${when}`,
-        n.host.name ? `Host: ${n.host.name}` : '',
-        n.location ? `Where: ${n.location}` : '',
-        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
-      ],
-    }));
+    const rendered = this.reminderCopy(n);
     return this.email.send({
       accountId: n.accountId,
       to: this.recipients(n),
@@ -361,21 +347,43 @@ export class BookingNotifier {
   }
 
   /**
+   * A reminder or follow-up exactly as it would be sent (subject, plain text
+   * and the branded HTML, with this deployment's footer), WITHOUT sending it:
+   * what the event editor previews. The same builders the send paths use.
+   */
+  previewReminder(
+    n: BookingNotification & { reminderLeadMinutes?: number },
+    kind: 'reminder' | 'follow_up',
+  ): RenderedEmail {
+    return kind === 'reminder' ? this.reminderCopy(n) : this.followUpCopy(n);
+  }
+
+  private reminderCopy(n: BookingNotification & { reminderLeadMinutes?: number }): RenderedEmail {
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
+    const lead = n.reminderLeadMinutes;
+    const inWord =
+      lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
+    return this.copy(n, 'reminder', () => ({
+      subject: `Reminder: ${n.title} — ${when}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Reminder: "${n.title}" starts ${inWord}.`,
+        `When: ${when}`,
+        n.host.name ? `Host: ${n.host.name}` : '',
+        n.location ? `Where: ${n.location}` : '',
+        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
+      ],
+    }));
+  }
+
+  /**
    * Post-meeting FOLLOW-UP (thank-you) — scheduled at end + lead, attendee
    * side, strictly opt-in (default OFF). No .ics: the meeting already
    * happened; this is a courtesy note with a book-again link.
    */
   sendFollowUp(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, recipientTimeZone(n));
-    const rendered = this.copy(n, 'follow_up', () => ({
-      subject: `Thanks for meeting — ${n.title}`,
-      lines: [
-        `Hi ${n.attendee.name},`,
-        ``,
-        `Thanks for taking the time for "${n.title}" (${when}) — we hope it was useful.`,
-        n.bookingLink ? `Want to talk again? Book another slot: ${n.bookingLink}` : '',
-      ],
-    }));
+    const rendered = this.followUpCopy(n);
     return this.email.send({
       accountId: n.accountId,
       to: this.recipients(n),
@@ -389,6 +397,19 @@ export class BookingNotifier {
       idempotencyKey: this.idem(n, `calendar:${n.uid}:follow_up:${n.reminderLeadMinutes ?? 'x'}`),
       // No .ics on a follow-up.
     });
+  }
+
+  private followUpCopy(n: BookingNotification & { reminderLeadMinutes?: number }): RenderedEmail {
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
+    return this.copy(n, 'follow_up', () => ({
+      subject: `Thanks for meeting — ${n.title}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Thanks for taking the time for "${n.title}" (${when}) — we hope it was useful.`,
+        n.bookingLink ? `Want to talk again? Book another slot: ${n.bookingLink}` : '',
+      ],
+    }));
   }
 
   /**
