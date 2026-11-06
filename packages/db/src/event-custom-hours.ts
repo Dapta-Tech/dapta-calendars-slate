@@ -155,11 +155,6 @@ export function deleteEventCustomHoursSql(eventTypeId: string): SQL[] {
   return deleteOwnedSql(eventTypeId);
 }
 
-/** Delete an event's custom hours. */
-export async function deleteEventCustomHours(db: Db, eventTypeId: string): Promise<void> {
-  await runAtomically(db, deleteOwnedSql(eventTypeId));
-}
-
 /**
  * Whether an event may follow this schedule: a REUSABLE schedule of the same
  * account and, for a personal event, of the event's own member. Another
