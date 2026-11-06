@@ -110,6 +110,17 @@ import { EntitlementGate } from './entitlement-gate';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 import { publicBookingBase } from './booking-origin';
 
+/**
+ * The calendar backend's subject for an account a member connects:
+ * `${iamUserId}-${email}`, with the address trimmed and lower-cased. Subjects
+ * are case-sensitive there, so "Jose@x.com" and "jose@x.com" were two
+ * identities and a connect typed with a capital never saw the account the
+ * person already had (BUGS-2734).
+ */
+export function connectSubject(iamUserId: string, email: string): string {
+  return `${iamUserId}-${email.trim().toLowerCase()}`;
+}
+
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
 @Injectable()
 export class AdminService {
@@ -201,7 +212,7 @@ export class AdminService {
     if (schedules.length > 0) {
       const rule = await this.db.get<{ n: number }>(
         sql`SELECT COUNT(*) AS n FROM availability WHERE schedule_id IN (
-              SELECT id FROM schedule WHERE member_id = ${p.memberId}
+              SELECT id FROM schedule WHERE member_id = ${p.memberId} AND event_type_id IS NULL
             )`,
       );
       hasWorkingHours = Number(rule?.n ?? 0) > 0;
@@ -638,8 +649,10 @@ export class AdminService {
               await setConnectionPrimaryEmail(this.db, p.memberId, c.id, email);
               c.primaryEmail = email;
             }
-          } catch {
-            /* best-effort — leave null */
+          } catch (err) {
+            // Best-effort: the row stays "account unknown". Logged, because
+            // otherwise nothing shows that every page load keeps failing.
+            new Logger(AdminService.name).warn(`connection email backfill failed: ${failureCause(err)}`);
           }
         }),
       );
@@ -735,7 +748,7 @@ export class AdminService {
     }
     const identity = await getMemberIdentity(this.db, p.memberId);
     const iamUserId = identity?.iamUserId ?? p.memberId;
-    const subject = email ? `${iamUserId}-${email}` : iamUserId;
+    const subject = email ? connectSubject(iamUserId, email) : iamUserId;
     let start: Awaited<ReturnType<typeof connector.startConnect>>;
     try {
       start = await connector.startConnect(provider, subject);
@@ -802,12 +815,25 @@ export class AdminService {
     //   - the member's own login email (surfaces a calendar connected elsewhere
     //     in Dapta under the same identity — e.g. the main app),
     //   - the bare `iamUserId` (legacy pre-per-email connections).
+    // Subjects are case-sensitive on the backend. A connect now starts under the
+    // lower-case address (`connectSubject`), but accounts connected before that
+    // live under the address exactly as it was typed, so both forms are asked.
     const subjects = new Set<string>();
-    if (email) subjects.add(`${iamUserId}-${email}`);
-    if (identity?.email) subjects.add(`${iamUserId}-${identity.email}`);
+    for (const address of [email, identity?.email]) {
+      if (!address) continue;
+      subjects.add(`${iamUserId}-${address}`);
+      subjects.add(connectSubject(iamUserId, address));
+    }
     subjects.add(iamUserId);
     const perSubject = await Promise.all(
-      [...subjects].map((s) => connector.discoverConnections(s, provider).catch(() => [])),
+      [...subjects].map((s) =>
+        connector.discoverConnections(s, provider).catch((err: unknown) => {
+          // One subject failing must not hide the others' accounts, but it must
+          // not vanish either. Never the subject itself: it carries an address.
+          new Logger(AdminService.name).warn(`connection discovery failed for one subject: ${failureCause(err)}`);
+          return [];
+        }),
+      ),
     );
     const discoveredByRef = new Map<string, (typeof perSubject)[number][number]>();
     for (const conn of perSubject.flat()) discoveredByRef.set(conn.connectionRef, conn);
@@ -858,8 +884,9 @@ export class AdminService {
             calendars.find((c) => c.isPrimary)?.avatarUrl ??
             calendars.find((c) => c.avatarUrl)?.avatarUrl ??
             null;
-        } catch {
-          /* keep null */
+        } catch (err) {
+          // Keep null (a label-less connection still works), but say so.
+          new Logger(AdminService.name).warn(`connection email lookup failed on connect: ${failureCause(err)}`);
         }
       }
       await createConnection(this.db, {

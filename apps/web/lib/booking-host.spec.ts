@@ -40,7 +40,7 @@ const PUBLIC = [
 /** What every host serves as is. */
 const SHARED = ['/api/availability', '/_next/static/chunks/app.js', '/embed.js', '/favicon.ico', '/dapta-mark.png', '/robots.txt', '/mcp', '/.well-known/oauth-protected-resource'];
 /** The dashboard's. */
-const PRODUCT = ['/', '/admin', '/admin/event-types', '/login', '/onboarding', '/auth/join', '/api/auth/login', '/api/auth/logout'];
+const PRODUCT = ['/', '/admin', '/admin/event-types', '/preview/event', '/login', '/onboarding', '/auth/join', '/api/auth/login', '/api/auth/logout'];
 
 describe('configuration', () => {
   it('is off unless a booking origin other than the app’s is set', () => {
@@ -97,6 +97,16 @@ describe('the booking host', () => {
 });
 
 describe('the app host and older aliases', () => {
+  it('keeps the editor’s draft preview on the app host: it needs the session and the draft left there', () => {
+    for (const mode of [undefined, 'temporary', 'permanent']) {
+      expect(routeForHost(req('app.dcal.ai', '/preview/event', { search: '?k=abc&event=intro-call' }), env(mode))).toEqual({
+        kind: 'next',
+        bookingHost: false,
+      });
+    }
+    expect(isBookingPath('/preview/event')).toBe(false);
+  });
+
   it('step 1 (redirects off): still serves public pages, as before', () => {
     for (const [path, search] of PUBLIC) expect(routeForHost(req('app.dcal.ai', path, { search }), env())).toEqual({ kind: 'next', bookingHost: false });
   });

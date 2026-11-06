@@ -234,6 +234,24 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(health.detail).not.toContain('expired');
   });
 
+  it('logs a failed health check with operation and status, never the ref or the body', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const bad = makeProvider([{ status: 404, text: 'Action with key x not found for jose@example.com' }]);
+      expect((await bad.provider.checkConnection('conn-secret-ref')).ok).toBe(false);
+      const lines = warn.mock.calls.map((c) => String(c[0]));
+      expect(lines).toEqual(['connection health check failed: cause=CalendarHttpError op=checkConnection status=404']);
+      expect(lines.join('\n')).not.toMatch(/conn-secret-ref|jose@example\.com|not found/);
+
+      warn.mockClear();
+      const ok = makeProvider([{ json: { ok: true, detail: 'Connected' } }]);
+      expect((await ok.provider.checkConnection('conn-A')).ok).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('throws CalendarHttpError on a non-2xx write so the outbox retries', async () => {
     const { provider } = makeProvider([{ status: 503, text: 'upstream down' }]);
     await expect(

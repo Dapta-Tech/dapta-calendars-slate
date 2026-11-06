@@ -49,7 +49,7 @@ export const RESERVED_PUBLIC_SLUGS = new Set([
   'about', 'admin', 'api', 'app', 'apps', 'assets', 'auth', 'availability', 'billing', 'blog', 'booking',
   'bookings', 'calendar', 'calendars', 'connections', 'contact', 'dashboard', 'demo', 'dev',
   'docs', 'events', 'event-types', 'favicon', 'health', 'help', 'home', 'internal', 'login',
-  'logout', 'mail', 'manage', 'me', 'null', 'oauth', 'onboarding', 'pricing', 'privacy', 'public', 'reserved',
+  'logout', 'mail', 'manage', 'me', 'null', 'oauth', 'onboarding', 'preview', 'pricing', 'privacy', 'public', 'reserved',
   'robots', 'root', 'settings', 'signin', 'signup', 'sitemap', 'static', 'status', 'support',
   'team', 'teams', 'terms', 'test', 'undefined', 'v1', 'v2', 'webhooks', 'www',
 ]);

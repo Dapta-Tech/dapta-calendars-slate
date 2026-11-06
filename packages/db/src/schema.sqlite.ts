@@ -130,6 +130,8 @@ export const schedule = sqliteTable('schedule', {
   name: text('name').notNull(),
   timeZone: text('time_zone').notNull().default('UTC'),
   createdAt: integer('created_at').notNull(),
+  /** Set when the schedule is one event type's private custom hours; NULL = reusable. */
+  eventTypeId: text('event_type_id'),
 });
 
 export const availability = sqliteTable('availability', {

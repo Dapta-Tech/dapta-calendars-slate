@@ -1,9 +1,9 @@
 import { adminApi } from '@/lib/admin-api';
 import { connectedPhotoOf } from '@/lib/avatar';
 import { brandingShown } from '@/lib/growth';
-import { DEFAULT_ACCENT, defaultBranding, getMessages } from '@slate/shared';
+import { getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
-import { bookingCanvasOf } from '@/lib/booking-canvas';
+import { bookingLookOf } from '@/lib/booking-look';
 import { Studio } from './studio';
 import { StudioTabs } from './studio-tabs';
 import { hasBrandKit } from '@slate/types';
@@ -30,28 +30,11 @@ export default async function BookingPageSettings() {
   const t = msgs.admin;
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
-  // The literal used to live here. If DEFAULT_ACCENT ever moves, a hardcoded
-  // copy seeds the studio from a colour the public page would never render —
-  // preview != prod, one indirection out.
-  const accent = profile?.member.brandColor ?? DEFAULT_ACCENT;
+  // One derivation for every preview of the page and the page itself
+  // (`bookingLookOf`): an absent axis resolves exactly where the public page
+  // resolves it, so a config saved before an axis existed reads the same.
   const style = (profile?.member.style ?? {}) as Record<string, unknown>;
-  const def = defaultBranding(displayName);
-  const axes = {
-    template: (style.template as never) ?? def.template,
-    cardStyle: (style.cardStyle as never) ?? def.cardStyle,
-    corners: (style.corners as never) ?? def.corners,
-    buttons: (style.buttons as never) ?? def.buttons,
-    density: (style.density as never) ?? def.density,
-    font: (style.font as never) ?? def.font,
-    slotLayout: (style.slotLayout as never) ?? def.slotLayout,
-    dayGroup: (style.dayGroup as never) ?? def.dayGroup,
-    slotSelect: (style.slotSelect as never) ?? def.slotSelect,
-    // Through the resolver, never a literal at the call site: an absent axis
-    // resolves in exactly one place, and the studio has to agree with the public
-    // page about what a config saved before B2 renders as. The literal has moved
-    // once already (ADR 0004's amendment), which is the reason for the rule.
-    theme: bookingCanvasOf(style),
-  };
+  const { accent, axes } = bookingLookOf(style, profile?.member.brandColor, displayName);
 
   return (
     <div className="mx-auto max-w-6xl px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">

@@ -242,7 +242,10 @@
      saying "you can type here" (WCAG 1.4.11). */
   --border: rgba(255, 255, 255, 0.1);
   --input: rgba(255, 255, 255, 0.36);
-  --ring: #3ddc84;
+  /* The field focus halo: a soft wash of the signal, not a solid band. A
+     focused field also turns its edge `--primary`, which is what clears 3:1;
+     the halo only says where the focus is. */
+  --ring: rgb(61 220 132 / 0.35);
 
   /* Corner rounding. Controls 8, cards 16; the full ladder is in globals.css. */
   --radius: 0.5rem; /* 8px: buttons, inputs, selects, menu rows */
@@ -294,7 +297,7 @@
   --destructive-foreground: #ffffff;
   --border: #e6e6e8;
   --input: #8f8f96;
-  --ring: #1d9a55;
+  --ring: rgb(29 154 85 / 0.35);
 }
 
 /* The no-attribute fallback: whoever renders this sheet stamped no `data-theme`,
@@ -337,7 +340,7 @@
     --destructive-foreground: #ffffff;
     --border: #e6e6e8;
     --input: #8f8f96;
-    --ring: #1d9a55;
+    --ring: rgb(29 154 85 / 0.35);
   }
 }
 
