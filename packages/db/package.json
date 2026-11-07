@@ -26,7 +26,7 @@
     "@slate/types": "workspace:*",
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.38.2",
-    "postgres": "^3.4.5"
+    "postgres": "^4.0.0"
   },
   "devDependencies": {
     "@slate/config": "workspace:*",
