@@ -65,7 +65,8 @@ calendar (`create_event` does not email; it writes to the host's calendar, which
 invites the attendees). Descriptions and the server instructions say what a tool does and
 never give the model orders, as the Claude and ChatGPT connector directories
 require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
-exposed over MCP: webhooks, API keys, team administration, event-type edits.
+exposed over MCP: webhooks, API keys, team administration, event-type edits
+(see [Coverage of the dashboard API](#coverage-of-the-dashboard-api)).
 
 Output schemas are open: every object in them allows properties it does not
 list, and a value from a set (an event's `kind`, a team's `scheduling_type`)
@@ -87,6 +88,29 @@ team link, take theirs from the link.
 and `/v1/machine/bookings/:uid/cancel`) accept `bookings:cancel` **or**
 `bookings:write`, so existing keys keep working there; the MCP tool requires
 `bookings:cancel`.
+
+### Coverage of the dashboard API
+
+Every route of the signed-in dashboard API (`HostController` and
+`AdminCrudController`) is listed in `apps/api/src/api-reference.ts`, with its
+area, who may call it (`member`, `own`, `admin`, `owner`) and whether it is
+destructive. `apps/api/src/api-reference.spec.ts` reads the routes off the
+controllers the app registers and fails when the list and the app disagree, or
+when a route's `access` disagrees with the permission checks in its handler.
+
+`apps/api/src/mcp/parity.ts` maps each of those routes to the tool that does the
+same thing, or names why there is none:
+
+- `excluded`: decided against exposing it over MCP (the list above).
+- `dashboard-only`: it needs a person in the browser (a provider's sign-in, the
+  onboarding) or is kept for a person in the dashboard (handing over the account).
+- `not-yet`: no tool has been written. These are the work left to reach parity.
+
+`apps/api/src/mcp/mcp-parity.spec.ts` fails when a documented route has neither
+a tool nor an exclusion, when a tool's read, write and destructive marks disagree
+with its route, and when a tool for an owner or admin route does not say so in a
+fixed sentence ("Owners and admins only." or "The account owner only."). A new
+dashboard route therefore cannot ship without a decision about the MCP.
 
 ### Booking safely
 
