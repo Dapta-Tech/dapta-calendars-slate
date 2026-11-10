@@ -29,6 +29,11 @@ export const API_ROUTE_TOOLS: Readonly<Record<string, string>> = {
   'GET /v1/me/availability': 'find_available_slots',
 
   'GET /v1/event-types': 'list_event_types',
+  'GET /v1/event-types/:id': 'get_event_type',
+  'GET /v1/event-types/:id/one-off-links': 'list_one_off_links',
+
+  'GET /v1/schedules': 'list_schedules',
+  'GET /v1/schedules/:id': 'get_schedule',
 };
 
 /**
@@ -65,18 +70,14 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'POST /v1/me/workspaces/:accountId/accept': dashboardOnly("Joining another account is the person's own consent, given in the dashboard."),
 
   // Event types
-  'GET /v1/event-types/:id': notYet('No tool reads one event type with all its settings.'),
   'POST /v1/event-types': excluded(EVENT_TYPE_EDITS),
   'PATCH /v1/event-types/:id': excluded(EVENT_TYPE_EDITS),
   'DELETE /v1/event-types/:id': excluded(EVENT_TYPE_EDITS),
   'POST /v1/event-types/reminder-preview': notYet('No tool renders a reminder email.'),
-  'GET /v1/event-types/:id/one-off-links': notYet('No tool lists single-use links.'),
   'POST /v1/event-types/:id/one-off-links': notYet('No tool creates a single-use link.'),
   'DELETE /v1/event-types/:id/one-off-links/:linkId': notYet('No tool revokes a single-use link.'),
 
   // Schedules
-  'GET /v1/schedules': notYet('No tool lists schedules.'),
-  'GET /v1/schedules/:id': notYet('No tool reads a schedule.'),
   'POST /v1/schedules': notYet('No tool creates a schedule.'),
   'PATCH /v1/schedules/:id': notYet('No tool changes working hours.'),
   'DELETE /v1/schedules/:id': notYet('No tool deletes a schedule.'),

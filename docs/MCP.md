@@ -31,7 +31,7 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 
 ## Tools
 
-The `develop` branch exposes 19 tools. Use `tools/list` on your deployed endpoint
+The `develop` branch exposes 23 tools. Use `tools/list` on your deployed endpoint
 to see its actual catalog: a deployment stays on its released version until
 upgraded.
 
@@ -46,6 +46,10 @@ upgraded.
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
+| `get_event_type` | `event-types:read` | read | One event type with its editor settings: length, location, the hours it follows (schedule, working hours or custom hours), notice, window, buffers, confirmation, seats, questions, team hosts. Hidden ones included; respects the allowlist. |
+| `list_one_off_links` | `event-types:read` | read | The single-use links of one event type, newest first, each live, used (with its booking uid) or revoked. Respects the allowlist. |
+| `list_schedules` | `availability:read` | read | The account's reusable working-hours schedules, whose each is, its time zone and whether it is that person's default. |
+| `get_schedule` | `availability:read` | read | One schedule's weekly hours and its date-specific hours, wall-clock in its time zone. |
 | `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |

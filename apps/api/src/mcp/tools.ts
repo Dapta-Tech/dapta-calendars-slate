@@ -21,6 +21,9 @@ import {
   completeApiIdempotency,
   createHostEvent,
   getAccountByCode,
+  getEventTypeById,
+  getSchedule,
+  listOneOffLinks,
   hashApiValue,
   hostEventAttendees,
   loadDestinationConnectionRefs,
@@ -40,6 +43,7 @@ import { calendarFeatures } from '@slate/calendar';
 import {
   RECURRENCE_WEEKDAYS,
   localDateParts,
+  oneOffLinkPath,
   recurrenceProblem,
   seriesOccurrences,
   seriesWallClockToUtc,
@@ -1595,6 +1599,252 @@ const getLink: ToolDef = {
     if (!r) throw notFound('Event type');
     const url = pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
     return { data: { event_type_id: r.daptaId, title: untrusted(r.title, 200), booking_page_url: url }, summary: url };
+  },
+};
+
+// --- Setup reads: schedules, one event type, single-use links -----------------
+//
+// What the dashboard's Availability and event-type editor read, for an agent.
+// A key acts for the whole account, not one person, so these read across the
+// account the way list_bookings does; the event-type allowlist still applies.
+
+const weekdays = z.array(z.number()).describe('Weekdays, 0 = Sunday to 6 = Saturday.');
+
+const listSchedulesInput = z.object({});
+const listSchedules: ToolDef = {
+  name: 'list_schedules',
+  title: 'List working-hours schedules',
+  description:
+    "Lists the account's reusable working-hours schedules: whose each one is, its name, its time zone, and whether it is that person's default. An event type's private custom hours are not schedules and show in get_event_type instead. Needs scope availability:read. The ids work with get_schedule.",
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listSchedulesInput,
+  output: z.looseObject({
+    schedules: z.array(
+      z.looseObject({
+        id: z.string(),
+        name: z.string(),
+        time_zone: z.string(),
+        is_default: z.boolean().describe("True for the person's own working hours, what an event type follows when it names no schedule."),
+        member_id: z.string(),
+        member_name: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listSchedulesInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const rows = await deps.db.all<{
+      id: string;
+      name: string;
+      time_zone: string;
+      is_default: number | boolean | null;
+      member_id: string;
+      display_name: string | null;
+    }>(
+      sql`SELECT s.id, s.name, s.time_zone, s.member_id, m.display_name,
+                 CASE WHEN m.default_schedule_id = s.id THEN 1 ELSE 0 END AS is_default
+          FROM schedule s JOIN member m ON m.id = s.member_id
+          WHERE s.account_id = ${p.accountId} AND s.event_type_id IS NULL
+          ORDER BY m.created_at ASC, s.created_at ASC LIMIT 200`,
+    );
+    const schedules = rows.map((r) => ({
+      id: r.id,
+      name: untrusted(r.name, 120),
+      time_zone: r.time_zone,
+      is_default: Number(r.is_default) === 1,
+      member_id: r.member_id,
+      member_name: r.display_name ? untrusted(r.display_name, 120) : null,
+    }));
+    return {
+      data: { schedules, count: schedules.length },
+      summary: `${schedules.length} schedule(s): ${schedules
+        .slice(0, 10)
+        .map((s) => `${s.name}${s.member_name ? ` (${s.member_name})` : ''}`)
+        .join(', ')}.`,
+    };
+  },
+};
+
+const getScheduleInput = z.object({ schedule_id: z.string().min(1).max(64).describe('From list_schedules.') });
+const getScheduleTool: ToolDef = {
+  name: 'get_schedule',
+  title: 'Read one working-hours schedule',
+  description:
+    'Returns one schedule with its rules: the weekdays and hours it is open, and any date with its own hours. Times are wall-clock in the schedule\'s time zone. Needs scope availability:read.',
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getScheduleInput,
+  output: z.looseObject({
+    schedule: z.looseObject({
+      id: z.string(),
+      name: z.string(),
+      time_zone: z.string(),
+      member_id: z.string(),
+      weekly: z.array(z.looseObject({ days: weekdays, start: z.string(), end: z.string() })),
+      dates: z.array(z.looseObject({ date: z.string().describe('YYYY-MM-DD.'), start: z.string(), end: z.string() })),
+    }),
+  }),
+  async run(args: z.infer<typeof getScheduleInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const s = await getSchedule(deps.db, p.accountId, args.schedule_id);
+    if (!s) throw notFound('Schedule');
+    const weekly = s.rules.filter((r) => !r.date).map((r) => ({ days: r.days ?? [], start: r.startTime, end: r.endTime }));
+    const dates = s.rules
+      .filter((r): r is typeof r & { date: string } => Boolean(r.date))
+      .map((r) => ({ date: r.date, start: r.startTime, end: r.endTime }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
+    const name = untrusted(s.name, 120);
+    return {
+      data: { schedule: { id: s.id, name, time_zone: s.timeZone, member_id: s.memberId, weekly, dates } },
+      summary: `Schedule "${name}" (${s.timeZone}): ${weekly.length} weekly rule(s), ${dates.length} date rule(s).`,
+    };
+  },
+};
+
+const getEventTypeInput = z.object({ event_type_id: z.string().min(1).max(64).describe('From list_event_types.') });
+const getEventTypeTool: ToolDef = {
+  name: 'get_event_type',
+  title: 'Read one event type with its settings',
+  description:
+    "Returns one event type with the settings the dashboard's editor shows: length, location, which hours it follows (a schedule, the host's working hours, or its own custom hours), notice, booking window, buffers, slot interval, whether bookings wait for confirmation, seats, questions and, for a team event, its hosts. Hidden event types are included. Needs scope event-types:read and respects the key's event-type allowlist.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getEventTypeInput,
+  output: z.looseObject({
+    event_type: z.looseObject({
+      id: z.string(),
+      title: z.string(),
+      slug: z.string(),
+      description: z.string().nullable(),
+      kind: openEnum(['personal', 'team']),
+      member_id: z.string().nullable(),
+      team_id: z.string().nullable(),
+      duration_minutes: z.number(),
+      hidden: z.boolean(),
+      location: z.looseObject({ kind: z.string(), detail: z.string().nullable() }).nullable(),
+      schedule_id: z.string().nullable().describe("The schedule it follows. Null with no custom_hours: the host's working hours."),
+      custom_hours: z
+        .looseObject({ time_zone: z.string(), ranges: z.array(z.looseObject({ days: weekdays, start: z.string(), end: z.string() })) })
+        .nullable(),
+      scheduling_type: z.string().nullable(),
+      minimum_notice_minutes: z.number(),
+      booking_window_days: z.number().nullable().describe('How many days ahead it can be booked. Null: no limit.'),
+      buffer_before_minutes: z.number(),
+      buffer_after_minutes: z.number(),
+      slot_interval_minutes: z.number().nullable(),
+      requires_confirmation: z.boolean(),
+      prevent_duplicate_bookings: z.boolean(),
+      seats_per_slot: z.number().nullable(),
+      questions: z.array(
+        z.looseObject({ name: z.string(), label: z.string(), type: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }),
+      ),
+      hosts: z.array(
+        z.looseObject({ member_id: z.string(), is_fixed: z.boolean(), priority: z.number().nullable(), weight: z.number().nullable() }),
+      ),
+      booking_page_url: z.string().nullable().describe('Null for a hidden event type, which has no public page.'),
+    }),
+  }),
+  async run(args: z.infer<typeof getEventTypeInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    const et = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
+    if (!et) throw notFound('Event type');
+    let bookingPageUrl: string | null = null;
+    if (!et.hidden) {
+      const code = await canonicalCode(deps.db, p.accountId);
+      const r = (await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds)).find((x) => x.daptaId === et.id);
+      if (r) {
+        const kind = r.type === 'team' ? 'team' : 'personal';
+        bookingPageUrl = pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, kind, (kind === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
+      }
+    }
+    const title = untrusted(et.title, 200);
+    const event_type = {
+      id: et.id,
+      title,
+      slug: et.slug,
+      description: et.description ? untrusted(et.description, 2000) : null,
+      kind: (et.teamId ? 'team' : 'personal') as 'team' | 'personal',
+      member_id: et.memberId,
+      team_id: et.teamId,
+      duration_minutes: et.lengthMinutes,
+      hidden: et.hidden,
+      location: et.location ? { kind: et.location.kind, detail: et.location.detail ? untrusted(et.location.detail, 300) : null } : null,
+      schedule_id: et.scheduleId,
+      custom_hours: et.customHours
+        ? { time_zone: et.customHours.timeZone, ranges: et.customHours.ranges.map((r) => ({ days: r.days, start: r.start, end: r.end })) }
+        : null,
+      scheduling_type: et.schedulingType,
+      minimum_notice_minutes: et.minimumBookingNotice,
+      booking_window_days: et.bookingWindowDays,
+      buffer_before_minutes: et.beforeEventBuffer,
+      buffer_after_minutes: et.afterEventBuffer,
+      slot_interval_minutes: et.slotInterval,
+      requires_confirmation: et.requiresConfirmation,
+      prevent_duplicate_bookings: et.preventDuplicateBookings,
+      seats_per_slot: et.seatsPerTimeSlot,
+      questions: questionsOf(et.bookingFields),
+      hosts: et.hosts.map((h) => ({ member_id: h.memberId, is_fixed: h.isFixed, priority: h.priority, weight: h.weight })),
+      booking_page_url: bookingPageUrl,
+    };
+    return {
+      data: { event_type },
+      summary: `"${title}": ${et.lengthMinutes} min, ${event_type.kind}${et.hidden ? ', hidden' : ''}${et.requiresConfirmation ? ', needs confirmation' : ''}.`,
+    };
+  },
+};
+
+const listOneOffLinksInput = z.object({ event_type_id: z.string().min(1).max(64).describe('From list_event_types.') });
+const listOneOffLinksTool: ToolDef = {
+  name: 'list_one_off_links',
+  title: 'List the single-use links of an event type',
+  description:
+    'Lists the single-use booking links handed out for one event type, newest first: each link, whether it is still live, used (with the booking it made) or revoked, and when. A live link books the event type once, even when it is hidden. Needs scope event-types:read and respects the key\'s event-type allowlist.',
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listOneOffLinksInput,
+  output: z.looseObject({
+    links: z.array(
+      z.looseObject({
+        id: z.string(),
+        url: z.string(),
+        state: openEnum(['live', 'consumed', 'revoked']),
+        created_at: z.string(),
+        created_by_member_id: z.string().nullable(),
+        consumed_at: z.string().nullable(),
+        booking_uid: z.string().nullable().describe('The booking a used link made, for get_booking.'),
+        revoked_at: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof listOneOffLinksInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    const et = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
+    if (!et) throw notFound('Event type');
+    const base = (deps.publicBookingUrl ?? deps.publicAppUrl).replace(/\/+$/, '');
+    const iso = (ms: number | null) => (ms == null ? null : new Date(ms).toISOString());
+    const links = (await listOneOffLinks(deps.db, p.accountId, et.id)).slice(0, 100).map((l) => ({
+      id: l.id,
+      url: `${base}${oneOffLinkPath(l.token)}`,
+      state: l.state,
+      created_at: new Date(l.createdAt).toISOString(),
+      created_by_member_id: l.createdByMemberId,
+      consumed_at: iso(l.consumedAt),
+      booking_uid: l.consumedBookingUid,
+      revoked_at: iso(l.revokedAt),
+    }));
+    const live = links.filter((l) => l.state === 'live').length;
+    return {
+      data: { links, count: links.length },
+      summary: `${links.length} single-use link(s) for "${untrusted(et.title, 80)}", ${live} still live.`,
+    };
   },
 };
 
@@ -3242,6 +3492,10 @@ export const TOOLS: readonly ToolDef[] = [
   listMyAccounts,
   listEventTypes,
   getLink,
+  getEventTypeTool,
+  listOneOffLinksTool,
+  listSchedules,
+  getScheduleTool,
   listBookings,
   listPendingBookings,
   getBooking,

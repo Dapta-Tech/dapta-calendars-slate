@@ -39,7 +39,7 @@ async function firstSlot(client: Awaited<ReturnType<Harness['connect']>>, nth = 
 }
 
 describe('catalog', () => {
-  it('lists nineteen tools with titles, annotations and output schemas, in a stable order', async () => {
+  it('lists twenty-three tools with titles, annotations and output schemas, in a stable order', async () => {
     const client = await h.connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
@@ -52,6 +52,10 @@ describe('catalog', () => {
       'list_my_accounts',
       'list_event_types',
       'get_booking_page_link',
+      'get_event_type',
+      'list_one_off_links',
+      'list_schedules',
+      'get_schedule',
       'list_bookings',
       'list_pending_bookings',
       'get_booking',
@@ -509,6 +513,10 @@ describe('scope denial per tool', () => {
   const calls: [string, string, Record<string, unknown>][] = [
     ['list_event_types', 'event-types:read', {}],
     ['get_booking_page_link', 'event-types:read', { event_type_id: 'x' }],
+    ['get_event_type', 'event-types:read', { event_type_id: 'x' }],
+    ['list_one_off_links', 'event-types:read', { event_type_id: 'x' }],
+    ['list_schedules', 'availability:read', {}],
+    ['get_schedule', 'availability:read', { schedule_id: 'x' }],
     ['list_bookings', 'bookings:read', {}],
     ['get_booking', 'bookings:read', { booking_uid: 'x' }],
     [
