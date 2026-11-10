@@ -3,6 +3,7 @@ import { McpServer, createMcpHandler, type McpHttpHandler } from '@modelcontextp
 import type { Db } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { AdminService } from '../admin.service';
+import { CrmPropertyCatalogService } from '../crm-property-catalog';
 import { AnalyticsEffects } from '../analytics-effects';
 import { BookingService } from '../booking.service';
 import { CalendarEffects } from '../calendar-effects';
@@ -105,6 +106,8 @@ export class McpGateway {
     @Inject(CalendarEffects) calendar: CalendarEffects,
     // Product analytics: one `$mcp_tool_call` per tool call, only with a provider configured.
     @Optional() @Inject(AnalyticsEffects) analytics?: AnalyticsEffects,
+    // The CRM contact properties `list_crm_contact_properties` reads; absent, the CRM reads as disabled.
+    @Optional() @Inject(CrmPropertyCatalogService) crmProperties?: CrmPropertyCatalogService,
   ) {
     // Booking links the tools hand out name the booking host when there is one.
     this.deps = {
@@ -117,6 +120,7 @@ export class McpGateway {
       admin,
       calendar,
       analytics: analytics ?? null,
+      crmProperties: crmProperties ?? null,
       // create_event waits briefly for the video link the calendar write
       // creates; with no outbox worker in this process (specs, a read replica)
       // it answers `video: pending` at once.

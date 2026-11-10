@@ -9,12 +9,12 @@
  * none invented, so a new tool fails the spec until it is placed here.
  */
 export const TOOL_GROUPS = {
-  availability: ['find_available_slots', 'find_team_slots', 'check_attendee_availability', 'list_schedules', 'get_schedule', 'list_calendar_connections'],
+  availability: ['find_available_slots', 'find_team_slots', 'check_attendee_availability', 'list_schedules', 'get_schedule', 'list_calendar_connections', 'list_connection_calendars'],
   booking: ['book_meeting', 'book_team_meeting', 'create_booking'],
   holds: ['hold_slot'],
   bookings: ['create_event', 'list_bookings', 'get_booking', 'reschedule_booking', 'cancel_booking'],
   requests: ['list_pending_bookings', 'confirm_booking', 'decline_booking'],
-  account: ['whoami', 'list_my_accounts', 'list_event_types', 'get_booking_page_link', 'get_event_type', 'list_one_off_links', 'get_brand_kit', 'get_booking_page_settings', 'list_teams', 'list_team_members', 'list_members', 'list_notification_settings'],
+  account: ['whoami', 'list_my_accounts', 'list_event_types', 'get_booking_page_link', 'get_event_type', 'list_one_off_links', 'get_brand_kit', 'get_booking_page_settings', 'list_teams', 'list_team_members', 'list_members', 'list_notification_settings', 'list_integrations', 'list_crm_contact_properties'],
 } as const;
 
 export type ToolGroup = keyof typeof TOOL_GROUPS;

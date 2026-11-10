@@ -45,6 +45,12 @@ export const API_ROUTE_TOOLS: Readonly<Record<string, string>> = {
   'GET /v1/teams/:id/members': 'list_team_members',
   'GET /v1/members': 'list_members',
   'GET /v1/notification-settings': 'list_notification_settings',
+  'GET /v1/teams/:id/event-types': 'list_event_types',
+
+  'GET /v1/connections/:id/calendars': 'list_connection_calendars',
+  'GET /v1/integrations': 'list_integrations',
+  'GET /v1/integrations/capabilities': 'list_integrations',
+  'GET /v1/integrations/crm/contact-properties': 'list_crm_contact_properties',
 };
 
 /**
@@ -109,7 +115,6 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'POST /v1/teams/:id/members': excluded(TEAM_ADMIN),
   'PATCH /v1/teams/:id/members/:memberId': excluded(TEAM_ADMIN),
   'DELETE /v1/teams/:id/members/:memberId': excluded(TEAM_ADMIN),
-  'GET /v1/teams/:id/event-types': notYet("No tool lists a team's event types on their own; list_event_types includes them."),
 
   // Members
   'POST /v1/members': notYet('No tool invites someone to the account.'),
@@ -123,16 +128,12 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'GET /v1/connections/status': notYet('No tool reports whether each connection still works.'),
   'POST /v1/connections/token': dashboardOnly(PROVIDER_SIGN_IN),
   'POST /v1/connections/discover': dashboardOnly(PROVIDER_SIGN_IN),
-  'GET /v1/connections/:id/calendars': notYet('No tool lists the calendars inside a connection.'),
   'PATCH /v1/connections/:id': notYet('No tool chooses which calendars are checked.'),
   'POST /v1/connections/:id/ping': notYet('No tool checks that a connection answers.'),
   'POST /v1/connections/:id/test': notYet('No tool tests a connection end to end.'),
   'DELETE /v1/connections/:id': notYet('No tool disconnects a calendar.'),
 
   // Integrations
-  'GET /v1/integrations': notYet('No tool lists the integrations.'),
-  'GET /v1/integrations/capabilities': notYet('No tool reads what each integration can do.'),
-  'GET /v1/integrations/crm/contact-properties': notYet("No tool reads the CRM's contact properties."),
   'POST /v1/integrations': dashboardOnly(PROVIDER_SIGN_IN),
   'DELETE /v1/integrations/:provider': notYet('No tool disconnects an integration.'),
 

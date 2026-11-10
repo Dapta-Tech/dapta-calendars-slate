@@ -31,7 +31,7 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 
 ## Tools
 
-The `develop` branch exposes 30 tools. Use `tools/list` on your deployed endpoint
+The `develop` branch exposes 33 tools. Use `tools/list` on your deployed endpoint
 to see its actual catalog: a deployment stays on its released version until
 upgraded.
 
@@ -44,7 +44,7 @@ upgraded.
 | `book_team_meeting` | public team link, or `bookings:write` (by `event_type_id`) | write, emails the invitee | Books a team event; the host is picked at booking time and returned. |
 | `whoami` | any key or connection | read | Workspace, owner time zone, the key's (or connection's) scopes and allowlist. |
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
-| `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), respecting the allowlist. |
+| `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), or one team's with `team_id`, respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
 | `get_event_type` | `event-types:read` | read | One event type with its editor settings: length, location, the hours it follows (schedule, working hours or custom hours), notice, window, buffers, confirmation, seats, questions, team hosts. Hidden ones included; respects the allowlist. |
 | `list_one_off_links` | `event-types:read` | read | The single-use links of one event type, newest first, each live, used (with its booking uid) or revoked. Respects the allowlist. |
@@ -57,6 +57,9 @@ upgraded.
 | `list_team_members` | `event-types:read` | read | One team's members, their team role, whether they joined, and whether each has hours, a calendar and a booking calendar (without hours a host is never offered). |
 | `list_members` | `event-types:read` | read | Everyone in the workspace: name, email, link name, role, status. The dashboard route is owners and admins only; every MCP sign-in is one. |
 | `list_notification_settings` | `event-types:read` | read | The account-level notification emails: on or off, customized or not, the subject and body they send, and the template variables. Reminders live on each event type. |
+| `list_connection_calendars` | `availability:read` | read | The calendars inside one connected account, as the provider reports them now (name, primary, access). The provider's calendar refs stay on the server. |
+| `list_integrations` | `event-types:read` | read | The CRM integration's status, last check and any scopes the token lacks, plus what the deployment supports. Never a credential. Owners and admins only in the dashboard. |
+| `list_crm_contact_properties` | `event-types:read` | read | The connected CRM's contact properties booking answers can map to, or an empty list with the reason. |
 | `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |

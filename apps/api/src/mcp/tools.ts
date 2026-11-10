@@ -64,6 +64,7 @@ import type { BookingService } from '../booking.service';
 import type { CalendarEffects } from '../calendar-effects';
 import type { CalV2Service } from '../cal-v2.service';
 import type { CalV2PilotService } from '../cal-v2-pilot.service';
+import type { CrmPropertyCatalogService } from '../crm-property-catalog';
 import { isServiceError } from '../http';
 import { queryBookings } from './bookings-query';
 import { bindHold, findHold, heldByAnother, holdOwner } from './holds';
@@ -91,8 +92,19 @@ export interface McpToolDeps {
   calV2: CalV2Service;
   pilot: CalV2PilotService;
   bookings: BookingService;
-  /** The host routes' confirm and decline, so the machine path shares their side effects; `brandingStatus` and `listNotificationSettings`, so those reads match the dashboard's. */
-  admin: Pick<AdminService, 'confirm' | 'decline' | 'brandingStatus' | 'listNotificationSettings'>;
+  /** The host routes' confirm and decline, so the machine path shares their side effects; and the read methods some setup tools share with the dashboard, so they match it exactly. */
+  admin: Pick<
+    AdminService,
+    | 'confirm'
+    | 'decline'
+    | 'brandingStatus'
+    | 'listNotificationSettings'
+    | 'listConnectionCalendars'
+    | 'listIntegrations'
+    | 'integrationCapabilities'
+  >;
+  /** The CRM's contact properties, cached as the mapping picker reads them; absent, the CRM reads as disabled. */
+  crmProperties?: Pick<CrmPropertyCatalogService, 'catalog'> | null;
   /** Busy reads for a decision (`provider`, always fresh) and the calendar write-out, for `create_event`. */
   calendar: Pick<
     CalendarEffects,
@@ -1536,11 +1548,13 @@ const listMyAccounts: ToolDef = {
   },
 };
 
-const listEventTypesInput = z.object({});
+const listEventTypesInput = z.object({
+  team_id: z.string().min(1).max(64).optional().describe("Only this team's event types, from list_teams."),
+});
 const listEventTypes: ToolDef = {
   name: 'list_event_types',
   title: 'List event types',
-  description: 'List the workspace\'s bookable event types (personal and team), limited to the key\'s event-type allowlist when an API key is used. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
+  description: 'List the workspace\'s bookable event types (personal and team), or one team\'s with team_id, limited to the key\'s event-type allowlist when an API key is used. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1565,10 +1579,12 @@ const listEventTypes: ToolDef = {
     ),
     count: z.number(),
   }),
-  async run(_args: z.infer<typeof listEventTypesInput>, call, deps) {
+  async run(args: z.infer<typeof listEventTypesInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
+    if (args.team_id && !(await getTeamById(deps.db, p.accountId, args.team_id))) throw notFound('Team');
     const code = await canonicalCode(deps.db, p.accountId);
-    const rows = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
+    const all = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
+    const rows = args.team_id ? all.filter((r) => r.team?.daptaId === args.team_id) : all;
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
       title: untrusted(r.title, 200),
@@ -1606,6 +1622,20 @@ const getLink: ToolDef = {
     return { data: { event_type_id: r.daptaId, title: untrusted(r.title, 200), booking_page_url: url }, summary: url };
   },
 };
+
+/**
+ * The account owner as a dashboard principal, for the few reads that go through
+ * an `AdminService` method so they match the dashboard exactly. Those methods
+ * read the account (and, for language defaults, the owner); a key has no member
+ * of its own to pass.
+ */
+async function ownerHost(db: Db, accountId: string): Promise<{ accountId: string; memberId: string; role: 'owner' }> {
+  const owner = await db.get<{ id: string }>(
+    sql`SELECT id FROM member WHERE account_id = ${accountId} AND role = 'owner' ORDER BY created_at ASC LIMIT 1`,
+  );
+  if (!owner) throw notFound('Account');
+  return { accountId, memberId: owner.id, role: 'owner' };
+}
 
 // --- Setup reads: schedules, one event type, single-use links -----------------
 //
@@ -2014,12 +2044,9 @@ const getBookingPageSettings: ToolDef = {
     const account = await deps.db.get<{ code: string; vanity_slug: string | null }>(
       sql`SELECT code, vanity_slug FROM account WHERE id = ${p.accountId} LIMIT 1`,
     );
-    const owner = await deps.db.get<{ id: string }>(
-      sql`SELECT id FROM member WHERE account_id = ${p.accountId} AND role = 'owner' ORDER BY created_at ASC LIMIT 1`,
-    );
-    if (!account || !owner) throw notFound('Account');
+    if (!account) throw notFound('Account');
     // The dashboard's own read, so `showing` follows the same entitlement gate the public pages do.
-    const b = await deps.admin.brandingStatus({ accountId: p.accountId, memberId: owner.id, role: 'owner' });
+    const b = await deps.admin.brandingStatus(await ownerHost(deps.db, p.accountId));
     const code = canonicalPublicCode(account);
     return {
       data: {
@@ -2205,12 +2232,8 @@ const listNotificationSettingsTool: ToolDef = {
   }),
   async run(_args: z.infer<typeof listNotificationsInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
-    const owner = await deps.db.get<{ id: string }>(
-      sql`SELECT id FROM member WHERE account_id = ${p.accountId} AND role = 'owner' ORDER BY created_at ASC LIMIT 1`,
-    );
-    if (!owner) throw notFound('Account');
     // The dashboard's own read: the defaults come in the owner's language, as the Notifications screen shows them.
-    const out = await deps.admin.listNotificationSettings({ accountId: p.accountId, memberId: owner.id, role: 'owner' });
+    const out = await deps.admin.listNotificationSettings(await ownerHost(deps.db, p.accountId));
     const notifications = out.settings.map((s) => ({
       key: s.key,
       audience: (s.key.startsWith('host_') ? 'host' : 'invitee') as 'host' | 'invitee',
@@ -2223,6 +2246,166 @@ const listNotificationSettingsTool: ToolDef = {
     return {
       data: { notifications, variables: [...out.variables], count: notifications.length },
       summary: `${notifications.length} notification email(s); ${notifications.filter((n) => n.customized).length} customized${off.length ? `; off: ${off.join(', ')}` : ''}.`,
+    };
+  },
+};
+
+// --- Integration and connected-calendar reads -----------------------------------
+
+const listConnectionCalendarsInput = z.object({ connection_id: z.string().min(1).max(64).describe('From list_calendar_connections.') });
+const listConnectionCalendarsTool: ToolDef = {
+  name: 'list_connection_calendars',
+  title: 'List the calendars inside a connected account',
+  description:
+    "Lists the calendars one connected calendar account holds, as the provider reports them now: name, whether it is the account's primary calendar, and the access it grants. Empty when the deployment has no calendar provider. Needs scope availability:read.",
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listConnectionCalendarsInput,
+  output: z.looseObject({
+    connection_id: z.string(),
+    calendars: z.array(
+      z.looseObject({
+        name: z.string(),
+        is_primary: z.boolean(),
+        read_only: z.boolean(),
+        access_role: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof listConnectionCalendarsInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const conn = await deps.db.get<{ member_id: string }>(
+      sql`SELECT member_id FROM connected_calendar WHERE id = ${args.connection_id} AND account_id = ${p.accountId} LIMIT 1`,
+    );
+    if (!conn) throw notFound('Connection');
+    // The dashboard's own read, as the person who connected it: the provider is asked under their identity.
+    const rows = await deps.admin.listConnectionCalendars({ accountId: p.accountId, memberId: conn.member_id, role: 'member' }, args.connection_id);
+    // The provider's calendar ref is opaque and never leaves the server.
+    const calendars = rows.slice(0, 100).map((c) => ({
+      name: untrusted(c.name, 200),
+      is_primary: Boolean(c.isPrimary),
+      read_only: Boolean(c.readOnly),
+      access_role: c.accessRole ?? null,
+    }));
+    return {
+      data: { connection_id: args.connection_id, calendars, count: calendars.length },
+      summary: `${calendars.length} calendar(s): ${calendars.map((c) => c.name).slice(0, 10).join(', ')}.`,
+    };
+  },
+};
+
+const listIntegrationsInput = z.object({});
+const listIntegrationsTool: ToolDef = {
+  name: 'list_integrations',
+  title: 'List the CRM integrations',
+  description:
+    "Lists the workspace's integrations (the CRM that bookings are sent to) with their status and last check, and what this deployment supports: the CRM provider, whether credentials can be stored, and the access the CRM token needs. Never returns a credential. Connecting one happens in the dashboard. Owners and admins only. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listIntegrationsInput,
+  output: z.looseObject({
+    integrations: z.array(
+      z.looseObject({
+        provider: z.string(),
+        status: openEnum(['connected', 'unhealthy', 'disconnected']),
+        label: z.string().nullable(),
+        last_check: z.looseObject({ at: z.string(), ok: z.boolean().nullable(), detail: z.string().nullable() }).nullable(),
+        missing_scopes: z.array(z.string()).describe('Scopes the provider said the token lacks, when it said.'),
+      }),
+    ),
+    deployment: z.looseObject({
+      provider: z.string().nullable(),
+      enabled: z.boolean(),
+      can_store_credentials: z.boolean(),
+      required_scopes: z.array(z.string()),
+    }),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listIntegrationsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const host = await ownerHost(deps.db, p.accountId);
+    const [rows, caps] = await Promise.all([deps.admin.listIntegrations(host), Promise.resolve(deps.admin.integrationCapabilities(host))]);
+    const integrations = rows.map((r) => ({
+      provider: r.provider,
+      status: r.status,
+      label: r.label ? untrusted(r.label, 120) : null,
+      last_check:
+        r.lastCheckAt == null
+          ? null
+          : { at: new Date(r.lastCheckAt).toISOString(), ok: r.lastCheckOk, detail: r.lastCheckDetail ? untrusted(r.lastCheckDetail, 300) : null },
+      missing_scopes: [...(r.lastErrorDetail?.requiredGranularScopes ?? [])],
+    }));
+    return {
+      data: {
+        integrations,
+        deployment: {
+          provider: caps.provider,
+          enabled: caps.enabled,
+          can_store_credentials: caps.canStoreCredentials,
+          required_scopes: [...caps.requiredScopes],
+        },
+        count: integrations.length,
+      },
+      summary: integrations.length
+        ? integrations.map((i) => `${i.provider}: ${i.status}`).join(', ') + '.'
+        : `No integration connected${caps.enabled ? `; ${caps.provider ?? 'a CRM'} can be connected in the dashboard` : '; this deployment has no CRM'}.`,
+    };
+  },
+};
+
+const crmPropertiesInput = z.object({
+  refresh: z.boolean().optional().describe('Fetch the list from the CRM again instead of the copy cached for a few minutes.'),
+});
+const listCrmContactProperties: ToolDef = {
+  name: 'list_crm_contact_properties',
+  title: "List the CRM's contact properties",
+  description:
+    "Lists the contact properties of the connected CRM that booking answers can be mapped to: name, label, type and options. Empty, with a reason, when the CRM is off, not connected or not answering. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: crmPropertiesInput,
+  output: z.looseObject({
+    provider: z.string().nullable(),
+    connected: z.boolean(),
+    properties: z.array(
+      z.looseObject({
+        name: z.string(),
+        label: z.string(),
+        type: z.string(),
+        field_type: z.string(),
+        options: z.array(z.looseObject({ value: z.string(), label: z.string() })),
+      }),
+    ),
+    fetched_at: z.string().nullable(),
+    reason: openEnum(['disabled', 'not_connected', 'unavailable']).nullable(),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof crmPropertiesInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const catalog = deps.crmProperties
+      ? await deps.crmProperties.catalog(p.accountId, { refresh: args.refresh === true })
+      : { provider: null, connected: false, properties: [], fetchedAt: null, reason: 'disabled' as const };
+    const properties = catalog.properties.slice(0, 500).map((x) => ({
+      name: untrusted(x.name, 120),
+      label: untrusted(x.label, 200),
+      type: x.type,
+      field_type: x.fieldType,
+      options: x.options.slice(0, 100).map((o) => ({ value: untrusted(o.value, 200), label: untrusted(o.label, 200) })),
+    }));
+    return {
+      data: {
+        provider: catalog.provider,
+        connected: catalog.connected,
+        properties,
+        fetched_at: catalog.fetchedAt == null ? null : new Date(catalog.fetchedAt).toISOString(),
+        reason: catalog.reason,
+        count: properties.length,
+      },
+      summary: catalog.reason ? `No CRM properties (${catalog.reason}).` : `${properties.length} contact propert${properties.length === 1 ? 'y' : 'ies'} in ${catalog.provider ?? 'the CRM'}.`,
     };
   },
 };
@@ -3882,6 +4065,9 @@ export const TOOLS: readonly ToolDef[] = [
   listTeamMembersTool,
   listMembersTool,
   listNotificationSettingsTool,
+  listConnectionCalendarsTool,
+  listIntegrationsTool,
+  listCrmContactProperties,
   listBookings,
   listPendingBookings,
   getBooking,

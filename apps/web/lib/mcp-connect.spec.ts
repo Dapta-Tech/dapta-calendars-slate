@@ -113,7 +113,7 @@ describe('scope and tool catalogs', () => {
         if (tool.scope) expect(known.has(tool.scope)).toBe(true);
       }
     }
-    expect(MCP_TOOLS).toHaveLength(30);
+    expect(MCP_TOOLS).toHaveLength(33);
   });
   it('rescheduling, declining and cancelling are the destructive tools, as the server marks them', () => {
     expect(MCP_TOOLS.filter((t) => t.kind === 'destructive').map((t) => t.name)).toEqual(['reschedule_booking', 'decline_booking', 'cancel_booking']);

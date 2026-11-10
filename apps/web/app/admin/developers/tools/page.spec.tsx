@@ -64,7 +64,7 @@ describe('the Tools page', () => {
     const html = (await render()).replace(/<[^>]+>/g, ' ');
     expect(html).toContain('1 tool ');
     expect(html).not.toContain('1 tools');
-    expect(html).toContain('12 tools');
+    expect(html).toContain('14 tools');
     locale.value = 'es';
     const es = (await render()).replace(/<[^>]+>/g, ' ');
     expect(es).toContain('1 herramienta ');
