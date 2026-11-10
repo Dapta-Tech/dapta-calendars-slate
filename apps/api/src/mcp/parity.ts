@@ -40,6 +40,11 @@ export const API_ROUTE_TOOLS: Readonly<Record<string, string>> = {
   'GET /v1/account/vanity': 'get_booking_page_settings',
 
   'GET /v1/connections': 'list_calendar_connections',
+
+  'GET /v1/teams': 'list_teams',
+  'GET /v1/teams/:id/members': 'list_team_members',
+  'GET /v1/members': 'list_members',
+  'GET /v1/notification-settings': 'list_notification_settings',
 };
 
 /**
@@ -98,18 +103,15 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'PATCH /v1/account/vanity': notYet('No tool sets the short link name.'),
 
   // Teams
-  'GET /v1/teams': notYet('No tool lists teams; find_team_slots works from a team link.'),
   'POST /v1/teams': excluded(TEAM_ADMIN),
   'PATCH /v1/teams/:id': excluded(TEAM_ADMIN),
   'DELETE /v1/teams/:id': excluded(TEAM_ADMIN),
-  'GET /v1/teams/:id/members': notYet("No tool lists a team's members."),
   'POST /v1/teams/:id/members': excluded(TEAM_ADMIN),
   'PATCH /v1/teams/:id/members/:memberId': excluded(TEAM_ADMIN),
   'DELETE /v1/teams/:id/members/:memberId': excluded(TEAM_ADMIN),
   'GET /v1/teams/:id/event-types': notYet("No tool lists a team's event types on their own; list_event_types includes them."),
 
   // Members
-  'GET /v1/members': notYet("No tool lists the account's members."),
   'POST /v1/members': notYet('No tool invites someone to the account.'),
   'POST /v1/members/:id/resend-invite': notYet('No tool sends an invitation again.'),
   'PATCH /v1/members/:id': notYet("No tool changes a member's role or status."),
@@ -135,7 +137,6 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'DELETE /v1/integrations/:provider': notYet('No tool disconnects an integration.'),
 
   // Notifications
-  'GET /v1/notification-settings': notYet('No tool lists the notification emails.'),
   'PATCH /v1/notification-settings/:key': notYet('No tool changes a notification email.'),
   'POST /v1/notification-settings/:key/preview': notYet('No tool renders a notification email.'),
   'DELETE /v1/notification-settings/:key/template': notYet('No tool resets a notification email to its default.'),

@@ -57,7 +57,7 @@ SQLite-dev path documents where it degrades.
 
 ## What you get
 
-- A **remote MCP endpoint** with 26 tools for agents: find times, book, confirm,
+- A **remote MCP endpoint** with 30 tools for agents: find times, book, confirm,
   move and cancel meetings, or put an event on the host's own calendar. Host
   events can repeat daily or weekly, request a video link from the connected
   calendar, and check attendees' free/busy before creation. See

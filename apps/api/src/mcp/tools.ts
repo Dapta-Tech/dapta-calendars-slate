@@ -22,6 +22,10 @@ import {
   createHostEvent,
   getAccountByCode,
   getAccountBranding,
+  getTeamById,
+  listMembers,
+  listTeamMembers,
+  listTeams,
   getEventTypeById,
   getSchedule,
   listOneOffLinks,
@@ -87,8 +91,8 @@ export interface McpToolDeps {
   calV2: CalV2Service;
   pilot: CalV2PilotService;
   bookings: BookingService;
-  /** The host routes' confirm and decline, so the machine path shares their side effects; `brandingStatus`, so the branding read follows the dashboard's entitlement gate. */
-  admin: Pick<AdminService, 'confirm' | 'decline' | 'brandingStatus'>;
+  /** The host routes' confirm and decline, so the machine path shares their side effects; `brandingStatus` and `listNotificationSettings`, so those reads match the dashboard's. */
+  admin: Pick<AdminService, 'confirm' | 'decline' | 'brandingStatus' | 'listNotificationSettings'>;
   /** Busy reads for a decision (`provider`, always fresh) and the calendar write-out, for `create_event`. */
   calendar: Pick<
     CalendarEffects,
@@ -2027,6 +2031,202 @@ const getBookingPageSettings: ToolDef = {
   },
 };
 
+// --- Teams, members and notification reads --------------------------------------
+//
+// The dashboard's Teams, Members and Notifications screens. Members and
+// notifications are owner-and-admin routes there; on the MCP every sign-in is an
+// owner or admin of the account it acts in, and API keys are created by one.
+
+const listTeamsInput = z.object({});
+const listTeamsTool: ToolDef = {
+  name: 'list_teams',
+  title: 'List teams',
+  description:
+    "Lists the workspace's teams: name, link name, time zone, how many members each has and its public team page. Needs scope event-types:read. The ids work with list_team_members.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listTeamsInput,
+  output: z.looseObject({
+    teams: z.array(
+      z.looseObject({
+        id: z.string(),
+        name: z.string(),
+        slug: z.string().nullable(),
+        time_zone: z.string(),
+        member_count: z.number(),
+        team_page_url: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listTeamsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const teams = await listTeams(deps.db, p.accountId);
+    const counts = await deps.db.all<{ team_id: string; n: number | string }>(
+      sql`SELECT tm.team_id, COUNT(*) AS n FROM team_membership tm JOIN team t ON t.id = tm.team_id
+          WHERE t.account_id = ${p.accountId} GROUP BY tm.team_id`,
+    );
+    const countOf = new Map(counts.map((c) => [c.team_id, Number(c.n)]));
+    const code = await canonicalCode(deps.db, p.accountId);
+    const root = (deps.publicBookingUrl ?? deps.publicAppUrl).replace(/\/+$/, '');
+    const items = teams.slice(0, 100).map((t) => ({
+      id: t.id,
+      name: untrusted(t.name, 120),
+      slug: t.slug,
+      time_zone: t.timeZone,
+      member_count: countOf.get(t.id) ?? 0,
+      team_page_url: t.slug ? `${root}/${code}/team/${t.slug}` : null,
+    }));
+    return {
+      data: { teams: items, count: items.length },
+      summary: `${items.length} team(s): ${items.map((t) => `${t.name} (${t.member_count})`).slice(0, 10).join(', ')}.`,
+    };
+  },
+};
+
+const listTeamMembersInput = z.object({ team_id: z.string().min(1).max(64).describe('From list_teams.') });
+const listTeamMembersTool: ToolDef = {
+  name: 'list_team_members',
+  title: "List a team's members and whether each can be booked",
+  description:
+    "Lists one team's members with their team role, whether they joined, and whether each is ready to be offered: working hours set, a calendar connected for busy times, and one that receives bookings. A member without hours is never offered or assigned. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listTeamMembersInput,
+  output: z.looseObject({
+    team: z.looseObject({ id: z.string(), name: z.string() }),
+    members: z.array(
+      z.looseObject({
+        member_id: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
+        team_role: openEnum(['owner', 'member']),
+        joined: z.boolean(),
+        has_hours: z.boolean(),
+        has_calendar: z.boolean(),
+        has_destination_calendar: z.boolean(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof listTeamMembersInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const team = await getTeamById(deps.db, p.accountId, args.team_id);
+    if (!team) throw notFound('Team');
+    const rows = await listTeamMembers(deps.db, p.accountId, team.id);
+    const members = rows.slice(0, 200).map((r) => ({
+      member_id: r.member_id,
+      name: r.display_name ? untrusted(r.display_name, 120) : null,
+      email: r.email ? untrusted(r.email, 200) : null,
+      team_role: r.role,
+      joined: Boolean(Number(r.accepted)),
+      has_hours: r.has_hours,
+      has_calendar: r.has_calendar,
+      has_destination_calendar: r.has_destination_calendar,
+    }));
+    const notReady = members.filter((m) => !m.has_hours).length;
+    const name = untrusted(team.name, 120);
+    return {
+      data: { team: { id: team.id, name }, members, count: members.length },
+      summary: `${members.length} member(s) on ${name}${notReady ? `, ${notReady} without working hours` : ''}.`,
+    };
+  },
+};
+
+const listMembersInput = z.object({});
+const listMembersTool: ToolDef = {
+  name: 'list_members',
+  title: "List the workspace's members",
+  description:
+    "Lists everyone in the workspace with their name, email, link name, role (owner, admin, member) and status (active, invited, disabled). Owners and admins only. Needs scope event-types:read. Inviting, changing or removing members happens in the dashboard.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listMembersInput,
+  output: z.looseObject({
+    members: z.array(
+      z.looseObject({
+        id: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
+        handle: z.string().nullable(),
+        role: openEnum(['owner', 'admin', 'member']),
+        status: z.string(),
+        joined_at: z.string(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listMembersInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const rows = await listMembers(deps.db, p.accountId);
+    const members = rows.slice(0, 500).map((m) => ({
+      id: m.id,
+      name: m.displayName ? untrusted(m.displayName, 120) : null,
+      email: m.email ? untrusted(m.email, 200) : null,
+      handle: m.handle,
+      role: m.role,
+      status: m.status,
+      joined_at: new Date(Number(m.createdAt)).toISOString(),
+    }));
+    const byRole = (r: string) => members.filter((m) => m.role === r).length;
+    return {
+      data: { members, count: members.length },
+      summary: `${members.length} member(s): ${byRole('owner')} owner, ${byRole('admin')} admin(s), ${byRole('member')} member(s).`,
+    };
+  },
+};
+
+const listNotificationsInput = z.object({});
+const listNotificationSettingsTool: ToolDef = {
+  name: 'list_notification_settings',
+  title: 'List the notification emails',
+  description:
+    "Lists the workspace's notification emails (booking confirmations, cancellations, host alerts and the like): whether each is sent, whether its text was customized, and the subject and body it sends, with the variables they may use. Reminders and follow-ups belong to each event type and are not listed here. Owners and admins only. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listNotificationsInput,
+  output: z.looseObject({
+    notifications: z.array(
+      z.looseObject({
+        key: z.string(),
+        audience: openEnum(['host', 'invitee']),
+        enabled: z.boolean(),
+        customized: z.boolean(),
+        subject: z.string(),
+        body: z.string(),
+      }),
+    ),
+    variables: z.array(z.string()),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listNotificationsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const owner = await deps.db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE account_id = ${p.accountId} AND role = 'owner' ORDER BY created_at ASC LIMIT 1`,
+    );
+    if (!owner) throw notFound('Account');
+    // The dashboard's own read: the defaults come in the owner's language, as the Notifications screen shows them.
+    const out = await deps.admin.listNotificationSettings({ accountId: p.accountId, memberId: owner.id, role: 'owner' });
+    const notifications = out.settings.map((s) => ({
+      key: s.key,
+      audience: (s.key.startsWith('host_') ? 'host' : 'invitee') as 'host' | 'invitee',
+      enabled: s.enabled,
+      customized: s.customized,
+      subject: untrusted(s.subject ?? s.defaultSubject, 300),
+      body: untrusted(s.body ?? s.defaultBody, 5000),
+    }));
+    const off = notifications.filter((n) => !n.enabled).map((n) => n.key);
+    return {
+      data: { notifications, variables: [...out.variables], count: notifications.length },
+      summary: `${notifications.length} notification email(s); ${notifications.filter((n) => n.customized).length} customized${off.length ? `; off: ${off.join(', ')}` : ''}.`,
+    };
+  },
+};
+
 const listBookingsInput = z.object({
   from: z
     .string()
@@ -3678,6 +3878,10 @@ export const TOOLS: readonly ToolDef[] = [
   listCalendarConnections,
   getBrandKit,
   getBookingPageSettings,
+  listTeamsTool,
+  listTeamMembersTool,
+  listMembersTool,
+  listNotificationSettingsTool,
   listBookings,
   listPendingBookings,
   getBooking,

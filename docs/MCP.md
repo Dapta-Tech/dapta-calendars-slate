@@ -31,7 +31,7 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 
 ## Tools
 
-The `develop` branch exposes 26 tools. Use `tools/list` on your deployed endpoint
+The `develop` branch exposes 30 tools. Use `tools/list` on your deployed endpoint
 to see its actual catalog: a deployment stays on its released version until
 upgraded.
 
@@ -53,6 +53,10 @@ upgraded.
 | `list_calendar_connections` | `availability:read` | read | The workspace's connected calendar accounts: whose, provider, email, whether each blocks free times or receives bookings, and its last health check. Connecting one stays in the dashboard. |
 | `get_brand_kit` | `event-types:read` | read | The workspace brand kit: logo, accent, theme, font, corners, buttons, card style. An inline logo is reported as set, not returned. |
 | `get_booking_page_settings` | `event-types:read` | read | How the public links start (claimed link name or short code) and whether the product branding shows, and may be hidden. |
+| `list_teams` | `event-types:read` | read | The workspace's teams with their link name, time zone, member count and team page. |
+| `list_team_members` | `event-types:read` | read | One team's members, their team role, whether they joined, and whether each has hours, a calendar and a booking calendar (without hours a host is never offered). |
+| `list_members` | `event-types:read` | read | Everyone in the workspace: name, email, link name, role, status. The dashboard route is owners and admins only; every MCP sign-in is one. |
+| `list_notification_settings` | `event-types:read` | read | The account-level notification emails: on or off, customized or not, the subject and body they send, and the template variables. Reminders live on each event type. |
 | `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
