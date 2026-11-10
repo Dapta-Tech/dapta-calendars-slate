@@ -34,6 +34,12 @@ export const API_ROUTE_TOOLS: Readonly<Record<string, string>> = {
 
   'GET /v1/schedules': 'list_schedules',
   'GET /v1/schedules/:id': 'get_schedule',
+
+  'GET /v1/brand-kit': 'get_brand_kit',
+  'GET /v1/account/branding': 'get_booking_page_settings',
+  'GET /v1/account/vanity': 'get_booking_page_settings',
+
+  'GET /v1/connections': 'list_calendar_connections',
 };
 
 /**
@@ -87,11 +93,8 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'PATCH /v1/booking-page': notYet('No tool changes the booking page look.'),
   'POST /v1/booking-page/apply-kit': notYet('No tool applies the brand kit.'),
   'POST /v1/booking-page/revert': notYet('No tool undoes an applied look.'),
-  'GET /v1/brand-kit': notYet('No tool reads the brand kit.'),
   'PUT /v1/brand-kit': notYet('No tool sets the brand kit.'),
-  'GET /v1/account/branding': notYet('No tool reads whether the product branding shows.'),
   'PATCH /v1/account/branding': notYet('No tool hides or shows the product branding.'),
-  'GET /v1/account/vanity': notYet('No tool reads the short link name.'),
   'PATCH /v1/account/vanity': notYet('No tool sets the short link name.'),
 
   // Teams
@@ -114,7 +117,6 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'POST /v1/members/:id/transfer-ownership': dashboardOnly('Handing the account over cannot be undone by the person who gives it; it stays a deliberate act in the dashboard.'),
 
   // Connections
-  'GET /v1/connections': notYet('No tool lists the connected calendars.'),
   'POST /v1/connections': dashboardOnly(PROVIDER_SIGN_IN),
   'GET /v1/connections/status': notYet('No tool reports whether each connection still works.'),
   'POST /v1/connections/token': dashboardOnly(PROVIDER_SIGN_IN),

@@ -21,6 +21,7 @@ import {
   completeApiIdempotency,
   createHostEvent,
   getAccountByCode,
+  getAccountBranding,
   getEventTypeById,
   getSchedule,
   listOneOffLinks,
@@ -37,7 +38,7 @@ import {
   type SeriesConflict,
   type SkippedDate,
 } from '@slate/db';
-import { BOOKING_UTM_KEYS, MAX_BOOKING_UTM_VALUE, type ApiScope, type BookingUtm } from '@slate/types';
+import { BOOKING_UTM_KEYS, MAX_BOOKING_UTM_VALUE, hasBrandKit, type ApiScope, type BookingUtm } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import { calendarFeatures } from '@slate/calendar';
 import {
@@ -86,8 +87,8 @@ export interface McpToolDeps {
   calV2: CalV2Service;
   pilot: CalV2PilotService;
   bookings: BookingService;
-  /** The host routes' confirm and decline, so the machine path shares their side effects. */
-  admin: Pick<AdminService, 'confirm' | 'decline'>;
+  /** The host routes' confirm and decline, so the machine path shares their side effects; `brandingStatus`, so the branding read follows the dashboard's entitlement gate. */
+  admin: Pick<AdminService, 'confirm' | 'decline' | 'brandingStatus'>;
   /** Busy reads for a decision (`provider`, always fresh) and the calendar write-out, for `create_event`. */
   calendar: Pick<
     CalendarEffects,
@@ -1848,6 +1849,184 @@ const listOneOffLinksTool: ToolDef = {
   },
 };
 
+// --- Booking page and calendar reads ------------------------------------------
+//
+// What the dashboard's Booking page, Brand kit and Calendars screens read.
+// Account-wide, like the reads above.
+
+const listConnectionsInput = z.object({});
+const listCalendarConnections: ToolDef = {
+  name: 'list_calendar_connections',
+  title: 'List connected calendar accounts',
+  description:
+    "Lists the calendar accounts connected in the workspace: whose each one is, its provider and email, whether it is checked for conflicts, whether bookings are written to it, and its last health check. Needs scope availability:read. Connecting or removing a calendar happens in the dashboard.",
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listConnectionsInput,
+  output: z.looseObject({
+    connections: z.array(
+      z.looseObject({
+        id: z.string(),
+        member_id: z.string(),
+        member_name: z.string().nullable(),
+        provider: z.string(),
+        email: z.string().nullable(),
+        checks_conflicts: z.boolean().describe('Its busy times block booking slots.'),
+        is_destination: z.boolean().describe('New bookings are written to it.'),
+        last_check: z
+          .looseObject({ at: z.string(), ok: z.boolean().nullable(), detail: z.string().nullable() })
+          .nullable()
+          .describe('The last health check, null when it was never checked.'),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listConnectionsInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const rows = await deps.db.all<{
+      id: string;
+      member_id: string;
+      display_name: string | null;
+      provider: string;
+      primary_email: string | null;
+      is_destination: number | boolean;
+      check_conflicts: number | boolean;
+      last_check_at: number | string | null;
+      last_check_ok: number | boolean | null;
+      last_check_detail: string | null;
+    }>(
+      sql`SELECT c.id, c.member_id, m.display_name, c.provider, c.primary_email, c.is_destination, c.check_conflicts,
+                 c.last_check_at, c.last_check_ok, c.last_check_detail
+          FROM connected_calendar c JOIN member m ON m.id = c.member_id
+          WHERE c.account_id = ${p.accountId}
+          ORDER BY m.created_at ASC, c.id ASC LIMIT 200`,
+    );
+    const connections = rows.map((r) => ({
+      id: r.id,
+      member_id: r.member_id,
+      member_name: r.display_name ? untrusted(r.display_name, 120) : null,
+      provider: r.provider,
+      email: r.primary_email ? untrusted(r.primary_email, 200) : null,
+      checks_conflicts: Boolean(Number(r.check_conflicts)),
+      is_destination: Boolean(Number(r.is_destination)),
+      last_check:
+        r.last_check_at == null
+          ? null
+          : {
+              at: new Date(Number(r.last_check_at)).toISOString(),
+              ok: r.last_check_ok == null ? null : Boolean(Number(r.last_check_ok)),
+              detail: r.last_check_detail ? untrusted(r.last_check_detail, 300) : null,
+            },
+    }));
+    const failing = connections.filter((c) => c.last_check?.ok === false).length;
+    return {
+      data: { connections, count: connections.length },
+      summary: `${connections.length} connected calendar account(s)${failing ? `, ${failing} failing its last check` : ''}.`,
+    };
+  },
+};
+
+const getBrandKitInput = z.object({});
+const getBrandKit: ToolDef = {
+  name: 'get_brand_kit',
+  title: 'Read the workspace brand kit',
+  description:
+    "Returns the workspace brand kit the booking pages can apply: logo, accent color, theme, font, corners, buttons and card style. Settings the kit leaves unset are absent. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getBrandKitInput,
+  output: z.looseObject({
+    brand_kit: z
+      .looseObject({
+        logo_url: z.string().nullable().optional(),
+        accent: z.string().nullable().optional().describe('#RRGGBB.'),
+        theme: z.string().optional(),
+        font: z.string().optional(),
+        corners: z.string().optional(),
+        buttons: z.string().optional(),
+        card_style: z.string().optional(),
+      })
+      .nullable()
+      .describe('Null when the workspace has no kit.'),
+    updated_at: z.string().nullable(),
+  }),
+  async run(_args: z.infer<typeof getBrandKitInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const row = await getAccountBranding(deps.db, p.accountId);
+    const kit = row?.config ?? null;
+    const set = kit && hasBrandKit(kit) ? kit : null;
+    // A logo may be an inline data URL of a few hundred kB: report that one is set, not its bytes.
+    const logo = set?.logoUrl ? (set.logoUrl.startsWith('data:') ? '(inline image)' : untrusted(set.logoUrl, 500)) : set?.logoUrl;
+    const brand_kit = set
+      ? Object.fromEntries(
+          Object.entries({
+            logo_url: logo,
+            accent: set.accent,
+            theme: set.theme,
+            font: set.font,
+            corners: set.corners,
+            buttons: set.buttons,
+            card_style: set.cardStyle,
+          }).filter(([, v]) => v !== undefined),
+        )
+      : null;
+    return {
+      data: { brand_kit, updated_at: set && row ? new Date(row.updatedAt).toISOString() : null },
+      summary: brand_kit
+        ? `Brand kit: ${Object.entries(brand_kit)
+            .map(([k, v]) => `${k} ${String(v)}`)
+            .join(', ')}.`
+        : 'The workspace has no brand kit.',
+    };
+  },
+};
+
+const getPageSettingsInput = z.object({});
+const getBookingPageSettings: ToolDef = {
+  name: 'get_booking_page_settings',
+  title: 'Read the booking page link name and branding',
+  description:
+    "Returns how the workspace's public booking links start (its claimed link name, or its short code) and whether the product branding shows on the public pages, with whether the workspace may hide it. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getPageSettingsInput,
+  output: z.looseObject({
+    link: z.looseObject({
+      code: z.string().describe('The first segment of every public booking link.'),
+      vanity_slug: z.string().nullable().describe('The claimed link name, null when none.'),
+      short_code: z.string(),
+    }),
+    branding: z.looseObject({
+      showing: z.boolean().describe('The public pages carry the product branding right now.'),
+      hidden_by_choice: z.boolean(),
+      can_hide: z.boolean().describe('The subscription that allows hiding it is active.'),
+    }),
+  }),
+  async run(_args: z.infer<typeof getPageSettingsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const account = await deps.db.get<{ code: string; vanity_slug: string | null }>(
+      sql`SELECT code, vanity_slug FROM account WHERE id = ${p.accountId} LIMIT 1`,
+    );
+    const owner = await deps.db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE account_id = ${p.accountId} AND role = 'owner' ORDER BY created_at ASC LIMIT 1`,
+    );
+    if (!account || !owner) throw notFound('Account');
+    // The dashboard's own read, so `showing` follows the same entitlement gate the public pages do.
+    const b = await deps.admin.brandingStatus({ accountId: p.accountId, memberId: owner.id, role: 'owner' });
+    const code = canonicalPublicCode(account);
+    return {
+      data: {
+        link: { code, vanity_slug: account.vanity_slug, short_code: account.code },
+        branding: { showing: b.showing, hidden_by_choice: b.hideBranding, can_hide: b.canHide },
+      },
+      summary: `Links start with /${code}; branding ${b.showing ? 'shows' : 'is hidden'}${b.canHide ? '' : ' (hiding it needs the subscription)'}.`,
+    };
+  },
+};
+
 const listBookingsInput = z.object({
   from: z
     .string()
@@ -3496,6 +3675,9 @@ export const TOOLS: readonly ToolDef[] = [
   listOneOffLinksTool,
   listSchedules,
   getScheduleTool,
+  listCalendarConnections,
+  getBrandKit,
+  getBookingPageSettings,
   listBookings,
   listPendingBookings,
   getBooking,
