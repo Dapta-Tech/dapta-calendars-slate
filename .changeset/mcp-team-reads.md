@@ -1,6 +1,4 @@
 ---
-"@slate/api": minor
-"@slate/web": patch
 "@slate/shared": patch
 ---
 
