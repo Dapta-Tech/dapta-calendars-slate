@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { TOOL_COUNT } from '../app/admin/developers/tool-groups';
 import { E2E, HOST, answerWith, clearThrottle, signIn, throttle } from './stack';
 
 /**
@@ -151,7 +152,7 @@ test('MCP off, or an API that cannot be asked: the same note', async ({ page }) 
 test('Tools: every tool in its group, in plain words, and the way back to connect', async ({ page }) => {
   await openAsOwner(page, TOOLS);
   await expect(page.getByRole('heading', { level: 1, name: 'Tools' })).toBeVisible();
-  await expect(page.getByTestId('tools-item')).toHaveCount(19);
+  await expect(page.getByTestId('tools-item')).toHaveCount(TOOL_COUNT);
   for (const group of ['availability', 'booking', 'holds', 'bookings', 'requests', 'account']) {
     await expect(page.getByTestId(`tools-group-${group}`)).toBeVisible();
   }
