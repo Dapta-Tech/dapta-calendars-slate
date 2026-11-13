@@ -21,6 +21,14 @@ import {
   completeApiIdempotency,
   createHostEvent,
   getAccountByCode,
+  getAccountBranding,
+  getTeamById,
+  listMembers,
+  listTeamMembers,
+  listTeams,
+  getEventTypeById,
+  getSchedule,
+  listOneOffLinks,
   hashApiValue,
   hostEventAttendees,
   loadDestinationConnectionRefs,
@@ -34,12 +42,13 @@ import {
   type SeriesConflict,
   type SkippedDate,
 } from '@slate/db';
-import { BOOKING_UTM_KEYS, MAX_BOOKING_UTM_VALUE, type ApiScope, type BookingUtm } from '@slate/types';
+import { BOOKING_UTM_KEYS, MAX_BOOKING_UTM_VALUE, hasBrandKit, type ApiScope, type BookingUtm } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import { calendarFeatures } from '@slate/calendar';
 import {
   RECURRENCE_WEEKDAYS,
   localDateParts,
+  oneOffLinkPath,
   recurrenceProblem,
   seriesOccurrences,
   seriesWallClockToUtc,
@@ -55,6 +64,7 @@ import type { BookingService } from '../booking.service';
 import type { CalendarEffects } from '../calendar-effects';
 import type { CalV2Service } from '../cal-v2.service';
 import type { CalV2PilotService } from '../cal-v2-pilot.service';
+import type { CrmPropertyCatalogService } from '../crm-property-catalog';
 import { isServiceError } from '../http';
 import { queryBookings } from './bookings-query';
 import { bindHold, findHold, heldByAnother, holdOwner } from './holds';
@@ -82,8 +92,19 @@ export interface McpToolDeps {
   calV2: CalV2Service;
   pilot: CalV2PilotService;
   bookings: BookingService;
-  /** The host routes' confirm and decline, so the machine path shares their side effects. */
-  admin: Pick<AdminService, 'confirm' | 'decline'>;
+  /** The host routes' confirm and decline, so the machine path shares their side effects; and the read methods some setup tools share with the dashboard, so they match it exactly. */
+  admin: Pick<
+    AdminService,
+    | 'confirm'
+    | 'decline'
+    | 'brandingStatus'
+    | 'listNotificationSettings'
+    | 'listConnectionCalendars'
+    | 'listIntegrations'
+    | 'integrationCapabilities'
+  >;
+  /** The CRM's contact properties, cached as the mapping picker reads them; absent, the CRM reads as disabled. */
+  crmProperties?: Pick<CrmPropertyCatalogService, 'catalog'> | null;
   /** Busy reads for a decision (`provider`, always fresh) and the calendar write-out, for `create_event`. */
   calendar: Pick<
     CalendarEffects,
@@ -1527,11 +1548,13 @@ const listMyAccounts: ToolDef = {
   },
 };
 
-const listEventTypesInput = z.object({});
+const listEventTypesInput = z.object({
+  team_id: z.string().min(1).max(64).optional().describe("Only this team's event types, from list_teams."),
+});
 const listEventTypes: ToolDef = {
   name: 'list_event_types',
   title: 'List event types',
-  description: 'List the workspace\'s bookable event types (personal and team), limited to the key\'s event-type allowlist when an API key is used. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
+  description: 'List the workspace\'s bookable event types (personal and team), or one team\'s with team_id, limited to the key\'s event-type allowlist when an API key is used. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1556,10 +1579,12 @@ const listEventTypes: ToolDef = {
     ),
     count: z.number(),
   }),
-  async run(_args: z.infer<typeof listEventTypesInput>, call, deps) {
+  async run(args: z.infer<typeof listEventTypesInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
+    if (args.team_id && !(await getTeamById(deps.db, p.accountId, args.team_id))) throw notFound('Team');
     const code = await canonicalCode(deps.db, p.accountId);
-    const rows = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
+    const all = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
+    const rows = args.team_id ? all.filter((r) => r.team?.daptaId === args.team_id) : all;
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
       title: untrusted(r.title, 200),
@@ -1595,6 +1620,793 @@ const getLink: ToolDef = {
     if (!r) throw notFound('Event type');
     const url = pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
     return { data: { event_type_id: r.daptaId, title: untrusted(r.title, 200), booking_page_url: url }, summary: url };
+  },
+};
+
+/**
+ * The account owner as a dashboard principal, for the few reads that go through
+ * an `AdminService` method so they match the dashboard exactly. Those methods
+ * read the account (and, for language defaults, the owner); a key has no member
+ * of its own to pass.
+ */
+async function ownerHost(db: Db, accountId: string): Promise<{ accountId: string; memberId: string; role: 'owner' }> {
+  const owner = await db.get<{ id: string }>(
+    sql`SELECT id FROM member WHERE account_id = ${accountId} AND role = 'owner' ORDER BY created_at ASC LIMIT 1`,
+  );
+  if (!owner) throw notFound('Account');
+  return { accountId, memberId: owner.id, role: 'owner' };
+}
+
+// --- Setup reads: schedules, one event type, single-use links -----------------
+//
+// What the dashboard's Availability and event-type editor read, for an agent.
+// A key acts for the whole account, not one person, so these read across the
+// account the way list_bookings does; the event-type allowlist still applies.
+
+const weekdays = z.array(z.number()).describe('Weekdays, 0 = Sunday to 6 = Saturday.');
+
+const listSchedulesInput = z.object({});
+const listSchedules: ToolDef = {
+  name: 'list_schedules',
+  title: 'List working-hours schedules',
+  description:
+    "Lists the account's reusable working-hours schedules: whose each one is, its name, its time zone, and whether it is that person's default. An event type's private custom hours are not schedules and show in get_event_type instead. Needs scope availability:read. The ids work with get_schedule.",
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listSchedulesInput,
+  output: z.looseObject({
+    schedules: z.array(
+      z.looseObject({
+        id: z.string(),
+        name: z.string(),
+        time_zone: z.string(),
+        is_default: z.boolean().describe("True for the person's own working hours, what an event type follows when it names no schedule."),
+        member_id: z.string(),
+        member_name: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listSchedulesInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const rows = await deps.db.all<{
+      id: string;
+      name: string;
+      time_zone: string;
+      is_default: number | boolean | null;
+      member_id: string;
+      display_name: string | null;
+    }>(
+      sql`SELECT s.id, s.name, s.time_zone, s.member_id, m.display_name,
+                 CASE WHEN m.default_schedule_id = s.id THEN 1 ELSE 0 END AS is_default
+          FROM schedule s JOIN member m ON m.id = s.member_id
+          WHERE s.account_id = ${p.accountId} AND s.event_type_id IS NULL
+          ORDER BY m.created_at ASC, s.created_at ASC LIMIT 200`,
+    );
+    const schedules = rows.map((r) => ({
+      id: r.id,
+      name: untrusted(r.name, 120),
+      time_zone: r.time_zone,
+      is_default: Number(r.is_default) === 1,
+      member_id: r.member_id,
+      member_name: r.display_name ? untrusted(r.display_name, 120) : null,
+    }));
+    return {
+      data: { schedules, count: schedules.length },
+      summary: `${schedules.length} schedule(s): ${schedules
+        .slice(0, 10)
+        .map((s) => `${s.name}${s.member_name ? ` (${s.member_name})` : ''}`)
+        .join(', ')}.`,
+    };
+  },
+};
+
+const getScheduleInput = z.object({ schedule_id: z.string().min(1).max(64).describe('From list_schedules.') });
+const getScheduleTool: ToolDef = {
+  name: 'get_schedule',
+  title: 'Read one working-hours schedule',
+  description:
+    'Returns one schedule with its rules: the weekdays and hours it is open, and any date with its own hours. Times are wall-clock in the schedule\'s time zone. Needs scope availability:read.',
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getScheduleInput,
+  output: z.looseObject({
+    schedule: z.looseObject({
+      id: z.string(),
+      name: z.string(),
+      time_zone: z.string(),
+      member_id: z.string(),
+      weekly: z.array(z.looseObject({ days: weekdays, start: z.string(), end: z.string() })),
+      dates: z.array(z.looseObject({ date: z.string().describe('YYYY-MM-DD.'), start: z.string(), end: z.string() })),
+    }),
+  }),
+  async run(args: z.infer<typeof getScheduleInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const s = await getSchedule(deps.db, p.accountId, args.schedule_id);
+    if (!s) throw notFound('Schedule');
+    const weekly = s.rules.filter((r) => !r.date).map((r) => ({ days: r.days ?? [], start: r.startTime, end: r.endTime }));
+    const dates = s.rules
+      .filter((r): r is typeof r & { date: string } => Boolean(r.date))
+      .map((r) => ({ date: r.date, start: r.startTime, end: r.endTime }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
+    const name = untrusted(s.name, 120);
+    return {
+      data: { schedule: { id: s.id, name, time_zone: s.timeZone, member_id: s.memberId, weekly, dates } },
+      summary: `Schedule "${name}" (${s.timeZone}): ${weekly.length} weekly rule(s), ${dates.length} date rule(s).`,
+    };
+  },
+};
+
+const getEventTypeInput = z.object({ event_type_id: z.string().min(1).max(64).describe('From list_event_types.') });
+const getEventTypeTool: ToolDef = {
+  name: 'get_event_type',
+  title: 'Read one event type with its settings',
+  description:
+    "Returns one event type with the settings the dashboard's editor shows: length, location, which hours it follows (a schedule, the host's working hours, or its own custom hours), notice, booking window, buffers, slot interval, whether bookings wait for confirmation, seats, questions and, for a team event, its hosts. Hidden event types are included. Needs scope event-types:read and respects the key's event-type allowlist.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getEventTypeInput,
+  output: z.looseObject({
+    event_type: z.looseObject({
+      id: z.string(),
+      title: z.string(),
+      slug: z.string(),
+      description: z.string().nullable(),
+      kind: openEnum(['personal', 'team']),
+      member_id: z.string().nullable(),
+      team_id: z.string().nullable(),
+      duration_minutes: z.number(),
+      hidden: z.boolean(),
+      location: z.looseObject({ kind: z.string(), detail: z.string().nullable() }).nullable(),
+      schedule_id: z.string().nullable().describe("The schedule it follows. Null with no custom_hours: the host's working hours."),
+      custom_hours: z
+        .looseObject({ time_zone: z.string(), ranges: z.array(z.looseObject({ days: weekdays, start: z.string(), end: z.string() })) })
+        .nullable(),
+      scheduling_type: z.string().nullable(),
+      minimum_notice_minutes: z.number(),
+      booking_window_days: z.number().nullable().describe('How many days ahead it can be booked. Null: no limit.'),
+      buffer_before_minutes: z.number(),
+      buffer_after_minutes: z.number(),
+      slot_interval_minutes: z.number().nullable(),
+      requires_confirmation: z.boolean(),
+      prevent_duplicate_bookings: z.boolean(),
+      seats_per_slot: z.number().nullable(),
+      questions: z.array(
+        z.looseObject({ name: z.string(), label: z.string(), type: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }),
+      ),
+      hosts: z.array(
+        z.looseObject({ member_id: z.string(), is_fixed: z.boolean(), priority: z.number().nullable(), weight: z.number().nullable() }),
+      ),
+      booking_page_url: z.string().nullable().describe('Null for a hidden event type, which has no public page.'),
+    }),
+  }),
+  async run(args: z.infer<typeof getEventTypeInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    const et = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
+    if (!et) throw notFound('Event type');
+    let bookingPageUrl: string | null = null;
+    if (!et.hidden) {
+      const code = await canonicalCode(deps.db, p.accountId);
+      const r = (await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds)).find((x) => x.daptaId === et.id);
+      if (r) {
+        const kind = r.type === 'team' ? 'team' : 'personal';
+        bookingPageUrl = pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, kind, (kind === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
+      }
+    }
+    const title = untrusted(et.title, 200);
+    const event_type = {
+      id: et.id,
+      title,
+      slug: et.slug,
+      description: et.description ? untrusted(et.description, 2000) : null,
+      kind: (et.teamId ? 'team' : 'personal') as 'team' | 'personal',
+      member_id: et.memberId,
+      team_id: et.teamId,
+      duration_minutes: et.lengthMinutes,
+      hidden: et.hidden,
+      location: et.location ? { kind: et.location.kind, detail: et.location.detail ? untrusted(et.location.detail, 300) : null } : null,
+      schedule_id: et.scheduleId,
+      custom_hours: et.customHours
+        ? { time_zone: et.customHours.timeZone, ranges: et.customHours.ranges.map((r) => ({ days: r.days, start: r.start, end: r.end })) }
+        : null,
+      scheduling_type: et.schedulingType,
+      minimum_notice_minutes: et.minimumBookingNotice,
+      booking_window_days: et.bookingWindowDays,
+      buffer_before_minutes: et.beforeEventBuffer,
+      buffer_after_minutes: et.afterEventBuffer,
+      slot_interval_minutes: et.slotInterval,
+      requires_confirmation: et.requiresConfirmation,
+      prevent_duplicate_bookings: et.preventDuplicateBookings,
+      seats_per_slot: et.seatsPerTimeSlot,
+      questions: questionsOf(et.bookingFields),
+      hosts: et.hosts.map((h) => ({ member_id: h.memberId, is_fixed: h.isFixed, priority: h.priority, weight: h.weight })),
+      booking_page_url: bookingPageUrl,
+    };
+    return {
+      data: { event_type },
+      summary: `"${title}": ${et.lengthMinutes} min, ${event_type.kind}${et.hidden ? ', hidden' : ''}${et.requiresConfirmation ? ', needs confirmation' : ''}.`,
+    };
+  },
+};
+
+const listOneOffLinksInput = z.object({ event_type_id: z.string().min(1).max(64).describe('From list_event_types.') });
+const listOneOffLinksTool: ToolDef = {
+  name: 'list_one_off_links',
+  title: 'List the single-use links of an event type',
+  description:
+    'Lists the single-use booking links handed out for one event type, newest first: each link, whether it is still live, used (with the booking it made) or revoked, and when. A live link books the event type once, even when it is hidden. Needs scope event-types:read and respects the key\'s event-type allowlist.',
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listOneOffLinksInput,
+  output: z.looseObject({
+    links: z.array(
+      z.looseObject({
+        id: z.string(),
+        url: z.string(),
+        state: openEnum(['live', 'consumed', 'revoked']),
+        created_at: z.string(),
+        created_by_member_id: z.string().nullable(),
+        consumed_at: z.string().nullable(),
+        booking_uid: z.string().nullable().describe('The booking a used link made, for get_booking.'),
+        revoked_at: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof listOneOffLinksInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    const et = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
+    if (!et) throw notFound('Event type');
+    const base = (deps.publicBookingUrl ?? deps.publicAppUrl).replace(/\/+$/, '');
+    const iso = (ms: number | null) => (ms == null ? null : new Date(ms).toISOString());
+    const links = (await listOneOffLinks(deps.db, p.accountId, et.id)).slice(0, 100).map((l) => ({
+      id: l.id,
+      url: `${base}${oneOffLinkPath(l.token)}`,
+      state: l.state,
+      created_at: new Date(l.createdAt).toISOString(),
+      created_by_member_id: l.createdByMemberId,
+      consumed_at: iso(l.consumedAt),
+      booking_uid: l.consumedBookingUid,
+      revoked_at: iso(l.revokedAt),
+    }));
+    const live = links.filter((l) => l.state === 'live').length;
+    return {
+      data: { links, count: links.length },
+      summary: `${links.length} single-use link(s) for "${untrusted(et.title, 80)}", ${live} still live.`,
+    };
+  },
+};
+
+// --- Booking page and calendar reads ------------------------------------------
+//
+// What the dashboard's Booking page, Brand kit and Calendars screens read.
+// Account-wide, like the reads above.
+
+const listConnectionsInput = z.object({});
+const listCalendarConnections: ToolDef = {
+  name: 'list_calendar_connections',
+  title: 'List connected calendar accounts',
+  description:
+    "Lists the calendar accounts connected in the workspace: whose each one is, its provider and email, whether it is checked for conflicts, whether bookings are written to it, and its last health check. Needs scope availability:read. Connecting or removing a calendar happens in the dashboard.",
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listConnectionsInput,
+  output: z.looseObject({
+    connections: z.array(
+      z.looseObject({
+        id: z.string(),
+        member_id: z.string(),
+        member_name: z.string().nullable(),
+        provider: z.string(),
+        email: z.string().nullable(),
+        checks_conflicts: z.boolean().describe('Its busy times block booking slots.'),
+        is_destination: z.boolean().describe('New bookings are written to it.'),
+        last_check: z
+          .looseObject({ at: z.string(), ok: z.boolean().nullable(), detail: z.string().nullable() })
+          .nullable()
+          .describe('The last health check, null when it was never checked.'),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listConnectionsInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const rows = await deps.db.all<{
+      id: string;
+      member_id: string;
+      display_name: string | null;
+      provider: string;
+      primary_email: string | null;
+      is_destination: number | boolean;
+      check_conflicts: number | boolean;
+      last_check_at: number | string | null;
+      last_check_ok: number | boolean | null;
+      last_check_detail: string | null;
+    }>(
+      sql`SELECT c.id, c.member_id, m.display_name, c.provider, c.primary_email, c.is_destination, c.check_conflicts,
+                 c.last_check_at, c.last_check_ok, c.last_check_detail
+          FROM connected_calendar c JOIN member m ON m.id = c.member_id
+          WHERE c.account_id = ${p.accountId}
+          ORDER BY m.created_at ASC, c.id ASC LIMIT 200`,
+    );
+    const connections = rows.map((r) => ({
+      id: r.id,
+      member_id: r.member_id,
+      member_name: r.display_name ? untrusted(r.display_name, 120) : null,
+      provider: r.provider,
+      email: r.primary_email ? untrusted(r.primary_email, 200) : null,
+      checks_conflicts: Boolean(Number(r.check_conflicts)),
+      is_destination: Boolean(Number(r.is_destination)),
+      last_check:
+        r.last_check_at == null
+          ? null
+          : {
+              at: new Date(Number(r.last_check_at)).toISOString(),
+              ok: r.last_check_ok == null ? null : Boolean(Number(r.last_check_ok)),
+              detail: r.last_check_detail ? untrusted(r.last_check_detail, 300) : null,
+            },
+    }));
+    const failing = connections.filter((c) => c.last_check?.ok === false).length;
+    return {
+      data: { connections, count: connections.length },
+      summary: `${connections.length} connected calendar account(s)${failing ? `, ${failing} failing its last check` : ''}.`,
+    };
+  },
+};
+
+const getBrandKitInput = z.object({});
+const getBrandKit: ToolDef = {
+  name: 'get_brand_kit',
+  title: 'Read the workspace brand kit',
+  description:
+    "Returns the workspace brand kit the booking pages can apply: logo, accent color, theme, font, corners, buttons and card style. Settings the kit leaves unset are absent. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getBrandKitInput,
+  output: z.looseObject({
+    brand_kit: z
+      .looseObject({
+        logo_url: z.string().nullable().optional(),
+        accent: z.string().nullable().optional().describe('#RRGGBB.'),
+        theme: z.string().optional(),
+        font: z.string().optional(),
+        corners: z.string().optional(),
+        buttons: z.string().optional(),
+        card_style: z.string().optional(),
+      })
+      .nullable()
+      .describe('Null when the workspace has no kit.'),
+    updated_at: z.string().nullable(),
+  }),
+  async run(_args: z.infer<typeof getBrandKitInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const row = await getAccountBranding(deps.db, p.accountId);
+    const kit = row?.config ?? null;
+    const set = kit && hasBrandKit(kit) ? kit : null;
+    // A logo may be an inline data URL of a few hundred kB: report that one is set, not its bytes.
+    const logo = set?.logoUrl ? (set.logoUrl.startsWith('data:') ? '(inline image)' : untrusted(set.logoUrl, 500)) : set?.logoUrl;
+    const brand_kit = set
+      ? Object.fromEntries(
+          Object.entries({
+            logo_url: logo,
+            accent: set.accent,
+            theme: set.theme,
+            font: set.font,
+            corners: set.corners,
+            buttons: set.buttons,
+            card_style: set.cardStyle,
+          }).filter(([, v]) => v !== undefined),
+        )
+      : null;
+    return {
+      data: { brand_kit, updated_at: set && row ? new Date(row.updatedAt).toISOString() : null },
+      summary: brand_kit
+        ? `Brand kit: ${Object.entries(brand_kit)
+            .map(([k, v]) => `${k} ${String(v)}`)
+            .join(', ')}.`
+        : 'The workspace has no brand kit.',
+    };
+  },
+};
+
+const getPageSettingsInput = z.object({});
+const getBookingPageSettings: ToolDef = {
+  name: 'get_booking_page_settings',
+  title: 'Read the booking page link name and branding',
+  description:
+    "Returns how the workspace's public booking links start (its claimed link name, or its short code) and whether the product branding shows on the public pages, with whether the workspace may hide it. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: getPageSettingsInput,
+  output: z.looseObject({
+    link: z.looseObject({
+      code: z.string().describe('The first segment of every public booking link.'),
+      vanity_slug: z.string().nullable().describe('The claimed link name, null when none.'),
+      short_code: z.string(),
+    }),
+    branding: z.looseObject({
+      showing: z.boolean().describe('The public pages carry the product branding right now.'),
+      hidden_by_choice: z.boolean(),
+      can_hide: z.boolean().describe('The subscription that allows hiding it is active.'),
+    }),
+  }),
+  async run(_args: z.infer<typeof getPageSettingsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const account = await deps.db.get<{ code: string; vanity_slug: string | null }>(
+      sql`SELECT code, vanity_slug FROM account WHERE id = ${p.accountId} LIMIT 1`,
+    );
+    if (!account) throw notFound('Account');
+    // The dashboard's own read, so `showing` follows the same entitlement gate the public pages do.
+    const b = await deps.admin.brandingStatus(await ownerHost(deps.db, p.accountId));
+    const code = canonicalPublicCode(account);
+    return {
+      data: {
+        link: { code, vanity_slug: account.vanity_slug, short_code: account.code },
+        branding: { showing: b.showing, hidden_by_choice: b.hideBranding, can_hide: b.canHide },
+      },
+      summary: `Links start with /${code}; branding ${b.showing ? 'shows' : 'is hidden'}${b.canHide ? '' : ' (hiding it needs the subscription)'}.`,
+    };
+  },
+};
+
+// --- Teams, members and notification reads --------------------------------------
+//
+// The dashboard's Teams, Members and Notifications screens. Members and
+// notifications are owner-and-admin routes there; on the MCP every sign-in is an
+// owner or admin of the account it acts in, and API keys are created by one.
+
+const listTeamsInput = z.object({});
+const listTeamsTool: ToolDef = {
+  name: 'list_teams',
+  title: 'List teams',
+  description:
+    "Lists the workspace's teams: name, link name, time zone, how many members each has and its public team page. Needs scope event-types:read. The ids work with list_team_members.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listTeamsInput,
+  output: z.looseObject({
+    teams: z.array(
+      z.looseObject({
+        id: z.string(),
+        name: z.string(),
+        slug: z.string().nullable(),
+        time_zone: z.string(),
+        member_count: z.number(),
+        team_page_url: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listTeamsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const teams = await listTeams(deps.db, p.accountId);
+    const counts = await deps.db.all<{ team_id: string; n: number | string }>(
+      sql`SELECT tm.team_id, COUNT(*) AS n FROM team_membership tm JOIN team t ON t.id = tm.team_id
+          WHERE t.account_id = ${p.accountId} GROUP BY tm.team_id`,
+    );
+    const countOf = new Map(counts.map((c) => [c.team_id, Number(c.n)]));
+    const code = await canonicalCode(deps.db, p.accountId);
+    const root = (deps.publicBookingUrl ?? deps.publicAppUrl).replace(/\/+$/, '');
+    const items = teams.slice(0, 100).map((t) => ({
+      id: t.id,
+      name: untrusted(t.name, 120),
+      slug: t.slug,
+      time_zone: t.timeZone,
+      member_count: countOf.get(t.id) ?? 0,
+      team_page_url: t.slug ? `${root}/${code}/team/${t.slug}` : null,
+    }));
+    return {
+      data: { teams: items, count: items.length },
+      summary: `${items.length} team(s): ${items.map((t) => `${t.name} (${t.member_count})`).slice(0, 10).join(', ')}.`,
+    };
+  },
+};
+
+const listTeamMembersInput = z.object({ team_id: z.string().min(1).max(64).describe('From list_teams.') });
+const listTeamMembersTool: ToolDef = {
+  name: 'list_team_members',
+  title: "List a team's members and whether each can be booked",
+  description:
+    "Lists one team's members with their team role, whether they joined, and whether each is ready to be offered: working hours set, a calendar connected for busy times, and one that receives bookings. A member without hours is never offered or assigned. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listTeamMembersInput,
+  output: z.looseObject({
+    team: z.looseObject({ id: z.string(), name: z.string() }),
+    members: z.array(
+      z.looseObject({
+        member_id: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
+        team_role: openEnum(['owner', 'member']),
+        joined: z.boolean(),
+        has_hours: z.boolean(),
+        has_calendar: z.boolean(),
+        has_destination_calendar: z.boolean(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof listTeamMembersInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const team = await getTeamById(deps.db, p.accountId, args.team_id);
+    if (!team) throw notFound('Team');
+    const rows = await listTeamMembers(deps.db, p.accountId, team.id);
+    const members = rows.slice(0, 200).map((r) => ({
+      member_id: r.member_id,
+      name: r.display_name ? untrusted(r.display_name, 120) : null,
+      email: r.email ? untrusted(r.email, 200) : null,
+      team_role: r.role,
+      joined: Boolean(Number(r.accepted)),
+      has_hours: r.has_hours,
+      has_calendar: r.has_calendar,
+      has_destination_calendar: r.has_destination_calendar,
+    }));
+    const notReady = members.filter((m) => !m.has_hours).length;
+    const name = untrusted(team.name, 120);
+    return {
+      data: { team: { id: team.id, name }, members, count: members.length },
+      summary: `${members.length} member(s) on ${name}${notReady ? `, ${notReady} without working hours` : ''}.`,
+    };
+  },
+};
+
+const listMembersInput = z.object({});
+const listMembersTool: ToolDef = {
+  name: 'list_members',
+  title: "List the workspace's members",
+  description:
+    "Lists everyone in the workspace with their name, email, link name, role (owner, admin, member) and status (active, invited, disabled). Owners and admins only. Needs scope event-types:read. Inviting, changing or removing members happens in the dashboard.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listMembersInput,
+  output: z.looseObject({
+    members: z.array(
+      z.looseObject({
+        id: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
+        handle: z.string().nullable(),
+        role: openEnum(['owner', 'admin', 'member']),
+        status: z.string(),
+        joined_at: z.string(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listMembersInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const rows = await listMembers(deps.db, p.accountId);
+    const members = rows.slice(0, 500).map((m) => ({
+      id: m.id,
+      name: m.displayName ? untrusted(m.displayName, 120) : null,
+      email: m.email ? untrusted(m.email, 200) : null,
+      handle: m.handle,
+      role: m.role,
+      status: m.status,
+      joined_at: new Date(Number(m.createdAt)).toISOString(),
+    }));
+    const byRole = (r: string) => members.filter((m) => m.role === r).length;
+    return {
+      data: { members, count: members.length },
+      summary: `${members.length} member(s): ${byRole('owner')} owner, ${byRole('admin')} admin(s), ${byRole('member')} member(s).`,
+    };
+  },
+};
+
+const listNotificationsInput = z.object({});
+const listNotificationSettingsTool: ToolDef = {
+  name: 'list_notification_settings',
+  title: 'List the notification emails',
+  description:
+    "Lists the workspace's notification emails (booking confirmations, cancellations, host alerts and the like): whether each is sent, whether its text was customized, and the subject and body it sends, with the variables they may use. Reminders and follow-ups belong to each event type and are not listed here. Owners and admins only. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listNotificationsInput,
+  output: z.looseObject({
+    notifications: z.array(
+      z.looseObject({
+        key: z.string(),
+        audience: openEnum(['host', 'invitee']),
+        enabled: z.boolean(),
+        customized: z.boolean(),
+        subject: z.string(),
+        body: z.string(),
+      }),
+    ),
+    variables: z.array(z.string()),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listNotificationsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    // The dashboard's own read: the defaults come in the owner's language, as the Notifications screen shows them.
+    const out = await deps.admin.listNotificationSettings(await ownerHost(deps.db, p.accountId));
+    const notifications = out.settings.map((s) => ({
+      key: s.key,
+      audience: (s.key.startsWith('host_') ? 'host' : 'invitee') as 'host' | 'invitee',
+      enabled: s.enabled,
+      customized: s.customized,
+      subject: untrusted(s.subject ?? s.defaultSubject, 300),
+      body: untrusted(s.body ?? s.defaultBody, 5000),
+    }));
+    const off = notifications.filter((n) => !n.enabled).map((n) => n.key);
+    return {
+      data: { notifications, variables: [...out.variables], count: notifications.length },
+      summary: `${notifications.length} notification email(s); ${notifications.filter((n) => n.customized).length} customized${off.length ? `; off: ${off.join(', ')}` : ''}.`,
+    };
+  },
+};
+
+// --- Integration and connected-calendar reads -----------------------------------
+
+const listConnectionCalendarsInput = z.object({ connection_id: z.string().min(1).max(64).describe('From list_calendar_connections.') });
+const listConnectionCalendarsTool: ToolDef = {
+  name: 'list_connection_calendars',
+  title: 'List the calendars inside a connected account',
+  description:
+    "Lists the calendars one connected calendar account holds, as the provider reports them now: name, whether it is the account's primary calendar, and the access it grants. Empty when the deployment has no calendar provider. Needs scope availability:read.",
+  scope: 'availability:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listConnectionCalendarsInput,
+  output: z.looseObject({
+    connection_id: z.string(),
+    calendars: z.array(
+      z.looseObject({
+        name: z.string(),
+        is_primary: z.boolean(),
+        read_only: z.boolean(),
+        access_role: z.string().nullable(),
+      }),
+    ),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof listConnectionCalendarsInput>, call, deps) {
+    const p = requireScope(call, 'availability:read');
+    const conn = await deps.db.get<{ member_id: string }>(
+      sql`SELECT member_id FROM connected_calendar WHERE id = ${args.connection_id} AND account_id = ${p.accountId} LIMIT 1`,
+    );
+    if (!conn) throw notFound('Connection');
+    // The dashboard's own read, as the person who connected it: the provider is asked under their identity.
+    const rows = await deps.admin.listConnectionCalendars({ accountId: p.accountId, memberId: conn.member_id, role: 'member' }, args.connection_id);
+    // The provider's calendar ref is opaque and never leaves the server.
+    const calendars = rows.slice(0, 100).map((c) => ({
+      name: untrusted(c.name, 200),
+      is_primary: Boolean(c.isPrimary),
+      read_only: Boolean(c.readOnly),
+      access_role: c.accessRole ?? null,
+    }));
+    return {
+      data: { connection_id: args.connection_id, calendars, count: calendars.length },
+      summary: `${calendars.length} calendar(s): ${calendars.map((c) => c.name).slice(0, 10).join(', ')}.`,
+    };
+  },
+};
+
+const listIntegrationsInput = z.object({});
+const listIntegrationsTool: ToolDef = {
+  name: 'list_integrations',
+  title: 'List the CRM integrations',
+  description:
+    "Lists the workspace's integrations (the CRM that bookings are sent to) with their status and last check, and what this deployment supports: the CRM provider, whether credentials can be stored, and the access the CRM token needs. Never returns a credential. Connecting one happens in the dashboard. Owners and admins only. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listIntegrationsInput,
+  output: z.looseObject({
+    integrations: z.array(
+      z.looseObject({
+        provider: z.string(),
+        status: openEnum(['connected', 'unhealthy', 'disconnected']),
+        label: z.string().nullable(),
+        last_check: z.looseObject({ at: z.string(), ok: z.boolean().nullable(), detail: z.string().nullable() }).nullable(),
+        missing_scopes: z.array(z.string()).describe('Scopes the provider said the token lacks, when it said.'),
+      }),
+    ),
+    deployment: z.looseObject({
+      provider: z.string().nullable(),
+      enabled: z.boolean(),
+      can_store_credentials: z.boolean(),
+      required_scopes: z.array(z.string()),
+    }),
+    count: z.number(),
+  }),
+  async run(_args: z.infer<typeof listIntegrationsInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const host = await ownerHost(deps.db, p.accountId);
+    const [rows, caps] = await Promise.all([deps.admin.listIntegrations(host), Promise.resolve(deps.admin.integrationCapabilities(host))]);
+    const integrations = rows.map((r) => ({
+      provider: r.provider,
+      status: r.status,
+      label: r.label ? untrusted(r.label, 120) : null,
+      last_check:
+        r.lastCheckAt == null
+          ? null
+          : { at: new Date(r.lastCheckAt).toISOString(), ok: r.lastCheckOk, detail: r.lastCheckDetail ? untrusted(r.lastCheckDetail, 300) : null },
+      missing_scopes: [...(r.lastErrorDetail?.requiredGranularScopes ?? [])],
+    }));
+    return {
+      data: {
+        integrations,
+        deployment: {
+          provider: caps.provider,
+          enabled: caps.enabled,
+          can_store_credentials: caps.canStoreCredentials,
+          required_scopes: [...caps.requiredScopes],
+        },
+        count: integrations.length,
+      },
+      summary: integrations.length
+        ? integrations.map((i) => `${i.provider}: ${i.status}`).join(', ') + '.'
+        : `No integration connected${caps.enabled ? `; ${caps.provider ?? 'a CRM'} can be connected in the dashboard` : '; this deployment has no CRM'}.`,
+    };
+  },
+};
+
+const crmPropertiesInput = z.object({
+  refresh: z.boolean().optional().describe('Fetch the list from the CRM again instead of the copy cached for a few minutes.'),
+});
+const listCrmContactProperties: ToolDef = {
+  name: 'list_crm_contact_properties',
+  title: "List the CRM's contact properties",
+  description:
+    "Lists the contact properties of the connected CRM that booking answers can be mapped to: name, label, type and options. Empty, with a reason, when the CRM is off, not connected or not answering. Needs scope event-types:read.",
+  scope: 'event-types:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: crmPropertiesInput,
+  output: z.looseObject({
+    provider: z.string().nullable(),
+    connected: z.boolean(),
+    properties: z.array(
+      z.looseObject({
+        name: z.string(),
+        label: z.string(),
+        type: z.string(),
+        field_type: z.string(),
+        options: z.array(z.looseObject({ value: z.string(), label: z.string() })),
+      }),
+    ),
+    fetched_at: z.string().nullable(),
+    reason: openEnum(['disabled', 'not_connected', 'unavailable']).nullable(),
+    count: z.number(),
+  }),
+  async run(args: z.infer<typeof crmPropertiesInput>, call, deps) {
+    const p = requireScope(call, 'event-types:read');
+    const catalog = deps.crmProperties
+      ? await deps.crmProperties.catalog(p.accountId, { refresh: args.refresh === true })
+      : { provider: null, connected: false, properties: [], fetchedAt: null, reason: 'disabled' as const };
+    const properties = catalog.properties.slice(0, 500).map((x) => ({
+      name: untrusted(x.name, 120),
+      label: untrusted(x.label, 200),
+      type: x.type,
+      field_type: x.fieldType,
+      options: x.options.slice(0, 100).map((o) => ({ value: untrusted(o.value, 200), label: untrusted(o.label, 200) })),
+    }));
+    return {
+      data: {
+        provider: catalog.provider,
+        connected: catalog.connected,
+        properties,
+        fetched_at: catalog.fetchedAt == null ? null : new Date(catalog.fetchedAt).toISOString(),
+        reason: catalog.reason,
+        count: properties.length,
+      },
+      summary: catalog.reason ? `No CRM properties (${catalog.reason}).` : `${properties.length} contact propert${properties.length === 1 ? 'y' : 'ies'} in ${catalog.provider ?? 'the CRM'}.`,
+    };
   },
 };
 
@@ -3242,6 +4054,20 @@ export const TOOLS: readonly ToolDef[] = [
   listMyAccounts,
   listEventTypes,
   getLink,
+  getEventTypeTool,
+  listOneOffLinksTool,
+  listSchedules,
+  getScheduleTool,
+  listCalendarConnections,
+  getBrandKit,
+  getBookingPageSettings,
+  listTeamsTool,
+  listTeamMembersTool,
+  listMembersTool,
+  listNotificationSettingsTool,
+  listConnectionCalendarsTool,
+  listIntegrationsTool,
+  listCrmContactProperties,
   listBookings,
   listPendingBookings,
   getBooking,

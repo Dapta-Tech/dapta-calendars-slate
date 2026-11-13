@@ -31,7 +31,7 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 
 ## Tools
 
-The `develop` branch exposes 19 tools. Use `tools/list` on your deployed endpoint
+The `develop` branch exposes 33 tools. Use `tools/list` on your deployed endpoint
 to see its actual catalog: a deployment stays on its released version until
 upgraded.
 
@@ -44,8 +44,22 @@ upgraded.
 | `book_team_meeting` | public team link, or `bookings:write` (by `event_type_id`) | write, emails the invitee | Books a team event; the host is picked at booking time and returned. |
 | `whoami` | any key or connection | read | Workspace, owner time zone, the key's (or connection's) scopes and allowlist. |
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
-| `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), respecting the allowlist. |
+| `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), or one team's with `team_id`, respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
+| `get_event_type` | `event-types:read` | read | One event type with its editor settings: length, location, the hours it follows (schedule, working hours or custom hours), notice, window, buffers, confirmation, seats, questions, team hosts. Hidden ones included; respects the allowlist. |
+| `list_one_off_links` | `event-types:read` | read | The single-use links of one event type, newest first, each live, used (with its booking uid) or revoked. Respects the allowlist. |
+| `list_schedules` | `availability:read` | read | The account's reusable working-hours schedules, whose each is, its time zone and whether it is that person's default. |
+| `get_schedule` | `availability:read` | read | One schedule's weekly hours and its date-specific hours, wall-clock in its time zone. |
+| `list_calendar_connections` | `availability:read` | read | The workspace's connected calendar accounts: whose, provider, email, whether each blocks free times or receives bookings, and its last health check. Connecting one stays in the dashboard. |
+| `get_brand_kit` | `event-types:read` | read | The workspace brand kit: logo, accent, theme, font, corners, buttons, card style. An inline logo is reported as set, not returned. |
+| `get_booking_page_settings` | `event-types:read` | read | How the public links start (claimed link name or short code) and whether the product branding shows, and may be hidden. |
+| `list_teams` | `event-types:read` | read | The workspace's teams with their link name, time zone, member count and team page. |
+| `list_team_members` | `event-types:read` | read | One team's members, their team role, whether they joined, and whether each has hours, a calendar and a booking calendar (without hours a host is never offered). |
+| `list_members` | `event-types:read` | read | Everyone in the workspace: name, email, link name, role, status. The dashboard route is owners and admins only; every MCP sign-in is one. |
+| `list_notification_settings` | `event-types:read` | read | The account-level notification emails: on or off, customized or not, the subject and body they send, and the template variables. Reminders live on each event type. |
+| `list_connection_calendars` | `availability:read` | read | The calendars inside one connected account, as the provider reports them now (name, primary, access). The provider's calendar refs stay on the server. |
+| `list_integrations` | `event-types:read` | read | The CRM integration's status, last check and any scopes the token lacks, plus what the deployment supports. Never a credential. Owners and admins only in the dashboard. |
+| `list_crm_contact_properties` | `event-types:read` | read | The connected CRM's contact properties booking answers can map to, or an empty list with the reason. |
 | `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
@@ -65,7 +79,8 @@ calendar (`create_event` does not email; it writes to the host's calendar, which
 invites the attendees). Descriptions and the server instructions say what a tool does and
 never give the model orders, as the Claude and ChatGPT connector directories
 require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
-exposed over MCP: webhooks, API keys, team administration, event-type edits.
+exposed over MCP: webhooks, API keys, team administration, event-type edits
+(see [Coverage of the dashboard API](#coverage-of-the-dashboard-api)).
 
 Output schemas are open: every object in them allows properties it does not
 list, and a value from a set (an event's `kind`, a team's `scheduling_type`)
@@ -87,6 +102,29 @@ team link, take theirs from the link.
 and `/v1/machine/bookings/:uid/cancel`) accept `bookings:cancel` **or**
 `bookings:write`, so existing keys keep working there; the MCP tool requires
 `bookings:cancel`.
+
+### Coverage of the dashboard API
+
+Every route of the signed-in dashboard API (`HostController` and
+`AdminCrudController`) is listed in `apps/api/src/api-reference.ts`, with its
+area, who may call it (`member`, `own`, `admin`, `owner`) and whether it is
+destructive. `apps/api/src/api-reference.spec.ts` reads the routes off the
+controllers the app registers and fails when the list and the app disagree, or
+when a route's `access` disagrees with the permission checks in its handler.
+
+`apps/api/src/mcp/parity.ts` maps each of those routes to the tool that does the
+same thing, or names why there is none:
+
+- `excluded`: decided against exposing it over MCP (the list above).
+- `dashboard-only`: it needs a person in the browser (a provider's sign-in, the
+  onboarding) or is kept for a person in the dashboard (handing over the account).
+- `not-yet`: no tool has been written. These are the work left to reach parity.
+
+`apps/api/src/mcp/mcp-parity.spec.ts` fails when a documented route has neither
+a tool nor an exclusion, when a tool's read, write and destructive marks disagree
+with its route, and when a tool for an owner or admin route does not say so in a
+fixed sentence ("Owners and admins only." or "The account owner only."). A new
+dashboard route therefore cannot ship without a decision about the MCP.
 
 ### Booking safely
 
