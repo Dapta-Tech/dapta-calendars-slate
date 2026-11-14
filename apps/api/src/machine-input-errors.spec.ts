@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sql } from '@slate/db';
 import { bootHarness, type Harness } from './mcp/mcp-harness';
 
 /**
@@ -57,5 +58,71 @@ describe('machine routes: invalid input is a 400 naming the field', () => {
     const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe('BAD_REQUEST');
     expect(body.message).toMatch(/^from: /);
+  });
+
+  async function cancel(uid: string, idempotencyKey: string) {
+    const key = await h.key(['bookings:write']);
+    return fetch(`${h.base}/v1/machine/bookings/${uid}/cancel`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${key}`,
+        'content-type': 'application/json',
+        'idempotency-key': idempotencyKey,
+      },
+      body: JSON.stringify({}),
+    });
+  }
+
+  async function bookingStatus(uid: string): Promise<string | undefined> {
+    const row = await h.db.get<{ status: string }>(
+      sql`SELECT status FROM booking WHERE uid = ${uid}`,
+    );
+    return row?.status;
+  }
+
+  it('POST /v1/machine/bookings/:uid/cancel names the Idempotency-Key header when it is too long', async () => {
+    const uid = await h.newBooking();
+    const res = await cancel(uid, 'k'.repeat(201));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe('BAD_REQUEST');
+    expect(body.message).toMatch(/^Idempotency-Key: /);
+    expect(await bookingStatus(uid)).toBe('accepted');
+  });
+
+  it('POST /v1/machine/bookings/:uid/cancel still cancels with a valid Idempotency-Key', async () => {
+    const uid = await h.newBooking();
+    const res = await cancel(uid, 'cancel-once');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ uid, status: 'cancelled' });
+    expect(await bookingStatus(uid)).toBe('cancelled');
+  });
+
+  async function list(query: string) {
+    const key = await h.key(['bookings:read']);
+    return fetch(`${h.base}/v1/machine/bookings?${query}`, {
+      headers: { authorization: `Bearer ${key}` },
+    });
+  }
+
+  it.each([
+    ['from=tomorrow', 'from: Invalid date'],
+    ['to=next-week', 'to: Invalid date'],
+    ['limit=abc', 'limit: Expected an integer'],
+    ['limit=10.5', 'limit: Expected an integer'],
+    ['limit=1&limit=2', 'limit: Expected string, received array'],
+  ])('GET /v1/machine/bookings?%s is a 400 naming the field', async (query, message) => {
+    const res = await list(query);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'BAD_REQUEST', message });
+  });
+
+  it('GET /v1/machine/bookings keeps accepting any date the server can read and clamping the limit', async () => {
+    const uid = await h.newBooking();
+    const res = await list('from=2000-01-01&to=2100-01-01T00:00:00Z&limit=999');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ uid: string }>; nextCursor: string | null };
+    expect(body.items.length).toBeLessThanOrEqual(200);
+    expect(body.items.map((item) => item.uid)).toContain(uid);
   });
 });

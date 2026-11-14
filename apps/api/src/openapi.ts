@@ -1499,7 +1499,10 @@ export const openapiSpec = {
           required: false,
           schema: { type: 'string' },
         })),
-        responses: { '200': { description: '{items,nextCursor}' } },
+        responses: {
+          '200': { description: '{items,nextCursor}' },
+          '400': { description: 'from or to is not a date, or limit is not an integer' },
+        },
       },
     },
     '/v1/machine/bookings/{uid}': {
@@ -1557,6 +1560,7 @@ export const openapiSpec = {
           '200': {
             description: '{uid,status:"cancelled"} (retries return alreadyApplied)',
           },
+          '400': { description: 'Idempotency-Key is invalid (over 200 characters)' },
           '403': { description: 'out-of-scope' },
           '410': { description: 'Not cancellable (declined)' },
         },

@@ -36,6 +36,7 @@ import { AnalyticsEffects } from './analytics-effects';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { OnboardingService } from './onboarding.service';
 import { GrowthService } from './growth.service';
+import { parseBookingsListQuery } from './bookings-list-query';
 import { AuthService, type ReqLike } from './auth.service';
 import { requestEntry } from './auth.provider';
 import { assertAdmin } from './permissions';
@@ -431,12 +432,7 @@ export class HostController {
   @Get('host/bookings')
   async listBookings(@Req() req: ReqLike, @Query() q: Record<string, string>) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.listBookings(p, {
-      from: q.from,
-      to: q.to,
-      status: q.status,
-      limit: q.limit ? Number(q.limit) : undefined,
-    });
+    return this.admin.listBookings(p, { ...parseBookingsListQuery(q), status: q.status });
   }
 
   /**
