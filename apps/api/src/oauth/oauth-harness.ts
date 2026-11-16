@@ -45,7 +45,23 @@ export interface OAuthHarness extends Harness {
   otherOwner: Record<string, string>;
 }
 
+/**
+ * The issuer must be known before the app boots, so the port is picked first and
+ * bound a moment later: another process (a parallel spec file, an ephemeral
+ * port the OS hands out meanwhile) can take it in between. That is a lost race,
+ * not a failure: boot again on a new port.
+ */
 export async function bootOAuth(env: HarnessEnv = {}): Promise<OAuthHarness> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await bootOAuthOnce(env);
+    } catch (error) {
+      if (attempt >= 5 || (error as NodeJS.ErrnoException)?.code !== 'EADDRINUSE') throw error;
+    }
+  }
+}
+
+async function bootOAuthOnce(env: HarnessEnv): Promise<OAuthHarness> {
   const port = await freePort();
   const issuer = `http://127.0.0.1:${port}`;
   const resource = `${issuer}/mcp`;
