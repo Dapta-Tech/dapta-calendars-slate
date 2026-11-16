@@ -22,3 +22,20 @@ export function prefillFromQuery(query: RawSearchParams | undefined): BookingPre
   }
   return normalizeBookingPrefill(raw);
 }
+
+/**
+ * A plain decimal: an optional minus sign, digits, and an optional fraction
+ * that has digits of its own. The ONE shape a prefilled number is allowed to
+ * have, because it is the one every browser's `<input type="number">` keeps
+ * and the one a person types. JavaScript's `Number()` reads far more (`0x10`,
+ * `0b10`, `1e3`, `Infinity`, a lone space) and a browser empties the input for
+ * most of those, so the state would hold a value the field submits blank and
+ * the required check would pass on it. No surrounding whitespace is accepted
+ * here: `normalizeBookingPrefill` already trims, and a caller that did not
+ * should see the value refused rather than quietly repaired.
+ */
+const PLAIN_NUMBER_RE = /^-?(?:\d+|\d*\.\d+)$/;
+
+export function isPlainNumber(value: string): boolean {
+  return PLAIN_NUMBER_RE.test(value);
+}

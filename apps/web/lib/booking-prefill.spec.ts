@@ -12,7 +12,7 @@ import {
   MAX_BOOKING_PREFILL_NAME,
   MAX_BOOKING_PREFILL_VALUE,
 } from '@slate/types';
-import { prefillFromQuery } from '@/lib/booking-prefill';
+import { isPlainNumber, prefillFromQuery } from '@/lib/booking-prefill';
 
 describe('prefillFromQuery', () => {
   it('takes name, email and notes, and every answer_ key', () => {
@@ -110,4 +110,16 @@ describe('prefillFromQuery', () => {
     const prefill = prefillFromQuery(query);
     expect(Object.keys(prefill!.answers!)).toHaveLength(MAX_BOOKING_PREFILL_ANSWERS);
   });
+});
+
+describe('isPlainNumber', () => {
+  it.each(['0', '12', '-3', '3.5', '-0.25', '.5'])('accepts %s', (v) => {
+    expect(isPlainNumber(v)).toBe(true);
+  });
+  it.each(['', ' ', ' 5', '5 ', '0x10', '0b10', '1e3', 'Infinity', '-Infinity', 'NaN', '+5', '5.', '1,5', 'a few'])(
+    'rejects %j',
+    (v) => {
+      expect(isPlainNumber(v)).toBe(false);
+    },
+  );
 });
