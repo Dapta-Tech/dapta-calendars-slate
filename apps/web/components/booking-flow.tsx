@@ -34,7 +34,7 @@ import {
 /** Mirror of the server's attendee-email rule: catches the 400 before a
  *  round-trip, so a typo never costs the visitor their filled-in form. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-import type { BookingField, BookingUtm } from '@slate/types';
+import type { BookingField, BookingPrefill, BookingUtm } from '@slate/types';
 import {
   bookAction,
   meetingLinkAction,
@@ -152,6 +152,17 @@ interface Props {
    */
   utm?: BookingUtm | null;
   /**
+   * Starting values for the intake form, from this page's own address
+   * (`lib/booking-prefill.ts`): what the page that sent the visitor here — a
+   * dForms form, a campaign link — already asked them for.
+   *
+   * Absent on every page reached directly, and absent changes nothing. Present,
+   * it seeds the inputs and NOTHING else: each one stays editable, keeps its
+   * required flag, and is validated exactly as a typed value is, so a prefill
+   * cannot put a value into a booking the visitor did not see.
+   */
+  prefill?: BookingPrefill | null;
+  /**
    * The page's `showBranding` from the API (see `signupHref`): false for an
    * account that turned the Dapta branding off while it is a paying Dapta AI
    * customer, and the confirmation then carries no free-calendar block.
@@ -229,6 +240,7 @@ export function BookingFlow({
   embed = false,
   oneOffToken,
   utm = null,
+  prefill = null,
   showBranding,
   followBrowserZone = true,
   previewNotice,
@@ -297,12 +309,50 @@ export function BookingFlow({
   // CONTROLLED values for every visible input: React 19 resets uncontrolled
   // form fields when the action returns, so a server-side 400 used to wipe
   // everything the visitor had typed (QA2 fix 3).
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [notes, setNotes] = useState('');
+  // The three attendee fields this form always asks are seeded straight from
+  // the prefill: they exist on the first paint, so there is nothing to wait
+  // for and no effect that could overwrite what the visitor has typed.
+  const [name, setName] = useState(() => prefill?.name ?? '');
+  const [email, setEmail] = useState(() => prefill?.email ?? '');
+  const [notes, setNotes] = useState(() => prefill?.notes ?? '');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [emailError, setEmailError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
+  /**
+   * The custom-field half of the prefill, applied as the fields arrive.
+   *
+   * It cannot be seeded with the state above, because on the public pages this
+   * island does not KNOW its questions on the first paint: they come with the
+   * first availability read (`useProgressiveSlots`), so there is nothing to key
+   * a prefilled answer to yet. Hence an effect, and hence the two rules that
+   * make it safe to run again on every change to the field list:
+   *
+   *   - a key naming no rendered field is never applied, so an address copied
+   *     between two event types prefills what they share and nothing else;
+   *   - a key already IN `answers` is never touched, and the visitor typing in
+   *     a field is exactly what puts its key there — so a prefilled value they
+   *     corrected stays corrected, and one they cleared stays cleared.
+   *
+   * The reserved names (`name`, `email`, `notes`) are deliberately not here:
+   * they are attendee fields the form asks by itself, never custom questions
+   * (`visibleFields` filters them out), and they are seeded above.
+   */
+  const prefillAnswers = prefill?.answers;
+  useEffect(() => {
+    if (!prefillAnswers) return;
+    const asked = new Set(visibleFields.map((f) => f.name));
+    setAnswers((current) => {
+      let next: Record<string, string> | null = null;
+      for (const [key, value] of Object.entries(prefillAnswers)) {
+        if (!asked.has(key) || key in current) continue;
+        next ??= { ...current };
+        next[key] = value;
+      }
+      // The same object when nothing applied: a new one would re-render every
+      // input on every availability read for the rest of the visit.
+      return next ?? current;
+    });
+  }, [prefillAnswers, visibleFields]);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
   /** Preview only: a valid submit was made, and booked nothing. */
   const [previewSubmitted, setPreviewSubmitted] = useState(false);

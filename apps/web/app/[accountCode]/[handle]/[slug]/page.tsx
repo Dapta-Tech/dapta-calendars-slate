@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { bookingPageTracking } from '@/lib/booking-page-tracking';
 import { utmFromQuery } from '@/lib/booking-utm';
+import { prefillFromQuery } from '@/lib/booking-prefill';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { eventPageTitle, getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
@@ -176,6 +177,7 @@ export default async function BookingPage({
           nowUtc={from}
           embed={embed}
           utm={utmFromQuery(query)}
+          prefill={prefillFromQuery(query)}
           showBranding={brandingShown(profile)}
         />
       </main>
