@@ -186,5 +186,10 @@ describe('cross-member schedule and event-type reads follow the member\'s curren
     await h.db.run(sql`UPDATE event_type SET member_id = ${adminId} WHERE id = ${introId}`);
     expect(structured<{ event_type: { id: string } }>(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } })).event_type.id).toBe(introId);
     expect(structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} })).event_types.map((e) => e.id)).toContain(introId);
+    // A hidden event type of their own is not in the bookable list (as for an admin), but get_event_type still reads it.
+    await h.db.run(sql`UPDATE event_type SET hidden = 1 WHERE id = ${introId}`);
+    expect(structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} })).event_types.map((e) => e.id)).not.toContain(introId);
+    expect(structured<{ event_type: { hidden: boolean } }>(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } })).event_type.hidden).toBe(true);
+    await h.db.run(sql`UPDATE event_type SET hidden = 0 WHERE id = ${introId}`);
   });
 });

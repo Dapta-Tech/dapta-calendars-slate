@@ -24,7 +24,6 @@ import {
   getAccountBranding,
   getTeamById,
   listAccountSchedules,
-  listEventTypes as listEventTypeRows,
   listMembers,
   listTeamMembers,
   listTeams,
