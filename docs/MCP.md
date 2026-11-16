@@ -40,8 +40,8 @@ upgraded.
 | `find_available_slots` | public page link, or `availability:read` (by `event_type_id`) | read | Open times for one event, grouped by local date, each with its offset in the `time_zone` you ask for plus UTC. Range capped at 31 days. |
 | `find_team_slots` | public team link, or `availability:read` (by `event_type_id`) | read | The same for one team event, plus the team, its scheduling method (round-robin, collective, fixed round-robin) and host count. A team page that offers one event is enough. |
 | `hold_slot` | public page link, or `bookings:write` (by `event_type_id`) | write | Holds one offered slot for about 10 minutes and returns an opaque `hold_id`. One-host events only. |
-| `book_meeting` | nothing (public page) | write, emails the invitee | Books one offered slot. Same validation as the public booking page. Takes an optional `hold_id`. |
-| `book_team_meeting` | public team link, or `bookings:write` (by `event_type_id`) | write, emails the invitee | Books a team event; the host is picked at booking time and returned. |
+| `book_meeting` | nothing (public page) | write, emails the invitee | Books one offered slot. Same validation as the public booking page. Takes an optional `hold_id`. On a video meeting it waits a few seconds for the link. |
+| `book_team_meeting` | public team link, or `bookings:write` (by `event_type_id`) | write, emails the invitee | Books a team event; the host is picked at booking time and returned. On a video meeting it waits a few seconds for the link. |
 | `whoami` | any key or connection | read | Workspace, owner time zone, the key's (or connection's) scopes and allowlist. |
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), or one team's with `team_id`, respecting the allowlist. |
@@ -60,12 +60,12 @@ upgraded.
 | `list_connection_calendars` | `availability:read` | read | The calendars inside one connected account, as the provider reports them now (name, primary, access). The provider's calendar refs stay on the server. |
 | `list_integrations` | `event-types:read` | read | The CRM integration's status, last check and any scopes the token lacks, plus what the deployment supports. Never a credential. Owners and admins only in the dashboard. |
 | `list_crm_contact_properties` | `event-types:read` | read | The connected CRM's contact properties booking answers can map to, or an empty list with the reason. |
-| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
+| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain, the location kind and the video link ([Video links](#video-links-on-bookings)). Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
-| `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
-| `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
+| `get_booking` | `bookings:read` | read | One booking, with its location and video link. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
+| `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. On a video meeting it waits a few seconds for the link. |
 | `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. For a date of a repeating event, `scope` moves that date, it and the later ones, or every date not started. |
-| `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
+| `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. On a video meeting it waits a few seconds for the link. |
 | `decline_booking` | `bookings:write` | **destructive**, emails the invitee | Declines a pending request and frees its time. Never touches an accepted booking. |
 | `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. For a date of a repeating event, `scope` cancels that date, it and the later ones, or every date not started ([Repeating events](#repeating-events)). |
 | `create_event` | `bookings:write`, a key with no event-type allowlist | write, writes to the host's calendar | Puts an event of the host's own on their calendar: any title, start and length, 0 to 10 attendees, once or repeating, with a video link the calendar creates. See [Host events](#host-events). |
@@ -351,6 +351,27 @@ To cancel this date and the later ones, call `cancel_booking` with
 `booking_uid` set to the returned uid and `scope: "this_and_following"`. For a
 move, call `reschedule_booking` with `booking_uid` set to that uid, the new
 `start`, a new `idempotency_key`, and the desired scope.
+
+### Video links on bookings
+
+A booking on an event type whose location is a video meeting gets its link from
+the host's connected calendar, a few seconds after it is booked or confirmed.
+Every booking answer says where it stands: `location_kind` (`conferencing` for a
+video meeting), `location` (the place, or `Online meeting` when it has no text of
+its own), `meeting_url` and `meeting_url_status`:
+
+- `ready`: `meeting_url` holds the link, the same one the confirmation email carries.
+- `pending`: the calendar is still creating it. `book_meeting`, `book_team_meeting`,
+  `create_booking`, `confirm_booking` and `reschedule_booking` already wait a few
+  seconds for it; `get_booking` shows it about 10 seconds later, and the
+  confirmation email carries it.
+- `on_confirmation`: a request waiting for the host; the link is created once
+  `confirm_booking` (or the host) accepts it.
+- `none`: no link is coming (another kind of place, or no calendar to create one).
+
+`book_meeting` and `book_team_meeting` answer with the link with no sign-in too:
+whoever books gets the same link the invitee's confirmation email carries. A
+retry with the same `idempotency_key` reads the link as it is by then.
 
 ### Requests that wait for the host
 
