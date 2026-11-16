@@ -146,7 +146,7 @@ describe('create_event', () => {
 
   it('creates for an active member, and refuses a member disabled since connecting', async () => {
     const memberId = await addMember(h, 'admin');
-    const c = await signIn(h, memberId);
+    const c = await signIn(h, memberId, 'event-types:read availability:read bookings:read bookings:write');
     const made = structured<{ event: { uid: string } }>(await c.callTool({ name: 'create_event', arguments: args('guard-event-0001') }));
     expect(made.event.uid).toBeTruthy();
     await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${memberId}`);

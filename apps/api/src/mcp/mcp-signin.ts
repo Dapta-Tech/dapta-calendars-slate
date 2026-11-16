@@ -20,9 +20,9 @@ export async function addMember(h: OAuthHarness, role: 'owner' | 'admin' | 'memb
 }
 
 /** An MCP client signed in as `memberId` (the seeded owner when omitted). The member must be an owner or admin to approve. */
-export async function signIn(h: OAuthHarness, memberId?: string): Promise<McpClient> {
+export async function signIn(h: OAuthHarness, memberId?: string, scope = 'event-types:read availability:read bookings:read'): Promise<McpClient> {
   const client = await publicClient(h);
-  const started = await startAuthorization(h, client, { scope: 'event-types:read availability:read bookings:read' });
+  const started = await startAuthorization(h, client, { scope });
   const who = memberId ? { 'x-slate-account': h.accountId, 'x-slate-member': memberId } : h.owner;
   const res = await decide(h, started.uid, 'approve', who);
   if (res.status !== 200) throw new Error(`approve failed: ${res.status} ${await res.text()}`);
