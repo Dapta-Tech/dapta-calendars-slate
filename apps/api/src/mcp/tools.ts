@@ -1557,7 +1557,7 @@ const listEventTypesInput = z.object({
 const listEventTypes: ToolDef = {
   name: 'list_event_types',
   title: 'List event types',
-  description: 'List the workspace\'s bookable event types (personal and team), or one team\'s with team_id, limited to the key\'s event-type allowlist when an API key is used. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
+  description: 'List the workspace\'s bookable event types (personal and team; hidden ones are left out, get_event_type reads one), or one team\'s with team_id, limited to the key\'s event-type allowlist when an API key is used. A sign-in as an owner or admin sees every one; any other member sees only their own, by their current role. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1590,7 +1590,17 @@ const listEventTypes: ToolDef = {
     const inTeam = args.team_id ? all.filter((r) => r.team?.daptaId === args.team_id) : all;
     // A sign-in sees what its member's CURRENT role allows: an admin every event type, anyone else only their own.
     const me = p.memberId ? await actingMember(deps.db, p) : null;
-    const own = me && !isAdmin(me.role) ? new Set((await listEventTypeRows(deps.db, p.accountId, { memberId: me.memberId })).map((e) => e.id)) : null;
+    // One query: the member's own BOOKABLE ones, the same set (hidden left out) the listing below is made of.
+    const own =
+      me && !isAdmin(me.role)
+        ? new Set(
+            (
+              await deps.db.all<{ id: string }>(
+                sql`SELECT id FROM event_type WHERE account_id = ${p.accountId} AND member_id = ${me.memberId} AND hidden = 0`,
+              )
+            ).map((e) => e.id),
+          )
+        : null;
     const rows = own ? inTeam.filter((r) => own.has(r.daptaId)) : inTeam;
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
