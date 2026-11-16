@@ -238,6 +238,8 @@ export class McpGateway {
         const principal = accounts.length === 1 ? loginPrincipal(accounts[0]!, call.login.token) : null;
         return { ...call, principal, login: { ...call.login, accounts } };
       }
+      // Every membership was just verified, and a login principal is one of them: nothing more to ask.
+      return call;
     }
     await this.assertActiveMember(call);
     return call;
