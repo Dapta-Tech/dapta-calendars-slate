@@ -685,6 +685,40 @@ export async function listSchedules(
   return rows.map((r) => ({ id: r.id, name: r.name, timeZone: r.timeZone, isDefault: Number(r.is_default) === 1 }));
 }
 
+/**
+ * Every member's REUSABLE schedules in an account, with the owner's display name,
+ * for reads that look across the account (the MCP `list_schedules`). Same filter
+ * and default marker as `listSchedules`, so the two cannot drift.
+ */
+export async function listAccountSchedules(
+  db: Db,
+  accountId: string,
+  limit = 200,
+): Promise<{ id: string; name: string; timeZone: string; isDefault: boolean; memberId: string; memberName: string | null }[]> {
+  const rows = await db.all<{
+    id: string;
+    name: string;
+    timeZone: string;
+    memberId: string;
+    memberName: string | null;
+    is_default: number | boolean | null;
+  }>(
+    sql`SELECT s.id, s.name, s.time_zone AS "timeZone", s.member_id AS "memberId", m.display_name AS "memberName",
+               CASE WHEN m.default_schedule_id = s.id THEN 1 ELSE 0 END AS is_default
+        FROM schedule s JOIN member m ON m.id = s.member_id
+        WHERE s.account_id = ${accountId} AND s.event_type_id IS NULL
+        ORDER BY m.created_at ASC, s.created_at ASC LIMIT ${limit}`,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    timeZone: r.timeZone,
+    isDefault: Number(r.is_default) === 1,
+    memberId: r.memberId,
+    memberName: r.memberName,
+  }));
+}
+
 /** A REUSABLE schedule; an event's private custom hours read as not found (see `listSchedules`). */
 export async function getSchedule(db: Db, accountId: string, id: string): Promise<ScheduleView | null> {
   const s = await db.get<{ id: string; member_id: string; name: string; time_zone: string }>(

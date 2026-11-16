@@ -29,7 +29,7 @@ afterAll(async () => {
 });
 
 async function connect(accountId: string, opts: { email: string; ok?: boolean; destination?: boolean }) {
-  const member = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`))!;
+  const member = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${accountId} ORDER BY (role = 'owner') DESC, created_at ASC LIMIT 1`))!;
   const id = randomUUID();
   const checkedAt = opts.ok === undefined ? null : Date.now() - 60_000;
   await h.db.run(
@@ -42,11 +42,12 @@ async function connect(accountId: string, opts: { email: string; ok?: boolean; d
 }
 
 describe('list_calendar_connections', () => {
-  it("lists the account's connections with their role and last check, never the provider reference", async () => {
+  it("lists the owner's connections with their role and last check, never the provider reference", async () => {
     const good = await connect(h.accountId, { email: 'host@example.org', ok: true, destination: true });
     const bad = await connect(h.accountId, { email: 'old@example.org', ok: false });
     const theirs = await connect(h.other.accountId, { email: 'other@example.org' });
-    const c = await h.connect(await h.key(['availability:read']));
+    // A key reads the workspace owner's connections (and needs bookings:write besides); see mcp.read-guards.spec.ts.
+    const c = await h.connect(await h.key(['availability:read', 'bookings:write']));
     const raw = await c.callTool({ name: 'list_calendar_connections', arguments: {} });
     const got = structured<{ connections: Connection[]; count: number }>(raw);
     const ids = got.connections.map((x) => x.id);
