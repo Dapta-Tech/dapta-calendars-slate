@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { bookingPageTracking } from '@/lib/booking-page-tracking';
 import { utmFromQuery } from '@/lib/booking-utm';
+import { prefillFromQuery } from '@/lib/booking-prefill';
 import { notFound } from 'next/navigation';
 import { getMessages, schedulingMethodLabel } from '@slate/shared';
 import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
@@ -264,6 +265,7 @@ export default async function OneOffBookingPage({
             nowUtc={from}
             embed={embed}
             utm={utmFromQuery(query)}
+            prefill={prefillFromQuery(query)}
             oneOffToken={token}
             showBranding={brandingShown(team)}
           />
@@ -324,6 +326,7 @@ export default async function OneOffBookingPage({
           nowUtc={from}
           embed={embed}
           utm={utmFromQuery(query)}
+          prefill={prefillFromQuery(query)}
           oneOffToken={token}
           showBranding={brandingShown(profile)}
         />

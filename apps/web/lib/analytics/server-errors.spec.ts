@@ -17,7 +17,7 @@ const ON = {
   PUBLIC_APP_URL: 'https://cal.example.test',
 } as unknown as NodeJS.ProcessEnv;
 
-const request = (path = `/acme/ana/intro?prefill=${encodeURIComponent(EMAIL)}`) => ({
+const request = (path = `/acme/ana/intro?email=${encodeURIComponent(EMAIL)}`) => ({
   path,
   method: 'GET',
   headers: {
@@ -74,7 +74,7 @@ describe('reportRequestError', () => {
     });
     const sent = JSON.stringify(body);
     expect(sent).not.toContain(EMAIL);
-    expect(sent).not.toContain('prefill');
+    expect(sent).not.toContain('email=');
     expect(sent).not.toContain('session=');
     expect(sent).not.toContain('Bearer');
     expect(sent).not.toContain('/acme/ana/intro');

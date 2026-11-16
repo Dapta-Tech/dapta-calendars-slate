@@ -48,6 +48,33 @@ export function isPhoneValueTooShort(value: string): boolean {
   return d.length < min;
 }
 
+/**
+ * A value this field can actually DISPLAY, or '' when there is none.
+ *
+ * The field is a dial-code selector plus a digits-only box: it renders
+ * `formatPhoneDigits(dial, subscriberDigits)` and submits `value` verbatim, so
+ * anything in `value` that is not a dial code and digits is submitted while
+ * being invisible on screen. For a value the attendee TYPED that gap cannot
+ * open (the box takes digits only). For one that arrived from somewhere else, a
+ * prefilled booking page, it can, and `?answer_phone=sam@example.com` would
+ * have shown an empty box and booked the address.
+ *
+ * So a value from outside is put through this first: the dial code it carries
+ * (or `defaultCountry`'s, the same fallback the selector starts on), plus its
+ * digits, and nothing else. No digits at all means there is no phone number in
+ * it and the field is left empty, which is the honest reading of
+ * "sam@example.com". What comes back is exactly what the field will draw.
+ */
+export function canonicalPhoneValue(value: string, defaultCountry?: string): string {
+  const digits = phoneSubscriberDigits(value);
+  if (!digits) return '';
+  // Uppercased, because the country codes are and the selector's own fallback
+  // does the same with this exact prop.
+  const dial =
+    longestDialPrefix(value) || deriveCountry('', (defaultCountry ?? '').toUpperCase()).dial;
+  return `${dial}${digits}`;
+}
+
 /** Country a value implies. Shared dials (+1 is US/CA/…) are ambiguous:
  *  keep the already-picked country when it fits, else fall back to US. */
 function deriveCountry(value: string, pickedCode: string): Country {
