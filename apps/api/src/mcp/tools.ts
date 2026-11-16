@@ -1678,7 +1678,7 @@ async function adminMember(db: Db, p: MachinePrincipal) {
  * the workspace owner's connection, so it gets the bar `check_availability`
  * sets: `bookings:write` besides `availability:read`, and no event-type limit.
  */
-async function calendarOwner(call: McpCall, db: Db): Promise<{ id: string }> {
+async function calendarOwner(call: McpCall, db: Db): Promise<{ id: string; time_zone: string | null; email: string | null }> {
   const p = requireScope(call, 'availability:read');
   if (p.kind !== 'oauth' && !p.memberId) requireScope(call, 'bookings:write');
   if (p.eventTypeIds)
