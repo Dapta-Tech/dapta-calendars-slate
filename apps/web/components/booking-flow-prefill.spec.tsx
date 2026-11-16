@@ -355,6 +355,17 @@ describe('a prefill never books what the visitor cannot see', () => {
     expect(actions.bookAction).not.toHaveBeenCalled();
   });
 
+  it.each(['0x10', '0b10', '1e3', 'Infinity', '-Infinity'])(
+    'does not let the JavaScript-only number %s satisfy a required number question',
+    async (value) => {
+      const el = await mountTyped({ answers: { headcount: value } });
+      await pickTime(el);
+      expect(valueOf(el, 'input[name="answer_headcount"]')).toBe('');
+      await confirm(el);
+      expect(actions.bookAction).not.toHaveBeenCalled();
+    },
+  );
+
   it('fills a required number question from a numeric prefill, and books it', async () => {
     const el = await mountTyped({ answers: { headcount: '12' } });
     await pickTime(el);
@@ -390,6 +401,19 @@ describe('the prefill does not stay in the address', () => {
     expect(search()).not.toContain('name=');
     expect(search()).not.toContain('notes=');
     expect(search()).not.toContain('answer_');
+  });
+
+  it('removes values that did not survive cleaning too (overlong, invalid)', async () => {
+    // normalizeBookingPrefill drops these, so the island receives no prefill at
+    // all; the invitee's text must still leave the address.
+    const long = 'x'.repeat(5000);
+    window.history.replaceState(
+      {},
+      '',
+      `/acme/riley-chen/design-review?embed=1&email=${long}&name=Sam%00&answer_company=${long}&notes=${long}`,
+    );
+    await mount(null);
+    expect(search()).toBe('?embed=1');
   });
 
   it('keeps the parameters the page itself owns', async () => {

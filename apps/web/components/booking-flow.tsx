@@ -56,7 +56,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  */
 function seedForField(field: BookingField, value: string): string {
   if (field.type === 'phone') return canonicalPhoneValue(value, field.defaultCountry);
-  if (field.type === 'number') return Number.isFinite(Number(value.trim())) ? value.trim() : '';
+  if (field.type === 'number') return isPlainNumber(value.trim()) ? value.trim() : '';
   return value;
 }
 import { BOOKING_PREFILL_ANSWER_PREFIX, type BookingField, type BookingPrefill, type BookingUtm } from '@slate/types';
@@ -66,6 +66,7 @@ import {
   releaseAction,
   reserveAction,
 } from '@/app/[accountCode]/[handle]/[slug]/actions';
+import { isPlainNumber } from '@/lib/booking-prefill';
 import { classifyBookingFailure } from '@/lib/booking-failure';
 import type { BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
@@ -384,8 +385,10 @@ export function BookingFlow({
    * History is not touched when there is nothing to remove, so a page reached
    * without a prefill keeps the exact URL it always had.
    */
+  // Scrubbed whether or not the prefill survived cleaning: a value refused as
+  // overlong or invalid is still the invitee's own text, and it would reach the
+  // same tags. Only seeding the form depends on `prefill`.
   useEffect(() => {
-    if (!prefill) return;
     try {
       const url = new URL(window.location.href);
       let removed = false;
@@ -400,7 +403,7 @@ export function BookingFlow({
       // A browser that refuses `replaceState` (or an exotic URL) leaves the
       // address as it was. Nothing else depends on this having happened.
     }
-  }, [prefill]);
+  }, []);
 
   const prefillAnswers = prefill?.answers;
   useEffect(() => {
