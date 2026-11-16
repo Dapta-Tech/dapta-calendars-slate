@@ -20,7 +20,9 @@ import { memberWithHours, WEEKDAYS } from './member-hours.fixture';
 const url = process.env.DATABASE_URL ?? '';
 const isPg = url.startsWith('postgres://') || url.startsWith('postgresql://');
 const HOUR = 3_600_000;
-const PAST_BASE = Date.now() - 400 * 24 * HOUR;
+// A window of its own: rr-equal-distribution.spec.ts draws its load times the same way, in the same
+// Postgres database, from 400 days back; both ranges are up to 100k hours wide, so they must not overlap.
+const PAST_BASE = Date.now() - 400 * 24 * HOUR - 120_000 * HOUR;
 let loadSeq = Math.floor(Math.random() * 100_000);
 
 function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) {
@@ -131,7 +133,7 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       }
     }
 
-    /** An offered time at which none of `memberIds` holds a booking (Postgres keeps earlier runs' rows). */
+    /** An offered time at which none of `memberIds` holds a booking or a pending request (Postgres keeps earlier runs' rows). */
     async function freeFor(
       ev: { teamSlug: string; slug: string },
       memberIds: string[],
@@ -149,7 +151,8 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
         let clear = true;
         for (const m of memberIds) {
           const hit = await db.get<{ id: string }>(
-            sql`SELECT id FROM booking WHERE host_member_id = ${m} AND status = 'accepted'
+            // The same rows `booking_no_overlap` refuses on: accepted AND pending (other specs leave both).
+            sql`SELECT id FROM booking WHERE host_member_id = ${m} AND status IN ('accepted', 'pending')
                 AND start_ms < ${start + HOUR / 2} AND end_ms > ${start} LIMIT 1`,
           );
           if (hit) clear = false;

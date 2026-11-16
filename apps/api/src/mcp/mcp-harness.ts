@@ -100,13 +100,25 @@ export async function bootHarness(env: HarnessEnv = {}, opts: { port?: number } 
   // Same split as main.ts: the OAuth server parses its own bodies.
   const parse = json({ limit: '100kb' });
   app.use((req: ExpressRequest, res: ExpressResponse, next: NextFunction) => (oidcOwnsBody(req.path) ? next() : parse(req, res, next)));
-  await app.listen(opts.port ?? 0, '127.0.0.1');
+  const restoreEnv = () => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  };
+  try {
+    await app.listen(opts.port ?? 0, '127.0.0.1');
+  } catch (error) {
+    // A port taken by someone else (see bootOAuth): leave nothing behind, so the caller can boot again.
+    restoreEnv();
+    await app.close().catch(() => undefined);
+    await db.close().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
   // Providers read the environment while the app is built; put it back at once
   // so harnesses booted side by side do not leak settings into each other.
-  for (const k of ENV_KEYS) {
-    if (saved[k] === undefined) delete process.env[k];
-    else process.env[k] = saved[k];
-  }
+  restoreEnv();
   const gateway = app.get(McpGateway);
   const audit: string[] = [];
   gateway.auditSink = (line) => audit.push(line);
