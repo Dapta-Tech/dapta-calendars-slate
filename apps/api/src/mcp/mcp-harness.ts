@@ -125,6 +125,7 @@ export async function bootHarness(env: HarnessEnv = {}, opts: { port?: number } 
   const base = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
 
   const clients: Client[] = [];
+  let seq = 0;
   return {
     base,
     url: `${base}/mcp`,
@@ -139,7 +140,11 @@ export async function bootHarness(env: HarnessEnv = {}, opts: { port?: number } 
         sql`SELECT id, member_id FROM event_type WHERE account_id = ${accountId} AND slug = 'intro-call'`,
       ))!;
       const uid = randomUUID();
-      const start = Date.now() + (20 + Math.floor(Math.random() * 1000)) * 3_600_000;
+      // A day of its own per call (no two collide), at 23:41 UTC: a time no spec books or moves a series to. It used
+      // to be now + a random number of hours, which lands on any hour of the day, so it sometimes overlapped a
+      // fixed-time booking another test makes for the same host (the host's own overlap refusal, SLOT_TAKEN).
+      const day = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) + (2 + (seq++ % 300)) * 86_400_000;
+      const start = day + (23 * 60 + 41) * 60_000;
       await db.run(
         sql`INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, start_ms, end_ms, status, metadata, created_at, updated_at)
             VALUES (${randomUUID()}, ${accountId}, ${uid}, ${et.id}, ${et.member_id}, 'Intro Call', ${start}, ${start + 1_800_000}, 'accepted', ${null}, ${Date.now()}, ${Date.now()})`,
