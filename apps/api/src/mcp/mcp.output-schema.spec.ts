@@ -14,7 +14,8 @@ import { TOOLS, type ToolResult } from './tools';
 
 let h: Harness;
 beforeAll(async () => {
-  h = await bootHarness({ MCP_RATE_LIMIT_CAPACITY: '200' });
+  // Every tool, the ones behind a switch included.
+  h = await bootHarness({ MCP_RATE_LIMIT_CAPACITY: '200', MCP_EVENT_TYPE_WRITE_ENABLED: 'true' });
 });
 afterAll(async () => {
   await h.close();

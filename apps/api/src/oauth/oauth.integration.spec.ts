@@ -90,7 +90,7 @@ describe('discovery', () => {
       response_types_supported: ['code'],
     });
     expect(m.token_endpoint_auth_methods_supported).toContain('none');
-    expect(m.scopes_supported).toEqual([...READ.split(' '), 'bookings:write', 'bookings:cancel', 'offline_access']);
+    expect(m.scopes_supported).toEqual([...READ.split(' '), 'bookings:write', 'bookings:cancel', 'event-types:write', 'offline_access']);
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
