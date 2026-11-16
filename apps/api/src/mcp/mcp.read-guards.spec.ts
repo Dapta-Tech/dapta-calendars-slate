@@ -103,6 +103,19 @@ describe('calendar connections', () => {
     expect(errorText(await c.callTool({ name: 'list_connection_calendars', arguments: { connection_id: theirs } }))).toContain('NOT_FOUND');
   });
 
+  it('refuses a sign-in whose member was disabled or removed since connecting', async () => {
+    const memberId = await addMember(h, 'admin');
+    const c = await signIn(h, memberId);
+    const id = await connection(memberId, 'gone@example.org');
+    expect(structured<{ count: number }>(await c.callTool({ name: 'list_calendar_connections', arguments: {} })).count).toBe(1);
+    await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${memberId}`);
+    for (const [name, args] of [
+      ['list_calendar_connections', {}],
+      ['list_connection_calendars', { connection_id: id }],
+    ] as const)
+      expect(errorText(await c.callTool({ name, arguments: args }))).toContain('FORBIDDEN');
+  });
+
   it('holds an API key to the bar of check_availability and the workspace owner\'s connections', async () => {
     const ownerId = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${h.accountId} AND role = 'owner' AND status = 'active' ORDER BY created_at LIMIT 1`))!.id;
     const coworkerId = await addMember(h, 'member');

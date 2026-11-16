@@ -1687,6 +1687,8 @@ async function calendarOwner(call: McpCall, db: Db): Promise<{ id: string; time_
       `This API key (${p.prefix}) is limited to some event types, so it cannot read the host's own calendar.`,
       'Use a key with no event-type limit, or a sign-in.',
     );
+  // A sign-in is verified offline: a member disabled since connecting must lose the access now.
+  if (p.memberId) await actingMember(db, p);
   const host = await eventHost(db, p);
   if (!host) throw notFound('Host');
   return host;
