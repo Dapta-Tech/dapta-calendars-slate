@@ -105,6 +105,8 @@ export interface BookingMessages {
     nextMonth: string;
     /** Marks the current day in the grid; visually a dot, here for the label. */
     today: string;
+    /** On a day with hours whose times a booking limit of the event has closed. */
+    dayFull: string;
     /** The day column before any day is chosen. */
     pickADay: string;
     /** Announced (not shown) while the month's times are still being read. */
@@ -548,6 +550,8 @@ export interface BookingMessages {
           bufferAfter: string;
           seats: string;
           window: string;
+          /** Any booking limit is set. */
+          limits: string;
           interval: string;
         };
         errors: {
@@ -686,6 +690,24 @@ export interface BookingMessages {
         hint: string;
         /** Inline error for anything but a whole number in range; `{max}` is the cap. */
         invalid: string;
+      };
+      /**
+       * Booking limits: how many bookings of the event, and how many minutes of
+       * them, one day and one week (Monday to Sunday) may hold, in the
+       * schedule's time zone. Empty is no limit.
+       */
+      bookingLimits: {
+        title: string;
+        hint: string;
+        bookingsPerDay: string;
+        bookingsPerWeek: string;
+        minutesPerDay: string;
+        minutesPerWeek: string;
+        placeholder: string;
+        /** Inline error for anything but a whole number in range; `{max}` is the cap. */
+        invalid: string;
+        /** A minutes limit shorter than the event, which would close every day; `{min}` is its length. */
+        belowLength: string;
       };
       fBufferBefore: string;
       fBufferAfter: string;
@@ -2154,6 +2176,7 @@ export const en: BookingMessages = {
     previousMonth: 'Previous month',
     nextMonth: 'Next month',
     today: 'Today',
+    dayFull: 'Full',
     pickADay: 'Pick a day to see the times available.',
     readingTimes: 'Finding the times available this month.',
     noTimesOnDay: 'No times available on this day.',
@@ -2472,12 +2495,13 @@ export const en: BookingMessages = {
         },
         advanced: {
           title: 'Advanced settings',
-          hint: 'Buffers, group seats, how far ahead people can book, and how often times start.',
+          hint: 'Buffers, group seats, how far ahead people can book, booking limits, and how often times start.',
           allDefault: 'Default settings',
           bufferBefore: '{n} min before',
           bufferAfter: '{n} min after',
           seats: '{n} seats per time',
           window: 'up to {n} days ahead',
+          limits: 'booking limits',
           interval: 'starts every {n} min',
         },
         errors: {
@@ -2611,6 +2635,17 @@ export const en: BookingMessages = {
         placeholder: 'No limit',
         hint: 'Invitees can book up to this many calendar days ahead, counting from today in the time zone of the schedule (on a team event, each host’s own). With 14, the last day they can pick is 14 days from today. Leave it empty for no limit.',
         invalid: 'Use a whole number from 1 to {max}, or leave it empty.',
+      },
+      bookingLimits: {
+        title: 'Booking limits',
+        hint: 'Cap how many bookings of this event a day or a week (Monday to Sunday) can take, by count or by total minutes, in the time zone of the schedule (on a team event, each host’s own, with every host’s bookings counted together). Pending bookings count; cancelled and declined ones don’t. Once a day or week is full, its other times close and the booking page shows the day as Full. Leave a field empty for no limit.',
+        bookingsPerDay: 'Max bookings per day',
+        bookingsPerWeek: 'Max bookings per week',
+        minutesPerDay: 'Max total minutes per day',
+        minutesPerWeek: 'Max total minutes per week',
+        placeholder: 'No limit',
+        invalid: 'Use a whole number from 1 to {max}, or leave it empty.',
+        belowLength: 'Use at least the event’s length ({min} min), or leave it empty: no time could be booked with less.',
       },
       fBufferBefore: 'Buffer before (min)',
       fBufferAfter: 'Buffer after (min)',
@@ -4084,6 +4119,7 @@ export const es: BookingMessages = {
     previousMonth: 'Mes anterior',
     nextMonth: 'Mes siguiente',
     today: 'Hoy',
+    dayFull: 'Completo',
     pickADay: 'Elige un día para ver los horarios disponibles.',
     readingTimes: 'Buscando los horarios disponibles de este mes.',
     noTimesOnDay: 'No hay horarios disponibles este día.',
@@ -4409,12 +4445,13 @@ export const es: BookingMessages = {
         },
         advanced: {
           title: 'Ajustes avanzados',
-          hint: 'Márgenes, cupos por grupo, con cuánta anticipación se puede reservar y cada cuánto empiezan los horarios.',
+          hint: 'Márgenes, cupos por grupo, con cuánta anticipación se puede reservar, límites de reservas y cada cuánto empiezan los horarios.',
           allDefault: 'Ajustes predeterminados',
           bufferBefore: '{n} min antes',
           bufferAfter: '{n} min después',
           seats: '{n} cupos por horario',
           window: 'hasta {n} días antes',
+          limits: 'límites de reservas',
           interval: 'empieza cada {n} min',
         },
         errors: {
@@ -4548,6 +4585,17 @@ export const es: BookingMessages = {
         placeholder: 'Sin límite',
         hint: 'Los invitados pueden reservar hasta esta cantidad de días calendario hacia adelante, contando desde hoy en la zona horaria del horario (en un evento de equipo, la de cada anfitrión). Con 14, el último día que pueden elegir es dentro de 14 días. Déjalo vacío para no poner límite.',
         invalid: 'Usa un número entero de 1 a {max}, o déjalo vacío.',
+      },
+      bookingLimits: {
+        title: 'Límites de reservas',
+        hint: 'Limita cuántas reservas de este evento puede recibir un día o una semana (de lunes a domingo), por cantidad o por minutos en total, en la zona horaria del horario (en un evento de equipo, la de cada anfitrión, contando juntas las reservas de todos). Las reservas pendientes cuentan; las canceladas y las rechazadas no. Cuando un día o una semana se llena, sus demás horarios se cierran y la página de reservas muestra el día como Completo. Deja un campo vacío para no poner límite.',
+        bookingsPerDay: 'Máx. de reservas por día',
+        bookingsPerWeek: 'Máx. de reservas por semana',
+        minutesPerDay: 'Máx. de minutos por día',
+        minutesPerWeek: 'Máx. de minutos por semana',
+        placeholder: 'Sin límite',
+        invalid: 'Usa un número entero de 1 a {max}, o déjalo vacío.',
+        belowLength: 'Usa al menos la duración del evento ({min} min), o déjalo vacío: con menos no se podría reservar ningún horario.',
       },
       fBufferBefore: 'Margen antes (min)',
       fBufferAfter: 'Margen después (min)',

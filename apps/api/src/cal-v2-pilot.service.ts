@@ -82,6 +82,12 @@ function requestHash(value: unknown): string {
   return createHash("sha256").update(stableStringify(value)).digest("hex");
 }
 
+/** A day and a week limit as cal.com's `{ day?, week? }`, or null when neither is set. */
+function byPeriod(day: number | null, week: number | null): { day?: number; week?: number } | null {
+  if (day === null && week === null) return null;
+  return { ...(day !== null ? { day } : {}), ...(week !== null ? { week } : {}) };
+}
+
 type Slot = { start: string; end: string };
 
 function computeOpenSlots(
@@ -169,6 +175,10 @@ export class CalV2PilotService {
       description: string | null;
       length_minutes: number;
       booking_window_days: number | null;
+      max_bookings_per_day: number | null;
+      max_bookings_per_week: number | null;
+      max_minutes_per_day: number | null;
+      max_minutes_per_week: number | null;
       hidden: number;
       member_id: string | null;
       team_id: string | null;
@@ -181,6 +191,7 @@ export class CalV2PilotService {
       success_redirect_url: string | null;
     }>(
       sql`SELECT et.id, et.title, et.slug, et.description, et.length_minutes, et.booking_window_days,
+                 et.max_bookings_per_day, et.max_bookings_per_week, et.max_minutes_per_day, et.max_minutes_per_week,
                  et.hidden, et.member_id, et.team_id, m.handle,
                  t.slug AS team_slug, t.name AS team_name, et.scheduling_type,
                  et.locations, et.booking_fields, et.success_redirect_url
@@ -206,6 +217,10 @@ export class CalV2PilotService {
           row.booking_window_days === null
             ? null
             : { type: 'calendarDays' as const, value: row.booking_window_days, rolling: false },
+        // Cal.com's shapes for booking limits: counts and minutes, by period,
+        // only the periods that are set. Null when the event has none.
+        bookingLimitsCount: byPeriod(row.max_bookings_per_day, row.max_bookings_per_week),
+        bookingLimitsDuration: byPeriod(row.max_minutes_per_day, row.max_minutes_per_week),
         title: row.title,
         slug: row.slug,
         description: row.description,
@@ -547,7 +562,8 @@ export class CalV2PilotService {
           v2Error(
             status,
             outcome.reason,
-            "The booking could not be rescheduled.",
+            // The event's booking limit, when that is why, words the refusal.
+            outcome.message ?? "The booking could not be rescheduled.",
           );
         }
         if (!outcome.alreadyApplied)

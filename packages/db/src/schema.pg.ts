@@ -203,6 +203,16 @@ export const eventType = pgTable('event_type', {
    * @slate/engine). NULL = no limit, as before this existed. See migration 0035.
    */
   bookingWindowDays: integer('booking_window_days'),
+  /**
+   * Booking limits: at most this many accepted or pending bookings of the
+   * event (or minutes of them) per day and per week (Monday to Sunday), in the
+   * schedule's zone; a seated time counts once (`booking-limits.ts` in
+   * @slate/engine). NULL = no limit, as before these existed. See migration 0042.
+   */
+  maxBookingsPerDay: integer('max_bookings_per_day'),
+  maxBookingsPerWeek: integer('max_bookings_per_week'),
+  maxMinutesPerDay: integer('max_minutes_per_day'),
+  maxMinutesPerWeek: integer('max_minutes_per_week'),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),

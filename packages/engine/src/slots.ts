@@ -6,7 +6,8 @@
  *   available windows (UTC)  --step by slotInterval-->  candidate slots
  *   --drop any whose [start−beforeBuffer, end+afterBuffer] overlaps busy-->
  *   --drop before now+minimumBookingNotice, cap at the window (and at the
- *   booking window, N calendar days ahead)-->  free slots.
+ *   booking window, N calendar days ahead)-->
+ *   --drop a time whose day or week a booking limit has filled-->  free slots.
  *
  * `busy` is the UNION the caller assembles: vendor busy-times (all
  * check-conflict calendars of the qualified hosts) + existing `accepted`
@@ -23,6 +24,7 @@ import {
   parseTimeOfDay,
   zonedWallClockToUtc,
 } from './tz.util';
+import { bookingLimitTally, hasBookingLimits, type BookingLimitsInput } from './booking-limits';
 
 /** A wall-clock availability rule (mirrors booking.availability). */
 export interface AvailabilityRule {
@@ -62,6 +64,13 @@ export interface ComputeSlotsInput {
    * slot may start (see {@link bookingWindowEnd}). null or absent = no limit.
    */
   bookingWindowDays?: number | null;
+  /**
+   * The event's booking limits and the bookings that count toward them (see
+   * `booking-limits.ts`): a time whose day or week, in `timeZone` (or the
+   * input's own zone, a team's), one more booking would take past a limit is
+   * not offered. null or absent = none.
+   */
+  bookingLimits?: BookingLimitsInput | null;
   /** "Now" (UTC) — injected for deterministic tests. */
   now: Date;
 }
@@ -159,6 +168,15 @@ function overlapsBusy(aStart: number, aEnd: number, busy: Interval[]): boolean {
  * Compute free slot START instants (UTC), sorted ascending, de-duplicated.
  */
 export function computeSlots(input: ComputeSlotsInput): Date[] {
+  return computeSlotsDetailed(input).slots;
+}
+
+/**
+ * {@link computeSlots}, plus `full`: the times that pass everything else (hours,
+ * notice, window, busy) but that a booking limit closes. The booking page
+ * draws a day with some of those and no time left as "Full".
+ */
+export function computeSlotsDetailed(input: ComputeSlotsInput): { slots: Date[]; full: Date[] } {
   const {
     fromUtc,
     toUtc,
@@ -185,6 +203,11 @@ export function computeSlots(input: ComputeSlotsInput): Date[] {
   const windowEnd = bookingEnd ? Math.min(toUtc.getTime(), bookingEnd.getTime()) : toUtc.getTime();
 
   const busy = mergeIntervals(input.busy);
+  // Last, after busy: a time a limit closes is "full", never merely busy.
+  const breach =
+    input.bookingLimits && hasBookingLimits(input.bookingLimits.limits)
+      ? bookingLimitTally(input.bookingLimits, timeZone)
+      : null;
 
   // Split rules into date-overrides (keyed by date) and recurring (by weekday).
   const overridesByDate = new Map<string, AvailabilityRule[]>();
@@ -200,6 +223,7 @@ export function computeSlots(input: ComputeSlotsInput): Date[] {
   }
 
   const results: number[] = [];
+  const full: number[] = [];
   const seen = new Set<number>();
 
   // Iterate civil dates in the schedule's zone from the local date of fromUtc
@@ -236,16 +260,16 @@ export function computeSlots(input: ComputeSlotsInput): Date[] {
         if (slotStart >= windowEnd) break;
         // Buffer the candidate on both sides before testing against busy.
         if (overlapsBusy(slotStart - beforeMs, slotEnd + afterMs, busy)) continue;
-        if (!seen.has(slotStart)) {
-          seen.add(slotStart);
-          results.push(slotStart);
-        }
+        if (seen.has(slotStart)) continue;
+        seen.add(slotStart);
+        if (breach?.(slotStart, durationMs)) full.push(slotStart);
+        else results.push(slotStart);
       }
     }
 
     civil = nextCivilDate(civil);
   }
 
-  results.sort((a, b) => a - b);
-  return results.map(ms => new Date(ms));
+  const asDates = (list: number[]) => list.sort((a, b) => a - b).map((ms) => new Date(ms));
+  return { slots: asDates(results), full: asDates(full) };
 }

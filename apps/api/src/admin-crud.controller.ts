@@ -56,6 +56,7 @@ import {
   type CrudResult,
 } from '@slate/db';
 import {
+  bookingMinutesLimitProblem,
   eventTypeInputSchema,
   eventLocationSchema,
   MAX_REMINDER_BODY,
@@ -113,6 +114,12 @@ function parse<T>(schema: { parse: (v: unknown) => T }, body: unknown): T {
       throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
     throw err;
   }
+}
+
+/** Refuse a minutes limit shorter than the event, as the event stands after the save. */
+function assertMinutesLimitsFit(e: Parameters<typeof bookingMinutesLimitProblem>[0]): void {
+  const problem = bookingMinutesLimitProblem(e);
+  if (problem) throw new BadRequestException({ error: 'BAD_REQUEST', message: problem });
 }
 
 /**
@@ -488,6 +495,7 @@ export class AdminCrudController {
   async createEventType(@Req() req: ReqLike, @Body() body: unknown) {
     const p = await this.auth.resolveHost(req);
     const input = parse(eventTypeInputSchema, body);
+    assertMinutesLimitsFit(input);
     // A team event-type is a cross-member resource → admin/owner only. A plain
     // member may only create their OWN personal event-type.
     if (input.teamId) assertAdmin(p);
@@ -524,6 +532,12 @@ export class AdminCrudController {
     if (!existing) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(eventTypeInputSchema.partial(), body);
+    // Against what the save leaves: a partial save keeps the stored length and limits.
+    assertMinutesLimitsFit({
+      lengthMinutes: input.lengthMinutes ?? existing.lengthMinutes,
+      maxMinutesPerDay: input.maxMinutesPerDay !== undefined ? input.maxMinutesPerDay : existing.maxMinutesPerDay,
+      maxMinutesPerWeek: input.maxMinutesPerWeek !== undefined ? input.maxMinutesPerWeek : existing.maxMinutesPerWeek,
+    });
     await assertAvailabilitySource(
       this.db,
       input,

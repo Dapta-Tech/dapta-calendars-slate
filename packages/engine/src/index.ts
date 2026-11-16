@@ -3,6 +3,7 @@
  * Fully unit-tested; portable across SQLite and Postgres deployments.
  */
 export * from './slots';
+export * from './booking-limits';
 export * from './empty-reason';
 export * from './short-links';
 export * from './tz.util';

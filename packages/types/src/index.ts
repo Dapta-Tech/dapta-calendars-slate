@@ -465,6 +465,49 @@ export function clampAvailabilityWindow(fromMs: number, toMs: number): number {
 export const MAX_BOOKING_WINDOW_DAYS = 730;
 
 /**
+ * The highest booking limit a host may set on an event type, per day and per
+ * week (`maxBookingsPerDay`, `maxMinutesPerDay`, and the week pair): the
+ * minutes in a day and in a week. A count never needs more: two bookings of
+ * one event cannot start in the same minute without seats, and seats count once.
+ */
+export const MAX_BOOKING_LIMIT_PER_DAY = 1440;
+export const MAX_BOOKING_LIMIT_PER_WEEK = 10_080;
+
+/** One booking limit on the event type input: a whole number from 1 to `max`, or null for none. */
+function bookingLimitSchema(what: string, max: number) {
+  return z
+    .number()
+    .int()
+    .min(1, `The limit of ${what} must be at least 1.`)
+    .max(max, `The limit of ${what} can be at most ${max}.`)
+    .nullable()
+    .optional();
+}
+
+/**
+ * A minutes limit shorter than the event itself closes every day (or week): not
+ * even one booking fits. Checked against what a save LEAVES (the stored length
+ * or limit when the save omits it), so raising the length past an existing
+ * limit is refused too. The problem in words, or null.
+ */
+export function bookingMinutesLimitProblem(e: {
+  lengthMinutes?: number;
+  maxMinutesPerDay?: number | null;
+  maxMinutesPerWeek?: number | null;
+}): string | null {
+  const length = e.lengthMinutes;
+  if (!length) return null;
+  for (const [limit, what] of [
+    [e.maxMinutesPerDay, 'a day'],
+    [e.maxMinutesPerWeek, 'a week'],
+  ] as const) {
+    if (typeof limit === 'number' && limit < length)
+      return `The limit of minutes ${what} (${limit}) is shorter than the event (${length} min), so no time could be booked. Use at least ${length}, or no limit.`;
+  }
+  return null;
+}
+
+/**
  * Query for the public TEAM availability route
  * (`GET /v1/public/teams/{accountCode}/{teamSlug}/availability`, #136).
  *
@@ -544,6 +587,13 @@ export const availabilityResponseSchema = z.object({
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
+  /**
+   * Start instants (ISO-8601 UTC) the hours offer but a booking limit of the
+   * event (per day or per week) has closed. Not bookable; the booking page
+   * draws a day that has some of these and no slot left as "Full" rather than
+   * as a blank day. Absent when nothing is closed by a limit.
+   */
+  fullSlots: z.array(isoUtcSchema).optional(),
   /** Present only when slots is empty because of a configuration error. */
   emptyReason: availabilityEmptyReasonSchema.optional(),
 });
@@ -1493,6 +1543,15 @@ export const eventTypeInputSchema = z.object({
     .max(MAX_BOOKING_WINDOW_DAYS, `The booking window can be at most ${MAX_BOOKING_WINDOW_DAYS} days.`)
     .nullable()
     .optional(),
+  /** Booking limits: how many bookings of this event, and how many minutes of
+   *  them, a day and a week (Monday to Sunday) may hold, read in the schedule's
+   *  time zone. Accepted and pending bookings count; a seated time counts once.
+   *  Omitted ⇒ unchanged; null ⇒ no limit, which every event that predates
+   *  them reads as. Enforced wherever the booking window is. */
+  maxBookingsPerDay: bookingLimitSchema('bookings a day', MAX_BOOKING_LIMIT_PER_DAY),
+  maxBookingsPerWeek: bookingLimitSchema('bookings a week', MAX_BOOKING_LIMIT_PER_WEEK),
+  maxMinutesPerDay: bookingLimitSchema('minutes a day', MAX_BOOKING_LIMIT_PER_DAY),
+  maxMinutesPerWeek: bookingLimitSchema('minutes a week', MAX_BOOKING_LIMIT_PER_WEEK),
   beforeEventBuffer: z.number().int().min(0).optional(),
   afterEventBuffer: z.number().int().min(0).optional(),
   slotInterval: z.number().int().positive().nullable().optional(),

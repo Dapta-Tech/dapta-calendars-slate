@@ -75,6 +75,12 @@ export interface EventTypeView {
   /** Booking window in calendar days ahead (today = day 0). NULL ⇒ no limit,
    *  which is what every event type that predates it reads as. */
   bookingWindowDays: number | null;
+  /** Booking limits per day and per week (Monday to Sunday), as counts and as
+   *  minutes. NULL ⇒ no limit, which every event type that predates them reads as. */
+  maxBookingsPerDay: number | null;
+  maxBookingsPerWeek: number | null;
+  maxMinutesPerDay: number | null;
+  maxMinutesPerWeek: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;
   slotInterval: number | null;
@@ -132,6 +138,10 @@ interface EventTypeDbRow {
   rr_distribution: string | null;
   minimum_booking_notice: number;
   booking_window_days: number | null;
+  max_bookings_per_day: number | null;
+  max_bookings_per_week: number | null;
+  max_minutes_per_day: number | null;
+  max_minutes_per_week: number | null;
   before_event_buffer: number;
   after_event_buffer: number;
   slot_interval: number | null;
@@ -151,6 +161,7 @@ interface EventTypeDbRow {
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
   schedule_id, hidden, scheduling_type, rr_distribution, minimum_booking_notice, booking_window_days,
+  max_bookings_per_day, max_bookings_per_week, max_minutes_per_day, max_minutes_per_week,
   before_event_buffer, after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
   crm_property_mappings, calendar_title_template, calendar_description_template,
@@ -199,6 +210,10 @@ async function toEventTypeView(
     rrDistribution: r.rr_distribution,
     minimumBookingNotice: r.minimum_booking_notice,
     bookingWindowDays: r.booking_window_days ?? null,
+    maxBookingsPerDay: r.max_bookings_per_day ?? null,
+    maxBookingsPerWeek: r.max_bookings_per_week ?? null,
+    maxMinutesPerDay: r.max_minutes_per_day ?? null,
+    maxMinutesPerWeek: r.max_minutes_per_week ?? null,
     beforeEventBuffer: r.before_event_buffer,
     afterEventBuffer: r.after_event_buffer,
     slotInterval: r.slot_interval,
@@ -324,6 +339,11 @@ export interface EventTypeInputRepo {
   minimumBookingNotice?: number;
   /** Booking window. UNDEFINED ⇒ unchanged (no limit on create); null ⇒ no limit. */
   bookingWindowDays?: number | null;
+  /** Booking limits. UNDEFINED ⇒ unchanged (no limit on create); null ⇒ no limit. */
+  maxBookingsPerDay?: number | null;
+  maxBookingsPerWeek?: number | null;
+  maxMinutesPerDay?: number | null;
+  maxMinutesPerWeek?: number | null;
   beforeEventBuffer?: number;
   afterEventBuffer?: number;
   slotInterval?: number | null;
@@ -396,7 +416,8 @@ export async function createEventType(
     : null;
   const insert = sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
           length_minutes, locations, schedule_id, hidden, scheduling_type, rr_distribution, booking_fields, reminders,
-          minimum_booking_notice, booking_window_days, before_event_buffer, after_event_buffer, slot_interval,
+          minimum_booking_notice, booking_window_days, max_bookings_per_day, max_bookings_per_week,
+          max_minutes_per_day, max_minutes_per_week, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
           destination_calendar_id, crm_property_mappings, calendar_title_template,
           calendar_description_template, success_redirect_url, success_redirect_data, tracking, created_at)
@@ -407,6 +428,8 @@ export async function createEventType(
           ${jsonParam(db, input.bookingFields ?? null)},
           ${jsonParam(db, normalizeEventReminders(input.reminders ?? defaultEventReminders()))},
           ${input.minimumBookingNotice ?? 120}, ${input.bookingWindowDays ?? null},
+          ${input.maxBookingsPerDay ?? null}, ${input.maxBookingsPerWeek ?? null},
+          ${input.maxMinutesPerDay ?? null}, ${input.maxMinutesPerWeek ?? null},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.preventDuplicateBookings ? 1 : 0},
           ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId},
@@ -459,6 +482,10 @@ export async function updateEventType(
   if (input.rrDistribution !== undefined) set('rr_distribution', sql`${input.rrDistribution ?? null}`);
   if (input.minimumBookingNotice !== undefined) set('minimum_booking_notice', sql`${input.minimumBookingNotice}`);
   if (input.bookingWindowDays !== undefined) set('booking_window_days', sql`${input.bookingWindowDays ?? null}`);
+  if (input.maxBookingsPerDay !== undefined) set('max_bookings_per_day', sql`${input.maxBookingsPerDay ?? null}`);
+  if (input.maxBookingsPerWeek !== undefined) set('max_bookings_per_week', sql`${input.maxBookingsPerWeek ?? null}`);
+  if (input.maxMinutesPerDay !== undefined) set('max_minutes_per_day', sql`${input.maxMinutesPerDay ?? null}`);
+  if (input.maxMinutesPerWeek !== undefined) set('max_minutes_per_week', sql`${input.maxMinutesPerWeek ?? null}`);
   if (input.beforeEventBuffer !== undefined) set('before_event_buffer', sql`${input.beforeEventBuffer}`);
   if (input.afterEventBuffer !== undefined) set('after_event_buffer', sql`${input.afterEventBuffer}`);
   if (input.slotInterval !== undefined) set('slot_interval', sql`${input.slotInterval ?? null}`);

@@ -7,12 +7,15 @@ import { loadExternalBusy } from './calendar-refs';
 import { busyOutside, hostEventOwnTime } from './host-event';
 import { applyCalendarTemplates, applySharedFallback, markSharedSql, sharedFallbackTitle } from './calendar-text';
 import { normalizeAttendeeEmail, normalizedEmailSql } from './duplicate-guard';
+import type { BookingLimitPeriod } from '@slate/engine';
+import { limitGuardBreachPg, limitGuardBreachSqlite, limitReachedMessage } from './booking-limits';
 import {
   bookingStartOutOfRange,
-  isSlotBookable,
+  slotVerdict,
   jsonParam,
   lockMembers,
   memberHeldSql,
+  moveLimitGuard,
   parseJsonColumn,
   peopleOn,
   peopleRowsSql,
@@ -631,6 +634,8 @@ export type V2RescheduleOutcome =
   | {
       ok: false;
       reason: 'NOT_FOUND' | 'GONE' | 'INVALID_SLOT' | 'SLOT_TAKEN' | 'CALENDAR_UNAVAILABLE';
+      /** INVALID_SLOT / SLOT_TAKEN: set when the event's booking limit is why (`limitReachedMessage`). */
+      message?: string;
     };
 
 export async function rescheduleBookingV2(
@@ -710,14 +715,15 @@ export async function rescheduleBookingV2(
   // the calendar's busy times still apply.
   if (source.event_type_id) {
     for (const hostMemberId of hostIds) {
-      const bookable = await isSlotBookable(db, {
+      const verdict = await slotVerdict(db, {
         eventTypeId: source.event_type_id,
         hostMemberId,
         hostScheduleId: hostScheduleIds.get(hostMemberId),
         startMs: args.newStartMs,
         excludeBookingId: source.id,
       });
-      if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+      if (verdict !== 'ok')
+        return { ok: false, reason: 'INVALID_SLOT', ...(verdict === 'no' ? {} : { message: limitReachedMessage(verdict) }) };
     }
   }
 
@@ -828,8 +834,17 @@ export async function rescheduleBookingV2(
   // successor's own write-out must queue behind them, not beside them.
   const repointCalendarJobs = sql`UPDATE outbox SET booking_uid = ${newUid}, order_key = ${newUid}, updated_at = ${now}
     WHERE booking_uid = ${source.uid} AND kind IN ('calendar', 'crm') AND status = 'pending'`;
+  // The event's booking limits, counted again under the lock without the
+  // booking being moved (`moveLimitGuard`, the same one the v1 move runs).
+  const limitGuard = await moveLimitGuard(db, {
+    eventTypeId: source.event_type_id,
+    bookingId: source.id,
+    organizerId: source.host_member_id,
+    startMs: args.newStartMs,
+    durationMs: duration,
+  });
 
-  type TxResult = 'ok' | 'gone' | 'conflict';
+  type TxResult = 'ok' | 'gone' | 'conflict' | BookingLimitPeriod;
   let result: TxResult;
   try {
     if (db.dialect === 'sqlite') {
@@ -843,6 +858,8 @@ export async function rescheduleBookingV2(
         );
         if (!current || (current.status !== 'accepted' && current.status !== 'pending')) return 'gone';
         for (const conflict of hostConflictQueries) if (db.sqlite!.drizzle.get(conflict)) return 'conflict';
+        const full = limitGuard && limitGuardBreachSqlite(db, limitGuard);
+        if (full) return full;
         for (const statement of [
           updateOld,
           insertNew,
@@ -856,7 +873,7 @@ export async function rescheduleBookingV2(
         return 'ok';
       }, { immediate: true });
     } else {
-      result = await db.pg!.drizzle.transaction(async (tx) => {
+      result = await db.pg!.drizzle.transaction(async (tx): Promise<TxResult> => {
         // The hosts' rows first, then the booking's: the order every other
         // guarded write takes them in (see `lockMembers`), so a v1 move and a
         // v2 move of the same booking wait on each other instead of deadlocking.
@@ -870,6 +887,8 @@ export async function rescheduleBookingV2(
           const rows = (await tx.execute(conflict)) as unknown as unknown[];
           if (rows.length > 0) return 'conflict' as const;
         }
+        const full = limitGuard && (await limitGuardBreachPg(tx, limitGuard));
+        if (full) return full;
         for (const statement of [
           updateOld,
           insertNew,
@@ -922,6 +941,7 @@ export async function rescheduleBookingV2(
     return { ok: false, reason: 'GONE' };
   }
   if (result === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
+  if (result !== 'ok') return { ok: false, reason: 'SLOT_TAKEN', message: limitReachedMessage(result) };
   // The copy carried the old title and body; a template renders them again at
   // the new time.
   await applyCalendarTemplates(db, newUid);

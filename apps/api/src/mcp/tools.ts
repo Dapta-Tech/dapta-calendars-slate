@@ -70,6 +70,7 @@ import { queryBookings } from './bookings-query';
 import { bindHold, findHold, heldByAnother, holdOwner } from './holds';
 import {
   type McpCall,
+  BOOKING_LIMIT,
   ToolFailure,
   callerId,
   emailDomain,
@@ -1188,7 +1189,7 @@ const holdSlot: ToolDef = {
   name: 'hold_slot',
   title: 'Hold a time slot for about 10 minutes',
   description:
-    'Keep one offered slot for about 10 minutes while the details are confirmed with the person: meanwhile no slot list offers it, the MCP booking tools do not book it for anyone else (reschedule_booking does not move any booking into it), and new team bookings leave its host out (a one-host booking made straight through the REST API is not checked against holds yet). book_meeting (public link) or create_booking (event_type_id) then books it with the returned hold_id and the same start. A hold made signed in or with an API key can be used only by that same person or key; the hold_id of an anonymous hold works for whoever presents it, so it is best kept within this conversation. An unused hold just expires. One-host events only: a team event picks its host at booking time, so team events go straight to book_team_meeting. Works with no sign-in on a public booking link, or, signed in or with an API key holding bookings:write, by event_type_id.',
+    'Keep one offered slot for about 10 minutes while the details are confirmed with the person: meanwhile no slot list offers it, the MCP booking tools do not book it for anyone else (reschedule_booking does not move any booking into it), and new team bookings leave its host out (a one-host booking made straight through the REST API is not checked against holds yet). book_meeting (public link) or create_booking (event_type_id) then books it with the returned hold_id and the same start. A hold made signed in or with an API key can be used only by that same person or key; the hold_id of an anonymous hold works for whoever presents it, so it is best kept within this conversation. An unused hold just expires. A hold does not count toward the booking limits of the event type (max bookings or minutes a day or week), so it reserves no place against them: a booking with its hold_id is refused when the day or week filled up meanwhile. One-host events only: a team event picks its host at booking time, so team events go straight to book_team_meeting. Works with no sign-in on a public booking link, or, signed in or with an API key holding bookings:write, by event_type_id.',
   scope: null,
   // A public page holds like the booking page does; an event type by id is the account's own.
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
@@ -1262,6 +1263,8 @@ const holdSlot: ToolDef = {
           if (held.error === 'NOT_FOUND') throw notFound('Booking page');
           if (held.error === 'RATE_LIMITED') throw failureFor('TOO_MANY_HOLDS', held.message);
           if (held.error === 'CALENDAR_UNAVAILABLE') throw failureFor('CALENDAR_UNAVAILABLE', held.message);
+          // A full day or week: the event's booking limit says so, and no retry opens it.
+          if (BOOKING_LIMIT.test(held.message)) throw failureFor('INVALID_SLOT', held.message);
           // With an earlier attempt still open, the hold in the way is most
           // likely that attempt's own (it timed out and is still finishing).
           throw new ToolFailure(
@@ -1768,6 +1771,10 @@ const getEventTypeTool: ToolDef = {
       scheduling_type: z.string().nullable(),
       minimum_notice_minutes: z.number(),
       booking_window_days: z.number().nullable().describe('How many days ahead it can be booked. Null: no limit.'),
+      max_bookings_per_day: z.number().nullable().describe('Most bookings of this event a day holds. Null: no limit.'),
+      max_bookings_per_week: z.number().nullable().describe('Most bookings of this event a week (Monday to Sunday) holds. Null: no limit.'),
+      max_minutes_per_day: z.number().nullable().describe('Most minutes of bookings of this event a day holds. Null: no limit.'),
+      max_minutes_per_week: z.number().nullable().describe('Most minutes of bookings of this event a week holds. Null: no limit.'),
       buffer_before_minutes: z.number(),
       buffer_after_minutes: z.number(),
       slot_interval_minutes: z.number().nullable(),
@@ -1816,6 +1823,10 @@ const getEventTypeTool: ToolDef = {
       scheduling_type: et.schedulingType,
       minimum_notice_minutes: et.minimumBookingNotice,
       booking_window_days: et.bookingWindowDays,
+      max_bookings_per_day: et.maxBookingsPerDay,
+      max_bookings_per_week: et.maxBookingsPerWeek,
+      max_minutes_per_day: et.maxMinutesPerDay,
+      max_minutes_per_week: et.maxMinutesPerWeek,
       buffer_before_minutes: et.beforeEventBuffer,
       buffer_after_minutes: et.afterEventBuffer,
       slot_interval_minutes: et.slotInterval,
