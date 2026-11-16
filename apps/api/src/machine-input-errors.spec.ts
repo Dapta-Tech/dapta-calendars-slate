@@ -136,11 +136,21 @@ describe('machine routes: invalid input is a 400 naming the field', () => {
   });
 
   // The zod wording for an enum is not this test's business; the field name is.
-  it.each(['status=accepted&status=cancelled', 'status=upcoming'])('GET /v1/machine/bookings?%s is a 400 naming status', async (query) => {
+  it.each(['status=accepted&status=cancelled', 'status=upcoming', 'cursor=a&cursor=b'])('GET /v1/machine/bookings?%s is a 400 naming the field', async (query) => {
     const res = await list(query);
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe('BAD_REQUEST');
-    expect(body.message.startsWith('status: ')).toBe(true);
+    expect(body.message.startsWith(query.startsWith('cursor') ? 'cursor: ' : 'status: ')).toBe(true);
+  });
+
+  it('GET /v1/machine/bookings keeps reading a single unreadable cursor as before (page one) and an empty one as not given', async () => {
+    const uid = await h.newBooking();
+    for (const query of ['cursor=junk', 'cursor=']) {
+      const res = await list(query);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { items: Array<{ uid: string }> };
+      expect(body.items.map((item) => item.uid)).toContain(uid);
+    }
   });
 });

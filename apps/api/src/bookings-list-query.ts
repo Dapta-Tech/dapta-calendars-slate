@@ -25,6 +25,10 @@ const bookingsListQuerySchema = z.object({
   // One of the booking statuses. A repeated `status` is an array and, like a
   // repeated `limit`, is refused here instead of reaching SQL (a 500).
   status: optionalQuery(z.enum(bookingStatus)),
+  // The page cursor, opaque to the client. A repeated `cursor` is an array and
+  // used to decode as garbage, silently restarting at page one; it is refused
+  // like a repeated `limit`. A single unreadable cursor still behaves as before.
+  cursor: optionalQuery(z.string().max(1000)),
   limit: optionalQuery(
     z
       .string()
