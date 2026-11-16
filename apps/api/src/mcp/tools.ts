@@ -2212,7 +2212,7 @@ const listMembersTool: ToolDef = {
   name: 'list_members',
   title: "List the workspace's members",
   description:
-    "Lists everyone in the workspace with their name, email, link name, role (owner, admin, member) and status (active, invited, disabled). Owners and admins only, through a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read. Inviting, changing or removing members happens in the dashboard.",
+    "Lists everyone in the workspace with their name, email, link name, role (owner, admin, member) and status (active, invited, disabled). Owners and admins only. Needs a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read. Inviting, changing or removing members happens in the dashboard.",
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2257,7 +2257,7 @@ const listNotificationSettingsTool: ToolDef = {
   name: 'list_notification_settings',
   title: 'List the notification emails',
   description:
-    "Lists the workspace's notification emails (booking confirmations, cancellations, host alerts and the like): whether each is sent, whether its text was customized, and the subject and body it sends, with the variables they may use. Reminders and follow-ups belong to each event type and are not listed here. Owners and admins only, through a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read.",
+    "Lists the workspace's notification emails (booking confirmations, cancellations, host alerts and the like): whether each is sent, whether its text was customized, and the subject and body it sends, with the variables they may use. Reminders and follow-ups belong to each event type and are not listed here. Owners and admins only. Needs a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read.",
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2349,7 +2349,7 @@ const listIntegrationsTool: ToolDef = {
   name: 'list_integrations',
   title: 'List the CRM integrations',
   description:
-    "Lists the workspace's integrations (the CRM that bookings are sent to) with their status and last check, and what this deployment supports: the CRM provider, whether credentials can be stored, and the access the CRM token needs. Never returns a credential. Connecting one happens in the dashboard. Owners and admins only, through a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read.",
+    "Lists the workspace's integrations (the CRM that bookings are sent to) with their status and last check, and what this deployment supports: the CRM provider, whether credentials can be stored, and the access the CRM token needs. Never returns a credential. Connecting one happens in the dashboard. Owners and admins only. Needs a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read.",
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
