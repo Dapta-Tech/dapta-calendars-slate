@@ -661,8 +661,17 @@ export interface BookingPrefill {
  * the wrong question the moment the host reorders their form.
  */
 export const BOOKING_PREFILL_ANSWER_PREFIX = 'answer_';
-/** The longest prefilled value kept: the booking's own `notes` cap. */
+/**
+ * The longest prefilled value kept, per field, matching what the booking write
+ * will actually accept (`attendeeSchema`).
+ *
+ * Capping everything at the largest of them would hand the form a value it can
+ * never book: a 500-character name passes the prefill and the form's own
+ * required check, then fails `createBookingSchema` and surfaces a raw,
+ * untranslated zod message after the visitor has picked a time.
+ */
 export const MAX_BOOKING_PREFILL_VALUE = 2000;
+export const MAX_BOOKING_PREFILL_NAME = 200;
 /** The longest field name a prefill key may carry (`bookingFieldSchema.name`). */
 export const MAX_BOOKING_PREFILL_KEY = 64;
 /** At most this many custom-field values one address may prefill. */
@@ -675,11 +684,16 @@ export const MAX_BOOKING_PREFILL_ANSWERS = 50;
  * character is not a name or an address, it is an attempt to make the form
  * read as something other than what it holds.
  */
-function prefillValue(value: unknown): string | null {
+function prefillValue(value: unknown, max = MAX_BOOKING_PREFILL_VALUE): string | null {
   if (typeof value !== 'string') return null;
-  const v = value.trim();
-  if (!v || v.length > MAX_BOOKING_PREFILL_VALUE) return null;
-  if (hasControlCharacter(v) || hasInvisibleFormatCharacter(v)) return null;
+  // Line breaks are kept, as the one control character that belongs in a
+  // value: `notes` and a long-text question are exactly where a prefilled
+  // message carries them, and dropping the whole value over one newline makes
+  // the visitor watch their own text vanish. Normalized to `\n` first so the
+  // length check and the field agree on what they are counting.
+  const v = value.replace(/\r\n?/g, '\n').trim();
+  if (!v || v.length > max) return null;
+  if (hasControlCharacter(v.replace(/\n/g, '')) || hasInvisibleFormatCharacter(v)) return null;
   return v;
 }
 
@@ -698,7 +712,9 @@ export function normalizeBookingPrefill(input: unknown): BookingPrefill | null {
   const raw = input as Record<string, unknown>;
   const out: BookingPrefill = {};
   for (const key of ['name', 'email', 'notes'] as const) {
-    const value = prefillValue(raw[key]);
+    // `name` and `email` are capped where the booking write caps them; `notes`
+    // shares the general cap, which IS its own (`attendeeSchema.notes`).
+    const value = prefillValue(raw[key], key === 'notes' ? undefined : MAX_BOOKING_PREFILL_NAME);
     if (value !== null) out[key] = value;
   }
   const answers: Record<string, string> = {};

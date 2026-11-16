@@ -7,7 +7,11 @@
  * reason custom fields are prefixed rather than named bare.
  */
 import { describe, expect, it } from 'vitest';
-import { MAX_BOOKING_PREFILL_ANSWERS, MAX_BOOKING_PREFILL_VALUE } from '@slate/types';
+import {
+  MAX_BOOKING_PREFILL_ANSWERS,
+  MAX_BOOKING_PREFILL_NAME,
+  MAX_BOOKING_PREFILL_VALUE,
+} from '@slate/types';
 import { prefillFromQuery } from '@/lib/booking-prefill';
 
 describe('prefillFromQuery', () => {
@@ -58,9 +62,28 @@ describe('prefillFromQuery', () => {
     });
   });
 
-  it('drops a value with a control character', () => {
-    expect(prefillFromQuery({ name: 'Sam\nVisitor', email: 'sam@example.com' })).toEqual({
+  it('keeps line breaks, the one control character that belongs in a value', () => {
+    // `notes` and a long-text question are exactly where a prefilled message
+    // carries them; dropping the value over one newline loses the whole text.
+    expect(prefillFromQuery({ notes: 'Line one\r\nLine two', answer_topic: 'a\nb' })).toEqual({
+      notes: 'Line one\nLine two',
+      answers: { topic: 'a\nb' },
+    });
+  });
+
+  it('drops a value with any other control character', () => {
+    expect(prefillFromQuery({ name: 'Sam\u0007Visitor', email: 'sam@example.com' })).toEqual({
       email: 'sam@example.com',
+    });
+  });
+
+  it('caps name where the booking write caps it, not at the notes limit', () => {
+    // A 500-character name would pass the prefill and the form's required
+    // check, then fail createBookingSchema after the visitor picked a time.
+    const long = 'a'.repeat(MAX_BOOKING_PREFILL_NAME + 1);
+    expect(prefillFromQuery({ name: long, notes: long })).toEqual({ notes: long });
+    expect(prefillFromQuery({ name: 'a'.repeat(MAX_BOOKING_PREFILL_NAME) })).toEqual({
+      name: 'a'.repeat(MAX_BOOKING_PREFILL_NAME),
     });
   });
 

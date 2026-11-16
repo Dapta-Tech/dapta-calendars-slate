@@ -14,7 +14,7 @@
  *   - a key naming a question this event type does not ask changes nothing,
  *     so one address can be reused across event types.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { BookingPrefill } from '@slate/types';
@@ -168,6 +168,16 @@ async function confirm(el: HTMLElement) {
   return Object.fromEntries([...(form?.entries() ?? [])].map(([k, v]) => [k, String(v)]));
 }
 
+/** The event type whose questions cover the two types that render narrower
+ *  than the string they hold: a phone and a number. */
+const TYPED_FIELDS = [
+  { name: 'phone', label: 'Phone', type: 'phone', required: false, defaultCountry: 'CO' },
+  // Required on purpose: the number bug was never about what the input shows
+  // (a browser empties it by itself) but about the STATE behind it passing the
+  // required check while the field submits blank.
+  { name: 'headcount', label: 'How many people?', type: 'number', required: true },
+] as const;
+
 const PREFILL: BookingPrefill = {
   name: 'Sam Visitor',
   email: 'sam@example.com',
@@ -270,5 +280,141 @@ describe('the custom questions fill once the page knows them', () => {
     expect(valueOf(el, 'input[name="name"]')).toBe('Sam Visitor');
     expect(valueOf(el, 'input[name="email"]')).toBe('sam@example.com');
     expect(valueOf(el, 'textarea[name="notes"]')).toBe('Came from the form');
+  });
+});
+
+describe('a prefill never books what the visitor cannot see', () => {
+  /** Mount with the two narrow field types instead of the fixture's text ones. */
+  async function mountTyped(prefill: BookingPrefill | null) {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        <BrandedShell brandColor="#2f6fed" style={{ ...BASE_STYLE, theme: 'light' }} className="bp-viewport">
+          <main>
+            <BookingFlow
+              accountCode="northwind"
+              ownerSlug="riley-chen"
+              slug="design-review"
+              slots={fixture.slots}
+              bookingFields={TYPED_FIELDS as unknown as typeof fixture.eventType.bookingFields}
+              initialTimeZone={TIME_ZONE}
+              locale="en"
+              eventTitle={fixture.eventType.title}
+              lengthMinutes={fixture.eventType.lengthMinutes}
+              hostName="Riley Chen"
+              avatarUrl={null}
+              location={fixture.eventType.location}
+              nowUtc={NOW}
+              showBranding
+              prefill={prefill}
+            />
+          </main>
+        </BrandedShell>,
+      );
+    });
+    return container;
+  }
+
+  /** What the phone field would actually SUBMIT (its hidden input). */
+  const submittedPhone = (el: HTMLElement) =>
+    el.querySelector<HTMLInputElement>('input[type="hidden"][name="answer_phone"]')?.value ?? null;
+
+  it('leaves a phone field empty when the prefill holds no number at all', async () => {
+    // `?answer_phone=sam@example.com` used to show an empty box and book the
+    // address: the field draws the digits it can parse and submits the raw
+    // string, so the two disagreed.
+    const el = await mountTyped({ answers: { phone: 'sam@example.com' } });
+    await pickTime(el);
+    expect(submittedPhone(el)).toBe('');
+  });
+
+  it('keeps only the dial code and digits of a phone prefill', async () => {
+    const el = await mountTyped({ answers: { phone: '+1 CALL-ME-NOW 5550102030' } });
+    await pickTime(el);
+    expect(submittedPhone(el)).toBe('+15550102030');
+  });
+
+  it('gives a dial-less phone prefill the field’s own default country', async () => {
+    // The field would have DISPLAYED a country for it either way; this makes
+    // the value it submits say the same thing.
+    const el = await mountTyped({ answers: { phone: '3001234567' } });
+    await pickTime(el);
+    expect(submittedPhone(el)).toBe('+573001234567');
+  });
+
+  it('does not let a non-numeric prefill satisfy a required number question', async () => {
+    // The input empties itself, so the question submits blank. What used to
+    // pass the gate was the STATE still holding "a few": the booking was
+    // written with a required answer missing and no error on screen.
+    const el = await mountTyped({ answers: { headcount: 'a few' } });
+    await pickTime(el);
+    expect(valueOf(el, 'input[name="answer_headcount"]')).toBe('');
+    await confirm(el);
+    expect(actions.bookAction).not.toHaveBeenCalled();
+  });
+
+  it('fills a required number question from a numeric prefill, and books it', async () => {
+    const el = await mountTyped({ answers: { headcount: '12' } });
+    await pickTime(el);
+    expect(valueOf(el, 'input[name="answer_headcount"]')).toBe('12');
+    await act(async () => {
+      type(el, 'input[name="name"]', 'Sam Visitor');
+      type(el, 'input[name="email"]', 'sam@example.com');
+    });
+    const sent = await confirm(el);
+    expect(sent.answer_headcount).toBe('12');
+  });
+});
+
+describe('the prefill does not stay in the address', () => {
+  // This page runs the HOST's own tags (GA4, Meta, HubSpot, their PostHog, a
+  // GTM container), and every one of them sends the page URL. An invitee's
+  // email in the query would reach four vendor accounts before the invitee
+  // submitted anything.
+  const search = () => window.location.search;
+
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/acme/riley-chen/design-review');
+  });
+
+  it('removes name, email, notes and every answer_ from the bar', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/acme/riley-chen/design-review?embed=1&lang=es&utm_source=google&name=Sam&email=sam@example.com&notes=hi&answer_company=Example+Co',
+    );
+    await mount(PREFILL);
+    expect(search()).not.toContain('email=');
+    expect(search()).not.toContain('name=');
+    expect(search()).not.toContain('notes=');
+    expect(search()).not.toContain('answer_');
+  });
+
+  it('keeps the parameters the page itself owns', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/acme/riley-chen/design-review?embed=1&lang=es&utm_source=google&email=sam@example.com',
+    );
+    await mount(PREFILL);
+    const q = new URLSearchParams(search());
+    expect(q.get('embed')).toBe('1');
+    expect(q.get('lang')).toBe('es');
+    expect(q.get('utm_source')).toBe('google');
+  });
+
+  it('still shows the values it took out', async () => {
+    window.history.replaceState({}, '', '/acme/riley-chen/design-review?name=Sam&email=sam@example.com');
+    const el = await mount(PREFILL);
+    await pickTime(el);
+    expect(valueOf(el, 'input[name="email"]')).toBe('sam@example.com');
+  });
+
+  it('touches nothing on a page reached without a prefill', async () => {
+    window.history.replaceState({}, '', '/acme/riley-chen/design-review?embed=1');
+    await mount(null);
+    expect(search()).toBe('?embed=1');
   });
 });
