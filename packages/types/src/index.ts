@@ -77,6 +77,8 @@ export type MemberStatus = (typeof memberStatus)[number];
  * purpose: cancelling is destructive and emails the invitee, so an agent that
  * only books and moves meetings does not get it by default. The REST cancel
  * routes accept either scope; the MCP `cancel_booking` tool needs `bookings:cancel`.
+ * `event-types:write` lets the MCP tools create event types and change their
+ * safe fields (ADR 0013); no REST route reads it.
  */
 export const apiScope = [
   'availability:read',
@@ -85,6 +87,7 @@ export const apiScope = [
   'bookings:cancel',
   'calendars:read',
   'event-types:read',
+  'event-types:write',
 ] as const;
 export type ApiScope = (typeof apiScope)[number];
 

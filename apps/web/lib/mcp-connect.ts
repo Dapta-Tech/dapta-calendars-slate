@@ -141,7 +141,8 @@ export interface ScopeInfo {
  * Every scope a key can carry, in the order the create form shows them.
  * `bookings:cancel` is new with the MCP server; a key list that predates it simply
  * never shows it, and an API that predates it rejects it at create time (the form
- * surfaces that error rather than hiding the box).
+ * surfaces that error rather than hiding the box). `event-types:write` is read
+ * only by the MCP event-type tools, which a deployment may switch off.
  */
 export const SCOPE_CATALOG: readonly ScopeInfo[] = [
   { scope: 'event-types:read', kind: 'read' },
@@ -149,6 +150,7 @@ export const SCOPE_CATALOG: readonly ScopeInfo[] = [
   { scope: 'bookings:read', kind: 'read' },
   { scope: 'bookings:write', kind: 'write' },
   { scope: 'bookings:cancel', kind: 'destructive' },
+  { scope: 'event-types:write', kind: 'write' },
   { scope: 'calendars:read', kind: 'read' },
 ];
 
@@ -203,6 +205,8 @@ export const MCP_TOOLS: readonly ToolInfo[] = [
   { name: 'cancel_booking', kind: 'destructive', scope: 'bookings:cancel', publicOk: false },
   { name: 'create_event', kind: 'write', scope: 'bookings:write', publicOk: false },
   { name: 'check_attendee_availability', kind: 'read', scope: 'availability:read', publicOk: false },
+  { name: 'update_event_type', kind: 'destructive', scope: 'event-types:write', publicOk: false },
+  { name: 'create_event_type', kind: 'write', scope: 'event-types:write', publicOk: false },
 ];
 
 // --- Key list ---------------------------------------------------------------

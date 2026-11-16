@@ -12,7 +12,7 @@ import { CalV2PilotService } from '../cal-v2-pilot.service';
 import { DB, ENV } from '../tokens';
 import { NoopRateLimiter, TokenBucketRateLimiter, type RateLimiter } from '../rate-limit';
 import { type McpCall, ToolFailure, argsHash, callerLabel, loginPrincipal, notFound, signInKey, toFailure, untrusted } from './support';
-import { TOOLS, accessOf, accountIdArg, notLinked, requireScope, takesAccount, type McpToolDeps, type ToolDef, type ToolResult } from './tools';
+import { TOOLS, accessOf, accountIdArg, notLinked, requireScope, servedTools, takesAccount, type McpToolDeps, type ToolDef, type ToolResult } from './tools';
 import { McpUsageReporter, toolCallEvent } from './mcp-usage';
 import { publicBookingBase } from '../booking-origin';
 
@@ -80,7 +80,8 @@ export function forAccount(def: ToolDef, args: unknown, call: McpCall): { args: 
  * wrapper: rate limit, scope check, timeout, error mapping, audit line.
  *
  * The SDK handler is stateless: a fresh `McpServer` is made per request, so
- * any replica can answer any call. Tools are registered from `TOOLS`, which is
+ * any replica can answer any call. Tools are registered from `TOOLS` (less what
+ * the deployment's switches turn off, `servedTools`), which is
  * the single catalog.
  */
 @Injectable()
@@ -94,6 +95,8 @@ export class McpGateway {
   auditSink: (line: string) => void = (line) => process.stdout.write(`${line}\n`);
   /** Reports each tool call to product analytics. A field so specs can reach it. */
   readonly usage: McpUsageReporter;
+  /** The tools this deployment serves, by name: the catalog less what its switches turn off. */
+  readonly tools: ReadonlyMap<string, ToolDef>;
 
   constructor(
     @Inject(ENV) private readonly env: ServerEnv,
@@ -127,6 +130,7 @@ export class McpGateway {
       meetingUrlWaitMs: env.OUTBOX_WORKER_ENABLED && env.NODE_ENV !== 'test' ? undefined : 0,
     };
     this.usage = new McpUsageReporter(analytics ?? null, SERVER_VERSION);
+    this.tools = new Map(servedTools(env).map((def) => [def.name, def]));
     // Per pod, like the public limiter: a replica counts only what it served.
     this.readLimiter = env.RATE_LIMIT_ENABLED
       ? new TokenBucketRateLimiter(env.MCP_RATE_LIMIT_CAPACITY, env.MCP_RATE_LIMIT_REFILL_PER_SEC)
@@ -142,7 +146,7 @@ export class McpGateway {
 
   private buildServer(call: McpCall | undefined): McpServer {
     const server = new McpServer({ name: MCP_SERVER_NAME, version: SERVER_VERSION }, { instructions: MCP_INSTRUCTIONS });
-    for (const def of TOOLS) {
+    for (const def of this.tools.values()) {
       server.registerTool(
         def.name,
         {
@@ -248,7 +252,9 @@ export class McpGateway {
   /**
    * One structured line per tool call. No names, emails, notes, answers or
    * idempotency keys: the arguments are reduced to a hash of their redacted
-   * shape. The key is its public prefix, never the secret.
+   * shape. The key is its public prefix, never the secret. A write that
+   * changes an event type adds the names of the fields it changed, never
+   * their values.
    */
   private audit(def: ToolDef, args: unknown, call: McpCall, latencyMs: number, result: ToolResult | undefined, failure: ToolFailure | undefined): void {
     const line = {
@@ -264,6 +270,7 @@ export class McpGateway {
       tool: def.name,
       argsHash: argsHash(args),
       affected: result?.affected ?? [],
+      ...(result?.changed ? { changed: result.changed } : {}),
       result: failure ? 'error' : 'ok',
       ...(failure ? { error: failure.code } : {}),
       latencyMs,

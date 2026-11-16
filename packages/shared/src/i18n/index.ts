@@ -3379,6 +3379,8 @@ export const en: BookingMessages = {
         cancel_booking: 'Cancel a booking and tell the invitee. A repeating event can be cancelled by date or from a date on.',
         create_event: 'Put an event of your own on your calendar, with or without guests, once or repeating. Safe to retry.',
         check_attendee_availability: 'See when you and the people you name are free, from your calendar.',
+        update_event_type: 'Change the title, description, length, location, questions, visibility, notice, confirmation or booking window of an event type. Links are not accepted. Safe to retry.',
+        create_event_type: 'Create an event type, with its link name if you choose one, hidden until you publish it. Safe to retry.',
       },
       scopeLabels: {
         'event-types:read': 'See event types',
@@ -3387,6 +3389,7 @@ export const en: BookingMessages = {
         'bookings:write': 'Create, hold, reschedule, confirm and decline bookings',
         'bookings:cancel': 'Cancel bookings',
         'calendars:read': 'See connected calendars',
+        'event-types:write': 'Edit event types',
       },
       scopesLead: 'Access this key grants',
       eventTypesLabel: 'Event types',
@@ -3701,7 +3704,7 @@ export const en: BookingMessages = {
         holds: { title: 'Holds', body: 'Keep a time for a few minutes while the person decides, so nobody else takes it.' },
         bookings: { title: 'Your bookings', body: 'Put events of your own on your calendar, see your meetings, read their details, move them to another time or cancel them.' },
         requests: { title: 'Booking requests', body: 'See the requests waiting for your answer, then accept or decline them.' },
-        account: { title: 'Account and event types', body: 'Who is connected, the workspaces you can work in, your event types with their settings and links, your teams, members and notification emails.' },
+        account: { title: 'Account and event types', body: 'Who is connected, the workspaces you can work in, your event types with their settings and links (and, where your workspace allows it, creating and editing them), your teams, members and notification emails.' },
       },
       items: {
         find_available_slots: { what: 'See the open times of one event type, day by day.', ask: 'When am I free for a 30-minute call this week?' },
@@ -3743,6 +3746,14 @@ export const en: BookingMessages = {
         list_connection_calendars: { what: 'See the calendars inside one connected account, like a shared team calendar.', ask: 'Which calendars are in my Google account?' },
         list_integrations: { what: 'See whether your CRM is connected and, if it fails, which access it is missing.', ask: 'Is our CRM still connected?' },
         list_crm_contact_properties: { what: 'See the contact fields in your CRM that booking answers can fill.', ask: 'Which CRM fields can I map the company question to?' },
+        update_event_type: {
+          what: 'Change an event type: its title, description, length, location, questions, whether it is published, the notice it needs, whether you confirm each booking and how far ahead it can be booked. Links are not accepted.',
+          ask: 'Add a required question about the budget to my intro call',
+        },
+        create_event_type: {
+          what: 'Create an event type with a title and a length, and the link name you want. It stays hidden until you publish it.',
+          ask: 'Create a 45-minute event called Project kickoff',
+        },
       },
     },
     oauthConsent: {
@@ -5318,6 +5329,8 @@ export const es: BookingMessages = {
         cancel_booking: 'Cancela una reserva y avisa al invitado. Un evento que se repite se cancela por fecha o desde una fecha.',
         create_event: 'Pone un evento propio en tu calendario, con o sin invitados, una vez o que se repita. Se puede reintentar sin riesgo.',
         check_attendee_availability: 'Mira cuándo están libres tú y las personas que nombres, desde tu calendario.',
+        update_event_type: 'Cambia el título, la descripción, la duración, el lugar, las preguntas, la visibilidad, la antelación, la confirmación o el plazo de reserva de un tipo de evento. No acepta enlaces. Se puede reintentar sin riesgo.',
+        create_event_type: 'Crea un tipo de evento, con el nombre de enlace que elijas, oculto hasta que lo publiques. Se puede reintentar sin riesgo.',
       },
       scopeLabels: {
         'event-types:read': 'Ver tipos de evento',
@@ -5326,6 +5339,7 @@ export const es: BookingMessages = {
         'bookings:write': 'Crear, apartar, reagendar, confirmar y rechazar reservas',
         'bookings:cancel': 'Cancelar reservas',
         'calendars:read': 'Ver calendarios conectados',
+        'event-types:write': 'Editar tipos de evento',
       },
       scopesLead: 'Acceso que da esta clave',
       eventTypesLabel: 'Tipos de evento',
@@ -5640,7 +5654,7 @@ export const es: BookingMessages = {
         holds: { title: 'Horarios apartados', body: 'Aparta un horario unos minutos mientras la persona decide, para que nadie más lo tome.' },
         bookings: { title: 'Tus reservas', body: 'Pon eventos propios en tu calendario, mira tus reuniones, lee sus detalles, muévelas a otro horario o cancélalas.' },
         requests: { title: 'Solicitudes de reserva', body: 'Mira las solicitudes que esperan tu respuesta y acéptalas o recházalas.' },
-        account: { title: 'Cuenta y tipos de evento', body: 'Quién está conectado, en qué espacios puedes trabajar, tus tipos de evento con su configuración y enlaces, tus equipos, miembros y correos de notificación.' },
+        account: { title: 'Cuenta y tipos de evento', body: 'Quién está conectado, en qué espacios puedes trabajar, tus tipos de evento con su configuración y enlaces (y, donde tu espacio lo permite, crearlos y editarlos), tus equipos, miembros y correos de notificación.' },
       },
       items: {
         find_available_slots: { what: 'Mira los horarios libres de un tipo de evento, día por día.', ask: '¿Cuándo estoy libre para una llamada de 30 minutos esta semana?' },
@@ -5682,6 +5696,14 @@ export const es: BookingMessages = {
         list_connection_calendars: { what: 'Mira los calendarios dentro de una cuenta conectada, como un calendario compartido del equipo.', ask: '¿Qué calendarios hay en mi cuenta de Google?' },
         list_integrations: { what: 'Mira si tu CRM está conectado y, si falla, qué acceso le falta.', ask: '¿Nuestro CRM sigue conectado?' },
         list_crm_contact_properties: { what: 'Mira los campos de contacto de tu CRM que pueden llenar las respuestas de una reserva.', ask: '¿A qué campo del CRM puedo mapear la pregunta de empresa?' },
+        update_event_type: {
+          what: 'Cambia un tipo de evento: su título, descripción, duración, lugar, preguntas, si está publicado, la antelación que pide, si confirmas cada reserva y con cuántos días se puede reservar. No acepta enlaces.',
+          ask: 'Agrega a mi llamada de introducción una pregunta obligatoria sobre el presupuesto',
+        },
+        create_event_type: {
+          what: 'Crea un tipo de evento con un título, una duración y el nombre de enlace que quieras. Queda oculto hasta que lo publiques.',
+          ask: 'Crea un evento de 45 minutos llamado Inicio del proyecto',
+        },
       },
     },
     oauthConsent: {

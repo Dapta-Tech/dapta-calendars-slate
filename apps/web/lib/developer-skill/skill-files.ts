@@ -245,9 +245,9 @@ function envelopeExample(doc: OpenApiDocument): unknown {
   return undefined;
 }
 
-/** The one scope of a kind in the catalog, or null when there is not exactly one. */
+/** The one bookings scope of a kind in the catalog, or null when there is not exactly one. */
 function onlyScope(kind: ToolKind): string | null {
-  const matches = SCOPE_CATALOG.filter((s) => s.kind === kind);
+  const matches = SCOPE_CATALOG.filter((s) => s.kind === kind && s.scope.startsWith('bookings:'));
   return matches.length === 1 ? matches[0]!.scope : null;
 }
 
