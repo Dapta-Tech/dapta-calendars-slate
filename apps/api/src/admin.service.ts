@@ -92,6 +92,7 @@ import { canClaimVanitySlug, templateIssueMessage, validateTemplate } from '@sla
 import { CrmAuthError } from '@slate/crm';
 import {
   clampAvailabilityWindow,
+  type BookingStatus,
   type IntegrationCapabilities,
   type IntegrationConnectInput,
   type IntegrationStatusView,
@@ -285,7 +286,7 @@ export class AdminService {
 
   // Host bookings (R29): the on-behalf path with the singular-attendee shape.
   // `from` / `to` are epoch ms, already read by the caller (`parseBookingsListQuery`).
-  async listBookings(p: HostPrincipal, q: { from?: number; to?: number; status?: string; limit?: number }) {
+  async listBookings(p: HostPrincipal, q: { from?: number; to?: number; status?: BookingStatus; limit?: number }) {
     const page = await listBookings(this.db, {
       accountId: p.accountId,
       memberId: p.memberId,
