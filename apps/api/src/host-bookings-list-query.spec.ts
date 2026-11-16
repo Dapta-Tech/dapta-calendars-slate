@@ -38,11 +38,28 @@ describe('GET /v1/host/bookings: an unreadable query value is a 400 naming the f
     expect(body.items.map((item) => item.uid)).toContain(uid);
   });
 
+  it('still filters by a valid status', async () => {
+    const uid = await h.newBooking();
+    const items = async (status: string) =>
+      ((await (await list(`status=${status}`)).json()) as { items: Array<{ uid: string }> }).items.map((i) => i.uid);
+    expect(await items('accepted')).toContain(uid);
+    expect(await items('rejected')).not.toContain(uid);
+  });
+
   it('keeps reading an empty value as not given', async () => {
     const uid = await h.newBooking();
-    const res = await list('from=&to=&limit=');
+    const res = await list('from=&to=&limit=&status=');
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: Array<{ uid: string }> };
     expect(body.items.map((item) => item.uid)).toContain(uid);
+  });
+
+  // The zod wording for an enum is not this test's business; the field name is.
+  it.each(['status=accepted&status=cancelled', 'status=upcoming'])('GET /v1/host/bookings?%s is a 400 naming status', async (query) => {
+    const res = await list(query);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe('BAD_REQUEST');
+    expect(body.message.startsWith('status: ')).toBe(true);
   });
 });

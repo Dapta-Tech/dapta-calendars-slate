@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { z } from 'zod';
+import { bookingStatus } from '@slate/types';
 
 /** An optional query value: absent and empty both mean "not given". */
 const optionalQuery = <T extends z.ZodTypeAny>(schema: T) =>
@@ -15,12 +16,15 @@ const queryInstant = z
  * The window and page size of a bookings list (`GET /v1/host/bookings` and
  * `GET /v1/machine/bookings`). Only an unreadable value is refused: before, a
  * bad date read as NaN (a silently empty list) and a bad or repeated limit
- * reached SQL (a 500). An out-of-range limit is still clamped by the
+ * or status reached SQL (a 500). An out-of-range limit is still clamped by the
  * repository, not refused.
  */
 const bookingsListQuerySchema = z.object({
   from: optionalQuery(queryInstant),
   to: optionalQuery(queryInstant),
+  // One of the booking statuses. A repeated `status` is an array and, like a
+  // repeated `limit`, is refused here instead of reaching SQL (a 500).
+  status: optionalQuery(z.enum(bookingStatus)),
   limit: optionalQuery(
     z
       .string()
