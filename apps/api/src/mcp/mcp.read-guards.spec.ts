@@ -150,6 +150,46 @@ describe('create_event', () => {
     const made = structured<{ event: { uid: string } }>(await c.callTool({ name: 'create_event', arguments: args('guard-event-0001') }));
     expect(made.event.uid).toBeTruthy();
     await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${memberId}`);
-    expect(errorText(await c.callTool({ name: 'create_event', arguments: args('guard-event-0002') }))).toContain('NOT_FOUND');
+    expect(errorText(await c.callTool({ name: 'create_event', arguments: args('guard-event-0002') }))).toContain('FORBIDDEN');
+  });
+});
+
+describe('cross-member schedule and event-type reads follow the member\'s current role', () => {
+  it('lets an admin read coworkers\' schedules and event types, and a demoted admin only their own', async () => {
+    const adminId = await addMember(h, 'admin');
+    const c = await signIn(h, adminId);
+    const mine = (await h.db.get<{ id: string }>(sql`SELECT id FROM schedule WHERE member_id = ${adminId} LIMIT 1`))?.id ?? null;
+    const theirs = (await h.db.get<{ id: string; member_id: string }>(
+      sql`SELECT id, member_id FROM schedule WHERE account_id = ${h.accountId} AND event_type_id IS NULL AND member_id <> ${adminId} LIMIT 1`,
+    ))!;
+
+    // Current admin: everything.
+    const all = structured<{ schedules: { id: string; member_id: string }[] }>(await c.callTool({ name: 'list_schedules', arguments: {} }));
+    expect(all.schedules.some((s) => s.member_id !== adminId)).toBe(true);
+    expect(structured<{ schedule: { id: string } }>(await c.callTool({ name: 'get_schedule', arguments: { schedule_id: theirs.id } })).schedule.id).toBe(theirs.id);
+    expect(structured<{ event_type: { id: string } }>(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } })).event_type.id).toBe(introId);
+
+    expect(structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} })).event_types.map((e) => e.id)).toContain(introId);
+
+    // Demoted after connecting: the token still says admin, the member row says member.
+    await h.db.run(sql`UPDATE member SET role = 'member' WHERE id = ${adminId}`);
+    const own = structured<{ schedules: { member_id: string }[] }>(await c.callTool({ name: 'list_schedules', arguments: {} }));
+    expect(own.schedules.every((s) => s.member_id === adminId)).toBe(true);
+    expect(errorText(await c.callTool({ name: 'get_schedule', arguments: { schedule_id: theirs.id } }))).toContain('FORBIDDEN');
+    expect(errorText(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } }))).toContain('FORBIDDEN');
+
+    const listed = structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} }));
+    expect(listed.event_types.map((e) => e.id)).not.toContain(introId);
+
+    // Their own still read.
+    if (mine) expect(structured<{ schedule: { id: string } }>(await c.callTool({ name: 'get_schedule', arguments: { schedule_id: mine } })).schedule.id).toBe(mine);
+    await h.db.run(sql`UPDATE event_type SET member_id = ${adminId} WHERE id = ${introId}`);
+    expect(structured<{ event_type: { id: string } }>(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } })).event_type.id).toBe(introId);
+    expect(structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} })).event_types.map((e) => e.id)).toContain(introId);
+    // A hidden event type of their own is not in the bookable list (as for an admin), but get_event_type still reads it.
+    await h.db.run(sql`UPDATE event_type SET hidden = 1 WHERE id = ${introId}`);
+    expect(structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} })).event_types.map((e) => e.id)).not.toContain(introId);
+    expect(structured<{ event_type: { hidden: boolean } }>(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } })).event_type.hidden).toBe(true);
+    await h.db.run(sql`UPDATE event_type SET hidden = 0 WHERE id = ${introId}`);
   });
 });

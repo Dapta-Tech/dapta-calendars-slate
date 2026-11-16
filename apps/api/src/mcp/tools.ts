@@ -59,7 +59,7 @@ import {
   type SeriesAnchor,
 } from '@slate/engine';
 import type { AdminService } from '../admin.service';
-import { assertAdmin, assertOwnsOrAdmin } from '../permissions';
+import { assertAdmin, assertOwnsOrAdmin, isAdmin } from '../permissions';
 import type { AnalyticsEffects } from '../analytics-effects';
 import type { MachinePrincipal } from '../auth.service';
 import type { BookingService } from '../booking.service';
@@ -1556,7 +1556,7 @@ const listEventTypesInput = z.object({
 const listEventTypes: ToolDef = {
   name: 'list_event_types',
   title: 'List event types',
-  description: 'List the workspace\'s bookable event types (personal and team), or one team\'s with team_id, limited to the key\'s event-type allowlist when an API key is used. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
+  description: 'List the workspace\'s bookable event types (personal and team; hidden ones are left out, get_event_type reads one), or one team\'s with team_id, limited to the key\'s event-type allowlist when an API key is used. A sign-in as an owner or admin sees every one; any other member sees only their own, by their current role. Needs scope event-types:read. The ids work with find_available_slots and create_booking.',
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1586,7 +1586,21 @@ const listEventTypes: ToolDef = {
     if (args.team_id && !(await getTeamById(deps.db, p.accountId, args.team_id))) throw notFound('Team');
     const code = await canonicalCode(deps.db, p.accountId);
     const all = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
-    const rows = args.team_id ? all.filter((r) => r.team?.daptaId === args.team_id) : all;
+    const inTeam = args.team_id ? all.filter((r) => r.team?.daptaId === args.team_id) : all;
+    // A sign-in sees what its member's CURRENT role allows: an admin every event type, anyone else only their own.
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
+    // One query: the member's own BOOKABLE ones, the same set (hidden left out) the listing below is made of.
+    const own =
+      me && !isAdmin(me.role)
+        ? new Set(
+            (
+              await deps.db.all<{ id: string }>(
+                sql`SELECT id FROM event_type WHERE account_id = ${p.accountId} AND member_id = ${me.memberId} AND hidden = 0`,
+              )
+            ).map((e) => e.id),
+          )
+        : null;
+    const rows = own ? inTeam.filter((r) => own.has(r.daptaId)) : inTeam;
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
       title: untrusted(r.title, 200),
@@ -1707,7 +1721,7 @@ const listSchedules: ToolDef = {
   name: 'list_schedules',
   title: 'List working-hours schedules',
   description:
-    "Lists the account's reusable working-hours schedules: whose each one is, its name, its time zone, and whether it is that person's default. An event type's private custom hours are not schedules and show in get_event_type instead. Needs scope availability:read. The ids work with get_schedule.",
+    "Lists the account's reusable working-hours schedules (an owner or admin sees everyone's; any other member only their own): whose each one is, its name, its time zone, and whether it is that person's default. An event type's private custom hours are not schedules and show in get_event_type instead. Needs scope availability:read. The ids work with get_schedule.",
   scope: 'availability:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1727,7 +1741,11 @@ const listSchedules: ToolDef = {
   }),
   async run(_args: z.infer<typeof listSchedulesInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
-    const rows = await listAccountSchedules(deps.db, p.accountId);
+    // A sign-in sees what its member's CURRENT role allows, never the role at connect time: an admin reads every
+    // schedule, anyone else only their own, as the dashboard's Availability page does. A key acts for the account.
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
+    const all = await listAccountSchedules(deps.db, p.accountId);
+    const rows = me && !isAdmin(me.role) ? all.filter((r) => r.memberId === me.memberId) : all;
     const schedules = rows.map((r) => ({
       id: r.id,
       name: untrusted(r.name, 120),
@@ -1768,8 +1786,11 @@ const getScheduleTool: ToolDef = {
   }),
   async run(args: z.infer<typeof getScheduleInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
     const s = await getSchedule(deps.db, p.accountId, args.schedule_id);
     if (!s) throw notFound('Schedule');
+    // The dashboard's single read: the schedule's owner or an admin, by the member's current role.
+    if (me) assertOwnsOrAdmin(me, s.memberId);
     const weekly = s.rules.filter((r) => !r.date).map((r) => ({ days: r.days ?? [], start: r.startTime, end: r.endTime }));
     const dates = s.rules
       .filter((r): r is typeof r & { date: string } => Boolean(r.date))
@@ -1830,8 +1851,11 @@ const getEventTypeTool: ToolDef = {
   async run(args: z.infer<typeof getEventTypeInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
     if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
     const et = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
     if (!et) throw notFound('Event type');
+    // The dashboard's single read: the event type's owner or an admin, by the member's current role.
+    if (me) assertOwnsOrAdmin(me, et.memberId);
     let bookingPageUrl: string | null = null;
     if (!et.hidden) {
       const code = await canonicalCode(deps.db, p.accountId);
