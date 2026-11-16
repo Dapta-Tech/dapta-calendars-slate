@@ -23,6 +23,7 @@ import {
   getAccountByCode,
   getAccountBranding,
   getTeamById,
+  listAccountSchedules,
   listMembers,
   listTeamMembers,
   listTeams,
@@ -58,6 +59,7 @@ import {
   type SeriesAnchor,
 } from '@slate/engine';
 import type { AdminService } from '../admin.service';
+import { assertAdmin, assertOwnsOrAdmin } from '../permissions';
 import type { AnalyticsEffects } from '../analytics-effects';
 import type { MachinePrincipal } from '../auth.service';
 import type { BookingService } from '../booking.service';
@@ -1637,6 +1639,59 @@ async function ownerHost(db: Db, accountId: string): Promise<{ accountId: string
   return { accountId, memberId: owner.id, role: 'owner' };
 }
 
+/**
+ * The signed-in member behind a call, with the role they hold now, for the reads
+ * the dashboard guards by role (`assertAdmin`, `assertOwnsOrAdmin`). An API key
+ * has no member and so no role: it is refused, never treated as the owner, so a
+ * narrow scope cannot reach what the dashboard keeps to admins or to an
+ * event type's owner. A sign-in is checked against the member row each call, so a
+ * member demoted or disabled after connecting loses the access at once.
+ */
+async function actingMember(
+  db: Db,
+  p: MachinePrincipal,
+): Promise<{ accountId: string; memberId: string; role: 'owner' | 'admin' | 'member' }> {
+  const denied = () =>
+    new ToolFailure(
+      'FORBIDDEN',
+      'This read is for a signed-in owner or admin, as in the dashboard; an API key has no member role.',
+      'Connect the app with an owner or admin account instead of using an API key.',
+    );
+  if (!p.memberId) throw denied();
+  const m = await db.get<{ role: 'owner' | 'admin' | 'member' }>(
+    sql`SELECT role FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} AND status = 'active' LIMIT 1`,
+  );
+  if (!m) throw denied();
+  return { accountId: p.accountId, memberId: p.memberId, role: m.role };
+}
+
+/** `actingMember`, held to the dashboard's `assertAdmin` (owner or admin). */
+async function adminMember(db: Db, p: MachinePrincipal) {
+  const me = await actingMember(db, p);
+  assertAdmin(me);
+  return me;
+}
+
+/**
+ * Whose calendar connections a call may read: the signed-in member's own, as the
+ * dashboard's Calendars screen shows only the person's own. An API key acts for
+ * the workspace owner's connection, so it gets the bar `check_availability`
+ * sets: `bookings:write` besides `availability:read`, and no event-type limit.
+ */
+async function calendarOwner(call: McpCall, db: Db): Promise<{ id: string }> {
+  const p = requireScope(call, 'availability:read');
+  if (p.kind !== 'oauth' && !p.memberId) requireScope(call, 'bookings:write');
+  if (p.eventTypeIds)
+    throw new ToolFailure(
+      'INSUFFICIENT_SCOPE',
+      `This API key (${p.prefix}) is limited to some event types, so it cannot read the host's own calendar.`,
+      'Use a key with no event-type limit, or a sign-in.',
+    );
+  const host = await eventHost(db, p);
+  if (!host) throw notFound('Host');
+  return host;
+}
+
 // --- Setup reads: schedules, one event type, single-use links -----------------
 //
 // What the dashboard's Availability and event-type editor read, for an agent.
@@ -1670,27 +1725,14 @@ const listSchedules: ToolDef = {
   }),
   async run(_args: z.infer<typeof listSchedulesInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
-    const rows = await deps.db.all<{
-      id: string;
-      name: string;
-      time_zone: string;
-      is_default: number | boolean | null;
-      member_id: string;
-      display_name: string | null;
-    }>(
-      sql`SELECT s.id, s.name, s.time_zone, s.member_id, m.display_name,
-                 CASE WHEN m.default_schedule_id = s.id THEN 1 ELSE 0 END AS is_default
-          FROM schedule s JOIN member m ON m.id = s.member_id
-          WHERE s.account_id = ${p.accountId} AND s.event_type_id IS NULL
-          ORDER BY m.created_at ASC, s.created_at ASC LIMIT 200`,
-    );
+    const rows = await listAccountSchedules(deps.db, p.accountId);
     const schedules = rows.map((r) => ({
       id: r.id,
       name: untrusted(r.name, 120),
-      time_zone: r.time_zone,
-      is_default: Number(r.is_default) === 1,
-      member_id: r.member_id,
-      member_name: r.display_name ? untrusted(r.display_name, 120) : null,
+      time_zone: r.timeZone,
+      is_default: r.isDefault,
+      member_id: r.memberId,
+      member_name: r.memberName ? untrusted(r.memberName, 120) : null,
     }));
     return {
       data: { schedules, count: schedules.length },
@@ -1838,7 +1880,7 @@ const listOneOffLinksTool: ToolDef = {
   name: 'list_one_off_links',
   title: 'List the single-use links of an event type',
   description:
-    'Lists the single-use booking links handed out for one event type, newest first: each link, whether it is still live, used (with the booking it made) or revoked, and when. A live link books the event type once, even when it is hidden. Needs scope event-types:read and respects the key\'s event-type allowlist.',
+    'Lists the single-use booking links handed out for one event type, newest first: each link, whether it is still live, used (with the booking it made) or revoked, and when. A live link books the event type once, even when it is hidden. Needs scope event-types:read, a sign-in (an API key is refused: the links are live booking tokens) as the event type\'s owner or an admin, and respects the event-type allowlist.',
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1861,8 +1903,11 @@ const listOneOffLinksTool: ToolDef = {
   async run(args: z.infer<typeof listOneOffLinksInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
     if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    // The links carry live booking tokens: the dashboard shows them to the event type's owner or an admin only.
+    const me = await actingMember(deps.db, p);
     const et = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
     if (!et) throw notFound('Event type');
+    assertOwnsOrAdmin(me, et.memberId);
     const base = (deps.publicBookingUrl ?? deps.publicAppUrl).replace(/\/+$/, '');
     const iso = (ms: number | null) => (ms == null ? null : new Date(ms).toISOString());
     const links = (await listOneOffLinks(deps.db, p.accountId, et.id)).slice(0, 100).map((l) => ({
@@ -1893,7 +1938,7 @@ const listCalendarConnections: ToolDef = {
   name: 'list_calendar_connections',
   title: 'List connected calendar accounts',
   description:
-    "Lists the calendar accounts connected in the workspace: whose each one is, its provider and email, whether it is checked for conflicts, whether bookings are written to it, and its last health check. Needs scope availability:read. Connecting or removing a calendar happens in the dashboard.",
+    "Lists the calendar accounts connected in the workspace: whose each one is, its provider and email, whether it is checked for conflicts, whether bookings are written to it, and its last health check. Shows the signed-in member's own connections, as the dashboard does (a key shows the workspace owner's, and needs bookings:write too). Needs scope availability:read. Connecting or removing a calendar happens in the dashboard.",
   scope: 'availability:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1917,7 +1962,7 @@ const listCalendarConnections: ToolDef = {
     count: z.number(),
   }),
   async run(_args: z.infer<typeof listConnectionsInput>, call, deps) {
-    const p = requireScope(call, 'availability:read');
+    const owner = await calendarOwner(call, deps.db);
     const rows = await deps.db.all<{
       id: string;
       member_id: string;
@@ -1933,7 +1978,7 @@ const listCalendarConnections: ToolDef = {
       sql`SELECT c.id, c.member_id, m.display_name, c.provider, c.primary_email, c.is_destination, c.check_conflicts,
                  c.last_check_at, c.last_check_ok, c.last_check_detail
           FROM connected_calendar c JOIN member m ON m.id = c.member_id
-          WHERE c.account_id = ${p.accountId}
+          WHERE c.member_id = ${owner.id}
           ORDER BY m.created_at ASC, c.id ASC LIMIT 200`,
     );
     const connections = rows.map((r) => ({
@@ -2167,7 +2212,7 @@ const listMembersTool: ToolDef = {
   name: 'list_members',
   title: "List the workspace's members",
   description:
-    "Lists everyone in the workspace with their name, email, link name, role (owner, admin, member) and status (active, invited, disabled). Owners and admins only. Needs scope event-types:read. Inviting, changing or removing members happens in the dashboard.",
+    "Lists everyone in the workspace with their name, email, link name, role (owner, admin, member) and status (active, invited, disabled). Owners and admins only, through a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read. Inviting, changing or removing members happens in the dashboard.",
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2188,6 +2233,7 @@ const listMembersTool: ToolDef = {
   }),
   async run(_args: z.infer<typeof listMembersInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
+    await adminMember(deps.db, p);
     const rows = await listMembers(deps.db, p.accountId);
     const members = rows.slice(0, 500).map((m) => ({
       id: m.id,
@@ -2211,7 +2257,7 @@ const listNotificationSettingsTool: ToolDef = {
   name: 'list_notification_settings',
   title: 'List the notification emails',
   description:
-    "Lists the workspace's notification emails (booking confirmations, cancellations, host alerts and the like): whether each is sent, whether its text was customized, and the subject and body it sends, with the variables they may use. Reminders and follow-ups belong to each event type and are not listed here. Owners and admins only. Needs scope event-types:read.",
+    "Lists the workspace's notification emails (booking confirmations, cancellations, host alerts and the like): whether each is sent, whether its text was customized, and the subject and body it sends, with the variables they may use. Reminders and follow-ups belong to each event type and are not listed here. Owners and admins only, through a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read.",
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2232,8 +2278,8 @@ const listNotificationSettingsTool: ToolDef = {
   }),
   async run(_args: z.infer<typeof listNotificationsInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
-    // The dashboard's own read: the defaults come in the owner's language, as the Notifications screen shows them.
-    const out = await deps.admin.listNotificationSettings(await ownerHost(deps.db, p.accountId));
+    // The dashboard's own read, as the signed-in admin: the defaults come in their language, as the Notifications screen shows them.
+    const out = await deps.admin.listNotificationSettings(await adminMember(deps.db, p));
     const notifications = out.settings.map((s) => ({
       key: s.key,
       audience: (s.key.startsWith('host_') ? 'host' : 'invitee') as 'host' | 'invitee',
@@ -2257,7 +2303,7 @@ const listConnectionCalendarsTool: ToolDef = {
   name: 'list_connection_calendars',
   title: 'List the calendars inside a connected account',
   description:
-    "Lists the calendars one connected calendar account holds, as the provider reports them now: name, whether it is the account's primary calendar, and the access it grants. Empty when the deployment has no calendar provider. Needs scope availability:read.",
+    "Lists the calendars one connected calendar account holds, as the provider reports them now: name, whether it is the account's primary calendar, and the access it grants. Empty when the deployment has no calendar provider. Only the caller's own connection (a key: the workspace owner's, and it needs bookings:write too). Needs scope availability:read.",
   scope: 'availability:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2276,8 +2322,10 @@ const listConnectionCalendarsTool: ToolDef = {
   }),
   async run(args: z.infer<typeof listConnectionCalendarsInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
+    const owner = await calendarOwner(call, deps.db);
+    // Only the caller's own connection, as the dashboard: another member's reads as not found.
     const conn = await deps.db.get<{ member_id: string }>(
-      sql`SELECT member_id FROM connected_calendar WHERE id = ${args.connection_id} AND account_id = ${p.accountId} LIMIT 1`,
+      sql`SELECT member_id FROM connected_calendar WHERE id = ${args.connection_id} AND account_id = ${p.accountId} AND member_id = ${owner.id} LIMIT 1`,
     );
     if (!conn) throw notFound('Connection');
     // The dashboard's own read, as the person who connected it: the provider is asked under their identity.
@@ -2301,7 +2349,7 @@ const listIntegrationsTool: ToolDef = {
   name: 'list_integrations',
   title: 'List the CRM integrations',
   description:
-    "Lists the workspace's integrations (the CRM that bookings are sent to) with their status and last check, and what this deployment supports: the CRM provider, whether credentials can be stored, and the access the CRM token needs. Never returns a credential. Connecting one happens in the dashboard. Owners and admins only. Needs scope event-types:read.",
+    "Lists the workspace's integrations (the CRM that bookings are sent to) with their status and last check, and what this deployment supports: the CRM provider, whether credentials can be stored, and the access the CRM token needs. Never returns a credential. Connecting one happens in the dashboard. Owners and admins only, through a sign-in: an API key is refused, as it has no member role. Needs scope event-types:read.",
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2326,7 +2374,7 @@ const listIntegrationsTool: ToolDef = {
   }),
   async run(_args: z.infer<typeof listIntegrationsInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
-    const host = await ownerHost(deps.db, p.accountId);
+    const host = await adminMember(deps.db, p);
     const [rows, caps] = await Promise.all([deps.admin.listIntegrations(host), Promise.resolve(deps.admin.integrationCapabilities(host))]);
     const integrations = rows.map((r) => ({
       provider: r.provider,
@@ -3560,16 +3608,7 @@ const checkAttendeeAvailability: ToolDef = {
     // An API key acts for the workspace owner's calendar connection, through
     // which it reads other people's busy times: only a key already trusted to
     // write to that calendar (bookings:write) may, besides availability:read.
-    const p = requireScope(call, 'availability:read');
-    if (p.kind !== 'oauth' && !p.memberId) requireScope(call, 'bookings:write');
-    if (p.eventTypeIds)
-      throw new ToolFailure(
-        'INSUFFICIENT_SCOPE',
-        `This API key (${p.prefix}) is limited to some event types, so it cannot read the host's own calendar.`,
-        'Use a key with no event-type limit, or a sign-in.',
-      );
-    const host = await eventHost(deps.db, p);
-    if (!host) throw notFound('Host');
+    const host = await calendarOwner(call, deps.db);
     const tz = args.time_zone ?? (host.time_zone && isValidTimeZone(host.time_zone) ? host.time_zone : 'UTC');
     const durMs = args.duration_minutes * 60_000;
     const now = Date.now();
