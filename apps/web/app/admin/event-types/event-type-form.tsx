@@ -54,6 +54,7 @@ import { CalendarsForEventSection } from './sections/calendars';
 import { LocationField } from './sections/location';
 import { OneOffLinksSection } from './sections/one-off-links';
 import { BookingWindowField } from './sections/booking-window';
+import { BookingLimitsFields } from './sections/booking-limits';
 import { TrackingKey, TrackingSection, invalidTrackingKeys, trackingKeysShown } from './sections/tracking';
 
 export function EventTypeForm({
@@ -163,6 +164,7 @@ export function EventTypeForm({
     lengthMinutes,
     minNotice,
     windowDays,
+    limits,
     slotInterval,
     beforeBuf,
     afterBuf,
@@ -194,6 +196,7 @@ export function EventTypeForm({
   const setLength = setter('lengthMinutes');
   const setMinNotice = setter('minNotice');
   const setWindowDays = setter('windowDays');
+  const setLimits = setter('limits');
   const setSlotInterval = setter('slotInterval');
   const setBeforeBuf = setter('beforeBuf');
   const setAfterBuf = setter('afterBuf');
@@ -944,6 +947,13 @@ export function EventTypeForm({
                 onBlur={() => setWindowChecked(true)}
                 invalid={windowChecked && windowInvalid}
                 m={m.bookingWindow}
+              />
+              <BookingLimitsFields
+                value={limits}
+                onChange={(key, v) => setLimits((l) => ({ ...l, [key]: v }))}
+                onBlur={touch}
+                errorFor={errorFor}
+                m={m.bookingLimits}
               />
             </AdvancedSettings>
           </div>

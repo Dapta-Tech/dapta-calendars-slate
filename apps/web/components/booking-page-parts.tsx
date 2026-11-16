@@ -872,6 +872,9 @@ export function BookingConfirmation({
 
 // --- The month calendar ------------------------------------------------------
 
+/** No full days: the default, one instance so a memo never sees a new set. */
+const NO_DAYS = new Set<string>();
+
 /**
  * One month at a time. Availability comes from the day keys the slot list
  * already produced, so the grid and the column beside it are two readings of
@@ -886,6 +889,7 @@ export function MonthCalendar({
   m,
   monthKey,
   availableDayKeys,
+  fullDayKeys = NO_DAYS,
   todayKey,
   selectedDayKey,
   locale,
@@ -901,6 +905,11 @@ export function MonthCalendar({
   m: BookingMessages;
   monthKey: string;
   availableDayKeys: Set<string>;
+  /**
+   * Days with hours whose times a booking limit of the event closed. Drawn
+   * "Full" rather than as a blank day, and still not a control.
+   */
+  fullDayKeys?: Set<string>;
   todayKey: string;
   selectedDayKey: string | null;
   locale: string;
@@ -1071,9 +1080,11 @@ export function MonthCalendar({
                 ? 'outside'
                 : day.hasSlots
                   ? 'available'
-                  : pending && day.dayKey >= todayKey
-                    ? 'pending'
-                    : 'empty';
+                  : fullDayKeys.has(day.dayKey)
+                    ? 'full'
+                    : pending && day.dayKey >= todayKey
+                      ? 'pending'
+                      : 'empty';
               const canPick = state === 'available';
               const isSelected = canPick && day.dayKey === selectedDayKey;
               return (
@@ -1102,12 +1113,19 @@ export function MonthCalendar({
                     // arrow handler above moves both it and focus.
                     tabIndex={canPick && day.dayKey === cursor ? 0 : -1}
                     // The visible label is "14", which is not a date.
-                    aria-label={
-                      day.isToday ? `${day.label}, ${m.bookingPage.today}` : day.label
-                    }
+                    aria-label={[
+                      day.label,
+                      ...(day.isToday ? [m.bookingPage.today] : []),
+                      ...(state === 'full' ? [m.bookingPage.dayFull] : []),
+                    ].join(', ')}
                     onClick={() => onSelectDay(day.dayKey)}
                   >
                     {day.dayOfMonth}
+                    {state === 'full' ? (
+                      <span className="bp-cal-day-full" aria-hidden>
+                        {m.bookingPage.dayFull}
+                      </span>
+                    ) : null}
                   </button>
                 </div>
               );

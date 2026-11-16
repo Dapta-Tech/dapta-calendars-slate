@@ -28,6 +28,12 @@ import {
 import { trackingDraftOf, type TrackingDraft } from './sections/tracking';
 import { rowsFromRules, type AvailabilitySource, type CustomHoursDraft, type ScheduleRule } from './sections/availability';
 
+/** The four booking limits the editor sets, in form order. */
+export const LIMIT_KEYS = ['maxBookingsPerDay', 'maxBookingsPerWeek', 'maxMinutesPerDay', 'maxMinutesPerWeek'] as const;
+export type LimitKey = (typeof LIMIT_KEYS)[number];
+/** '' is "no limit". */
+export type LimitsDraft = Record<LimitKey, number | ''>;
+
 /** The hours a new custom-hours editor starts from when there are no working hours. */
 const STARTER_HOURS = [{ days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' }];
 
@@ -47,6 +53,8 @@ export interface EventTypeDraft {
   minNotice: number;
   /** '' is "no limit". */
   windowDays: number | '';
+  /** Booking limits per day and per week; '' is "no limit". */
+  limits: LimitsDraft;
   slotInterval: number | '';
   beforeBuf: number;
   afterBuf: number;
@@ -110,6 +118,8 @@ export function initialDraft({
     // Booking window, hydrated for the same reason: '' is "no limit", which is
     // what every event that predates it reads as.
     windowDays: initial?.bookingWindowDays ?? '',
+    // Booking limits, hydrated for the same reason; '' is no limit.
+    limits: Object.fromEntries(LIMIT_KEYS.map((k) => [k, initial?.[k] ?? ''])) as LimitsDraft,
     slotInterval: initial?.slotInterval ?? initial?.lengthMinutes ?? 30,
     beforeBuf: initial?.beforeEventBuffer ?? 0,
     afterBuf: initial?.afterEventBuffer ?? 0,
@@ -229,6 +239,10 @@ export function toPayload(d: EventTypeDraft, ctx: PayloadContext): EventTypePayl
     lengthMinutes: Number(d.lengthMinutes),
     minimumBookingNotice: Number(d.minNotice),
     bookingWindowDays: d.windowDays === '' ? null : Number(d.windowDays),
+    ...(Object.fromEntries(LIMIT_KEYS.map((k) => [k, d.limits[k] === '' ? null : Number(d.limits[k])])) as Record<
+      LimitKey,
+      number | null
+    >),
     slotInterval: d.slotInterval === '' ? null : Number(d.slotInterval),
     beforeEventBuffer: Number(d.beforeBuf),
     afterEventBuffer: Number(d.afterBuf),

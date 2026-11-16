@@ -6,7 +6,8 @@ import { ChevronIcon, type EventTypeMessages } from './shared';
 
 /** The settings that live behind "Advanced settings", and whether any is set. */
 export function advancedSummary(
-  d: Pick<EventTypeDraft, 'beforeBuf' | 'afterBuf' | 'seats' | 'windowDays' | 'slotInterval' | 'lengthMinutes'>,
+  d: Pick<EventTypeDraft, 'beforeBuf' | 'afterBuf' | 'seats' | 'windowDays' | 'slotInterval' | 'lengthMinutes'> &
+    Partial<Pick<EventTypeDraft, 'limits'>>,
   m: EventTypeMessages['editor']['advanced'],
 ): { custom: boolean; text: string } {
   const parts: string[] = [];
@@ -15,6 +16,7 @@ export function advancedSummary(
   if (Number(d.afterBuf) > 0) parts.push(fill(m.bufferAfter, d.afterBuf));
   if (d.seats !== '' && Number(d.seats) > 1) parts.push(fill(m.seats, d.seats));
   if (d.windowDays !== '') parts.push(fill(m.window, d.windowDays));
+  if (d.limits && Object.values(d.limits).some((v) => v !== '')) parts.push(m.limits);
   // "Same as the duration" is the default interval; anything else is a choice.
   if (d.slotInterval !== '' && d.slotInterval !== d.lengthMinutes) parts.push(fill(m.interval, d.slotInterval));
   return { custom: parts.length > 0, text: parts.length ? parts.join(' · ') : m.allDefault };

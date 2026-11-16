@@ -422,6 +422,12 @@ export interface EventType {
   /** Booking window in calendar days ahead; null ⇒ no limit. Optional on the
    *  wire, so an older API reads as no limit. */
   bookingWindowDays?: number | null;
+  /** Booking limits per day and per week (Monday to Sunday); null ⇒ no limit.
+   *  Optional on the wire, so an older API reads as no limit. */
+  maxBookingsPerDay?: number | null;
+  maxBookingsPerWeek?: number | null;
+  maxMinutesPerDay?: number | null;
+  maxMinutesPerWeek?: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;
   slotInterval: number | null;
