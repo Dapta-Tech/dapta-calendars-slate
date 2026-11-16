@@ -685,6 +685,65 @@ export async function listSchedules(
   return rows.map((r) => ({ id: r.id, name: r.name, timeZone: r.timeZone, isDefault: Number(r.is_default) === 1 }));
 }
 
+/** Where the next page of `listAccountSchedules` starts: the last row's sort key. */
+export interface AccountSchedulesAfter {
+  memberCreatedAt: number;
+  createdAt: number;
+  id: string;
+}
+
+/**
+ * Every member's REUSABLE schedules in an account (or one member's, with
+ * `memberId`), with the owner's display name, for reads that look across the
+ * account (the MCP `list_schedules`). Same filter and default marker as
+ * `listSchedules`, so the two cannot drift. Paged by keyset, never truncated
+ * silently: `next` is where the following page starts, or null on the last.
+ */
+export async function listAccountSchedules(
+  db: Db,
+  accountId: string,
+  opts: { memberId?: string; limit?: number; after?: AccountSchedulesAfter } = {},
+): Promise<{
+  schedules: { id: string; name: string; timeZone: string; isDefault: boolean; memberId: string; memberName: string | null }[];
+  next: AccountSchedulesAfter | null;
+}> {
+  const limit = opts.limit ?? 200;
+  const who = opts.memberId ? sql` AND s.member_id = ${opts.memberId}` : sql``;
+  const after = opts.after
+    ? sql` AND (m.created_at, s.created_at, s.id) > (${opts.after.memberCreatedAt}, ${opts.after.createdAt}, ${opts.after.id})`
+    : sql``;
+  const rows = await db.all<{
+    id: string;
+    name: string;
+    timeZone: string;
+    memberId: string;
+    memberName: string | null;
+    mc: number | string;
+    sc: number | string;
+    is_default: number | boolean | null;
+  }>(
+    sql`SELECT s.id, s.name, s.time_zone AS "timeZone", s.member_id AS "memberId", m.display_name AS "memberName",
+               m.created_at AS mc, s.created_at AS sc,
+               CASE WHEN m.default_schedule_id = s.id THEN 1 ELSE 0 END AS is_default
+        FROM schedule s JOIN member m ON m.id = s.member_id
+        WHERE s.account_id = ${accountId} AND s.event_type_id IS NULL${who}${after}
+        ORDER BY m.created_at ASC, s.created_at ASC, s.id ASC LIMIT ${limit + 1}`,
+  );
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  return {
+    schedules: page.map((r) => ({
+      id: r.id,
+      name: r.name,
+      timeZone: r.timeZone,
+      isDefault: Number(r.is_default) === 1,
+      memberId: r.memberId,
+      memberName: r.memberName,
+    })),
+    next: rows.length > limit && last ? { memberCreatedAt: Number(last.mc), createdAt: Number(last.sc), id: last.id } : null,
+  };
+}
+
 /** A REUSABLE schedule; an event's private custom hours read as not found (see `listSchedules`). */
 export async function getSchedule(db: Db, accountId: string, id: string): Promise<ScheduleView | null> {
   const s = await db.get<{ id: string; member_id: string; name: string; time_zone: string }>(

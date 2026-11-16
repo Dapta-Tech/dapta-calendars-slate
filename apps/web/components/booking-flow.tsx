@@ -34,18 +34,44 @@ import {
 /** Mirror of the server's attendee-email rule: catches the 400 before a
  *  round-trip, so a typo never costs the visitor their filled-in form. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-import type { BookingField, BookingUtm } from '@slate/types';
+
+/**
+ * What a prefilled value may become for THIS field, or '' to leave it empty.
+ *
+ * The rule the whole prefill rests on is that the visitor sees what gets
+ * booked. Two field types render something narrower than the string they hold,
+ * so a value from outside has to be put through their own reading first or it
+ * is submitted while being invisible:
+ *
+ *   - `phone` draws a dial code and the digits it can parse, and submits the
+ *     raw string. `?answer_phone=sam@example.com` showed an empty box and
+ *     booked the address.
+ *   - `number` is an `<input type="number">`, and a browser empties one whose
+ *     value is not a number. The state kept the string, so the required check
+ *     passed on a question that submitted blank.
+ *
+ * Every other type is a text box that shows what it holds, so the value passes
+ * through. Validation is unchanged either way: what survives here is still
+ * checked on blur and on submit exactly as a typed value is.
+ */
+function seedForField(field: BookingField, value: string): string {
+  if (field.type === 'phone') return canonicalPhoneValue(value, field.defaultCountry);
+  if (field.type === 'number') return isPlainNumber(value.trim()) ? value.trim() : '';
+  return value;
+}
+import { BOOKING_PREFILL_ANSWER_PREFIX, type BookingField, type BookingPrefill, type BookingUtm } from '@slate/types';
 import {
   bookAction,
   meetingLinkAction,
   releaseAction,
   reserveAction,
 } from '@/app/[accountCode]/[handle]/[slug]/actions';
+import { isPlainNumber } from '@/lib/booking-prefill';
 import { classifyBookingFailure } from '@/lib/booking-failure';
 import type { BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { ZonePicker } from '@/components/zone-picker';
-import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
+import { PhoneField, canonicalPhoneValue, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled, postBookingStep } from '@/lib/embed-messages';
 import { followRedirect, redirectSite, redirectTarget } from '@/lib/success-redirect';
 import { reportBookingConversion, reportBookingStep, type BookingEventDetails } from '@/lib/booking-conversion';
@@ -152,6 +178,17 @@ interface Props {
    */
   utm?: BookingUtm | null;
   /**
+   * Starting values for the intake form, from this page's own address
+   * (`lib/booking-prefill.ts`): what the page that sent the visitor here — a
+   * dForms form, a campaign link — already asked them for.
+   *
+   * Absent on every page reached directly, and absent changes nothing. Present,
+   * it seeds the inputs and NOTHING else: each one stays editable, keeps its
+   * required flag, and is validated exactly as a typed value is, so a prefill
+   * cannot put a value into a booking the visitor did not see.
+   */
+  prefill?: BookingPrefill | null;
+  /**
    * The page's `showBranding` from the API (see `signupHref`): false for an
    * account that turned the Dapta branding off while it is a paying Dapta AI
    * customer, and the confirmation then carries no free-calendar block.
@@ -229,6 +266,7 @@ export function BookingFlow({
   embed = false,
   oneOffToken,
   utm = null,
+  prefill = null,
   showBranding,
   followBrowserZone = true,
   previewNotice,
@@ -297,12 +335,95 @@ export function BookingFlow({
   // CONTROLLED values for every visible input: React 19 resets uncontrolled
   // form fields when the action returns, so a server-side 400 used to wipe
   // everything the visitor had typed (QA2 fix 3).
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [notes, setNotes] = useState('');
+  // The three attendee fields this form always asks are seeded straight from
+  // the prefill: they exist on the first paint, so there is nothing to wait
+  // for and no effect that could overwrite what the visitor has typed.
+  const [name, setName] = useState(() => prefill?.name ?? '');
+  const [email, setEmail] = useState(() => prefill?.email ?? '');
+  const [notes, setNotes] = useState(() => prefill?.notes ?? '');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [emailError, setEmailError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
+  /**
+   * The custom-field half of the prefill, applied as the fields arrive.
+   *
+   * It cannot be seeded with the state above, because on the public pages this
+   * island does not KNOW its questions on the first paint: they come with the
+   * first availability read (`useProgressiveSlots`), so there is nothing to key
+   * a prefilled answer to yet. Hence an effect, and hence the two rules that
+   * make it safe to run again on every change to the field list:
+   *
+   *   - a key naming no rendered field is never applied, so an address copied
+   *     between two event types prefills what they share and nothing else;
+   *   - a key already IN `answers` is never touched, and the visitor typing in
+   *     a field is exactly what puts its key there — so a prefilled value they
+   *     corrected stays corrected, and one they cleared stays cleared.
+   *
+   * The reserved names (`name`, `email`, `notes`) are deliberately not here:
+   * they are attendee fields the form asks by itself, never custom questions
+   * (`visibleFields` filters them out), and they are seeded above.
+   */
+  /**
+   * Take the prefill OUT of the address, the moment the island has it.
+   *
+   * The prefill arrives as a query string, and this page runs the HOST's own
+   * tags: GA4 sends `page_location`, Meta's PageView and HubSpot's tracker send
+   * the page URL, the owner's PostHog sends `$current_url`, and a GTM container
+   * reads `location.href` for itself. With `?name=…&email=…` still on the
+   * address, four vendor accounts would be handed the invitee's email before
+   * the invitee has submitted anything, which is the exact leak
+   * `lib/event-tracking.ts` was written to prevent (dCal's own telemetry cuts
+   * every query string; the host's tags are not ours to filter).
+   *
+   * So: `replaceState` before those tags start. This island renders above
+   * `<EventTracking>` on all three pages, so its effects run first. It also
+   * keeps the address out of the visitor's history and out of any link they
+   * copy from the bar. The values are already in state by then, so the form
+   * stays filled; a RELOAD legitimately loses them, which is the right trade
+   * for not having an email sitting in the URL.
+   *
+   * History is not touched when there is nothing to remove, so a page reached
+   * without a prefill keeps the exact URL it always had.
+   */
+  // Scrubbed whether or not the prefill survived cleaning: a value refused as
+  // overlong or invalid is still the invitee's own text, and it would reach the
+  // same tags. Only seeding the form depends on `prefill`.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      let removed = false;
+      for (const key of [...url.searchParams.keys()]) {
+        if (key === 'name' || key === 'email' || key === 'notes' || key.startsWith(BOOKING_PREFILL_ANSWER_PREFIX)) {
+          url.searchParams.delete(key);
+          removed = true;
+        }
+      }
+      if (removed) window.history.replaceState(window.history.state, '', url.toString());
+    } catch {
+      // A browser that refuses `replaceState` (or an exotic URL) leaves the
+      // address as it was. Nothing else depends on this having happened.
+    }
+  }, []);
+
+  const prefillAnswers = prefill?.answers;
+  useEffect(() => {
+    if (!prefillAnswers) return;
+    const asked = new Map(visibleFields.map((f) => [f.name, f]));
+    setAnswers((current) => {
+      let next: Record<string, string> | null = null;
+      for (const [key, value] of Object.entries(prefillAnswers)) {
+        const field = asked.get(key);
+        if (!field || key in current) continue;
+        const seed = seedForField(field, value);
+        if (!seed) continue;
+        next ??= { ...current };
+        next[key] = seed;
+      }
+      // The same object when nothing applied: a new one would re-render every
+      // input on every availability read for the rest of the visit.
+      return next ?? current;
+    });
+  }, [prefillAnswers, visibleFields]);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
   /** Preview only: a valid submit was made, and booked nothing. */
   const [previewSubmitted, setPreviewSubmitted] = useState(false);

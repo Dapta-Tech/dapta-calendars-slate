@@ -630,6 +630,107 @@ export function normalizeBookingUtm(input: unknown): BookingUtm | null {
 }
 
 /**
+ * The prefill a booking page accepts in its OWN address: the attendee fields
+ * the form always asks (`name`, `email`, `notes`), plus one starting value per
+ * custom booking field under {@link BOOKING_PREFILL_ANSWER_PREFIX}. It exists
+ * for the page that sent the visitor here — a dForms form, a campaign link —
+ * which already asked for their name and address and should not make them type
+ * either one a second time on the way to a slot.
+ *
+ * A STARTING VALUE and nothing more. Every prefilled input stays editable and
+ * is validated exactly as a typed one is, so nothing here can put a value into
+ * a booking the visitor did not see and accept. That is also why a malformed
+ * prefilled email is kept rather than dropped: the field flags it and the
+ * visitor fixes it, where a silent drop reads as the page losing their data.
+ */
+export interface BookingPrefill {
+  name?: string;
+  email?: string;
+  notes?: string;
+  /** `bookingFields[].name` -> its starting value. */
+  answers?: Record<string, string>;
+}
+
+/**
+ * The query prefix a custom field's value arrives under (`answer_phone=…`).
+ *
+ * The same name the field's own input already carries, chosen over a bare
+ * field name so a field can never collide with a parameter this page already
+ * owns — `embed`, `lang`, `theme`, `brand_color`, the nine embed style axes or
+ * a `utm_*` — and over Calendly's positional `a1`/`a2`, which silently aims at
+ * the wrong question the moment the host reorders their form.
+ */
+export const BOOKING_PREFILL_ANSWER_PREFIX = 'answer_';
+/**
+ * The longest prefilled value kept, per field, matching what the booking write
+ * will actually accept (`attendeeSchema`).
+ *
+ * Capping everything at the largest of them would hand the form a value it can
+ * never book: a 500-character name passes the prefill and the form's own
+ * required check, then fails `createBookingSchema` and surfaces a raw,
+ * untranslated zod message after the visitor has picked a time.
+ */
+export const MAX_BOOKING_PREFILL_VALUE = 2000;
+export const MAX_BOOKING_PREFILL_NAME = 200;
+/** The longest field name a prefill key may carry (`bookingFieldSchema.name`). */
+export const MAX_BOOKING_PREFILL_KEY = 64;
+/** At most this many custom-field values one address may prefill. */
+export const MAX_BOOKING_PREFILL_ANSWERS = 50;
+
+/**
+ * One prefilled value, cleaned, or null to leave the input empty: trimmed, a
+ * blank or over-long one dropped, and the same two character guards
+ * `normalizeBookingUtm` applies — a value with a control or invisible format
+ * character is not a name or an address, it is an attempt to make the form
+ * read as something other than what it holds.
+ */
+function prefillValue(value: unknown, max = MAX_BOOKING_PREFILL_VALUE): string | null {
+  if (typeof value !== 'string') return null;
+  // Line breaks are kept, as the one control character that belongs in a
+  // value: `notes` and a long-text question are exactly where a prefilled
+  // message carries them, and dropping the whole value over one newline makes
+  // the visitor watch their own text vanish. Normalized to `\n` first so the
+  // length check and the field agree on what they are counting.
+  const v = value.replace(/\r\n?/g, '\n').trim();
+  if (!v || v.length > max) return null;
+  if (hasControlCharacter(v.replace(/\n/g, '')) || hasInvisibleFormatCharacter(v)) return null;
+  return v;
+}
+
+/**
+ * The prefill in a record of query values (first value per key), or null when
+ * it names none that survive cleaning.
+ *
+ * Keys are taken as they come: a key naming a field this event type does not
+ * ask is simply never applied (the island matches it against the fields it
+ * actually renders), so an address copied between two event types prefills
+ * what both share and nothing else. The answer count is capped so a crafted
+ * address cannot make the page hold an unbounded map.
+ */
+export function normalizeBookingPrefill(input: unknown): BookingPrefill | null {
+  if (!input || typeof input !== 'object') return null;
+  const raw = input as Record<string, unknown>;
+  const out: BookingPrefill = {};
+  for (const key of ['name', 'email', 'notes'] as const) {
+    // `name` and `email` are capped where the booking write caps them; `notes`
+    // shares the general cap, which IS its own (`attendeeSchema.notes`).
+    const value = prefillValue(raw[key], key === 'notes' ? undefined : MAX_BOOKING_PREFILL_NAME);
+    if (value !== null) out[key] = value;
+  }
+  const answers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!key.startsWith(BOOKING_PREFILL_ANSWER_PREFIX)) continue;
+    const name = key.slice(BOOKING_PREFILL_ANSWER_PREFIX.length);
+    if (!name || name.length > MAX_BOOKING_PREFILL_KEY) continue;
+    if (Object.keys(answers).length >= MAX_BOOKING_PREFILL_ANSWERS) break;
+    const clean = prefillValue(value);
+    if (clean !== null) answers[name] = clean;
+  }
+  if (Object.keys(answers).length > 0) out.answers = answers;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
  * What the redirect after booking may carry to the host's page (Calendly's
  * "pass event details"): `event` adds the event type, the time, the status,
  * the host's name and the booking's UTMs; `event_and_invitee` adds the

@@ -31,6 +31,7 @@ import {
 } from '@slate/db';
 import { availabilityQuerySchema, type ApiScope } from '@slate/types';
 import { BookingService } from './booking.service';
+import { parseBookingsListQuery } from './bookings-list-query';
 import { AuthService, type ReqLike } from './auth.service';
 import { unwrap } from './http';
 import { DB } from './tokens';
@@ -228,15 +229,16 @@ export class MachineController {
   @Get('bookings')
   async list(@Req() req: ReqLike, @Query() q: Record<string, string>) {
     const principal = await this.auth.resolveMachine(req, 'bookings:read');
+    const { from, to, limit } = parseBookingsListQuery(q);
     const res = await listBookings(this.db, {
       accountId: principal.accountId,
       // Honor the key's resource allowlist: an event-type-scoped key must not
       // read the whole account's bookings. null → unrestricted.
       eventTypeIds: principal.eventTypeIds,
-      from: q.from ? new Date(q.from).getTime() : undefined,
-      to: q.to ? new Date(q.to).getTime() : undefined,
+      from,
+      to,
       status: q.status,
-      limit: q.limit ? Number(q.limit) : undefined,
+      limit,
       cursor: q.cursor,
     });
     // P1-3: real keyset pagination — nextCursor is non-null when more remain.
@@ -286,7 +288,11 @@ export class MachineController {
   ) {
     await this.scopedBooking(req, uid, ['bookings:cancel', 'bookings:write']);
     // P1-1/P1-2: a retried cancel returns success (already-cancelled), not 410.
-    return unwrap(await this.svc.cancel(uid, { reason: body?.reason, byHost: true, idempotencyKey }));
+    return unwrap(
+      await rejectInvalidInput(
+        this.svc.cancel(uid, { reason: body?.reason, byHost: true, idempotencyKey }),
+      ),
+    );
   }
 
   @Post('bookings/:uid/attendees')

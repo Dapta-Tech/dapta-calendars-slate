@@ -1,8 +1,9 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { McpServer, createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
-import type { Db } from '@slate/db';
+import { sql, type Db } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { AdminService } from '../admin.service';
+import { CrmPropertyCatalogService } from '../crm-property-catalog';
 import { AnalyticsEffects } from '../analytics-effects';
 import { BookingService } from '../booking.service';
 import { CalendarEffects } from '../calendar-effects';
@@ -105,6 +106,8 @@ export class McpGateway {
     @Inject(CalendarEffects) calendar: CalendarEffects,
     // Product analytics: one `$mcp_tool_call` per tool call, only with a provider configured.
     @Optional() @Inject(AnalyticsEffects) analytics?: AnalyticsEffects,
+    // The CRM contact properties `list_crm_contact_properties` reads; absent, the CRM reads as disabled.
+    @Optional() @Inject(CrmPropertyCatalogService) crmProperties?: CrmPropertyCatalogService,
   ) {
     // Booking links the tools hand out name the booking host when there is one.
     this.deps = {
@@ -117,6 +120,7 @@ export class McpGateway {
       admin,
       calendar,
       analytics: analytics ?? null,
+      crmProperties: crmProperties ?? null,
       // create_event waits briefly for the video link the calendar write
       // creates; with no outbox worker in this process (specs, a read replica)
       // it answers `video: pending` at once.
@@ -164,6 +168,8 @@ export class McpGateway {
     try {
       let scoped: ReturnType<typeof forAccount>;
       try {
+        // Before any account choice is built from it: the memberships behind a sign-in are verified now.
+        ctx = await this.verifyMembers(def, args, ctx);
         scoped = forAccount(def, args, ctx);
       } catch (error) {
         // A refused account choice still counts against the caller.
@@ -204,6 +210,61 @@ export class McpGateway {
       };
     }
     return { content: [{ type: 'text' as const, text: result.summary }], structuredContent: result.data };
+  }
+
+  /**
+   * The members behind a sign-in, checked on this call before anything is built
+   * from them (`forAccount` lists accounts to choose from). Every membership of
+   * a sign-in that reaches several accounts must be an active member row of
+   * that account; those that are not are dropped, so a disabled or removed
+   * member learns no workspace name or id. A sign-in left with no account is
+   * refused outright, except on a public tool. Then the single-member check.
+   */
+  private async verifyMembers(def: ToolDef, args: unknown, call: McpCall): Promise<McpCall> {
+    if (call.login && call.login.accounts.length > 0) {
+      const checks = await Promise.all(
+        call.login.accounts.map((a) =>
+          this.deps.db.get<{ id: string }>(
+            sql`SELECT id FROM member WHERE id = ${a.memberId} AND account_id = ${a.accountId} AND status = 'active' LIMIT 1`,
+          ),
+        ),
+      );
+      const accounts = call.login.accounts.filter((_, i) => checks[i]);
+      if (accounts.length === 0) {
+        if (accessOf(def, (args ?? {}) as Record<string, unknown>) === 'public') return { ...call, principal: null, login: { ...call.login, accounts: [] } };
+        throw this.inactiveMember();
+      }
+      if (accounts.length !== call.login.accounts.length) {
+        const principal = accounts.length === 1 ? loginPrincipal(accounts[0]!, call.login.token) : null;
+        return { ...call, principal, login: { ...call.login, accounts } };
+      }
+      // Every membership was just verified, and a login principal is one of them: nothing more to ask.
+      return call;
+    }
+    await this.assertActiveMember(call);
+    return call;
+  }
+
+  private inactiveMember(): ToolFailure {
+    return new ToolFailure(
+      'FORBIDDEN',
+      'The member behind this sign-in is no longer active in this workspace.',
+      'Ask a workspace admin to restore the member, then connect the app again.',
+    );
+  }
+
+  /**
+   * A sign-in's token is verified offline, so it outlives the member behind it.
+   * On every call, a member who is missing or no longer active is refused, for
+   * every tool at once. API keys have no member and are unaffected.
+   */
+  private async assertActiveMember(call: McpCall): Promise<void> {
+    const p = call.principal;
+    if (!p || p.kind !== 'oauth' || !p.memberId) return;
+    const m = await this.deps.db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} AND status = 'active' LIMIT 1`,
+    );
+    if (!m) throw this.inactiveMember();
   }
 
   private takeToken(def: ToolDef, call: McpCall): void {

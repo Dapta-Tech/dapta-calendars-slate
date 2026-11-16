@@ -4,6 +4,7 @@ import { createApiKey, sql } from '@slate/db';
 import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, errorText, idem, structured, type Harness } from '../mcp/mcp-harness';
 import { startFakeAs, type FakeAs } from './fake-as';
+import { ExternalOAuthService } from './external.service';
 import { TOOLS, accessOf } from '../mcp/tools';
 import type { McpCall } from '../mcp/support';
 
@@ -746,5 +747,42 @@ describe('a sign-in that reaches no account, tool by tool', () => {
     const booked = (await body(await book(token, 'unlinked-hold-0004'))).result as { isError?: boolean; structuredContent?: { booking: { status: string } } };
     expect(booked.isError).toBeFalsy();
     expect(booked.structuredContent!.booking.status).toBe('accepted');
+  });
+});
+
+describe('a stale membership list at the door', () => {
+  it('never builds an account choice from a member who is no longer active', async () => {
+    const { as, h } = await setup();
+    const alex = await memberId(h, 'alex-rivera');
+    const bo = await memberId(h, 'bo');
+    await link(h, alex, 'user_stale');
+    await link(h, bo, 'user_stale');
+    const token = await as.mint({ sub: 'user_stale' });
+    const external = h.app.get(ExternalOAuthService);
+    // The list the controller read at the start of the request, before the members changed.
+    const stale = await external.accountsFor('user_stale');
+    expect(stale).toHaveLength(2);
+    const spy = vi.spyOn(external, 'accountsFor').mockResolvedValue(stale);
+    try {
+      // One of the two disabled: the choice drops it, and the other account is used without naming it.
+      await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${bo}`);
+      const left = structured<{ accounts: { id: string }[] }>(await tool(h, token, 'list_my_accounts'));
+      expect(left.accounts.map((a) => a.id)).toEqual([h.accountId]);
+      expect(structured<{ event_types: unknown[] }>(await tool(h, token, 'list_event_types')).event_types.length).toBeGreaterThan(0);
+
+      // Both disabled: refused, with no workspace name or id in the answer.
+      await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${alex}`);
+      for (const name of ['list_event_types', 'list_my_accounts', 'whoami']) {
+        const res = await tool(h, token, name);
+        const text = res.content![0]!.text;
+        expect(res.isError, name).toBe(true);
+        expect(text, name).toMatch(/^FORBIDDEN/);
+        expect(text).not.toMatch(/Acme|Globex/);
+        expect(text).not.toContain(h.accountId);
+        expect(text).not.toContain(h.other.accountId);
+      }
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

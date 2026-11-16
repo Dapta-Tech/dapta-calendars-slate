@@ -95,10 +95,12 @@ reads the reminder contract from `@slate/types`), never the other way round.
 
 ## The ports/adapters seams
 
-Four boundaries are defined as **ports** (interfaces) with **adapters** wired by
-configuration. Public code depends on the port; the concrete adapter is selected at
-runtime and **degrades to a safe default when unconfigured** — so a fork with an
-empty `.env` runs end-to-end.
+Five boundaries (auth, calendar, CRM, email and entitlements) are defined as
+**ports** (interfaces) with **adapters** wired by configuration. The database is the
+sixth row below: it has no port interface, and `DATABASE_URL` picks the dialect. Public
+code depends on the port; the concrete adapter is selected at runtime and **degrades
+to a safe default when unconfigured**, so a fork with an empty `.env` runs
+end-to-end.
 
 | Seam | Port | Adapters | Selector | Bare-fork default |
 |---|---|---|---|---|
