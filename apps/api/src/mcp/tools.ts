@@ -4108,7 +4108,7 @@ export const TOOLS: readonly ToolDef[] = [
   bookTeamMeeting,
   whoami,
   listMyAccounts,
-  listEventTypes as listEventTypeRows,
+  listEventTypes,
   getLink,
   getEventTypeTool,
   listOneOffLinksTool,
