@@ -24,6 +24,7 @@ import {
   getAccountBranding,
   getTeamById,
   listAccountSchedules,
+  listEventTypes as listEventTypeRows,
   listMembers,
   listTeamMembers,
   listTeams,
@@ -1586,7 +1587,11 @@ const listEventTypes: ToolDef = {
     if (args.team_id && !(await getTeamById(deps.db, p.accountId, args.team_id))) throw notFound('Team');
     const code = await canonicalCode(deps.db, p.accountId);
     const all = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
-    const rows = args.team_id ? all.filter((r) => r.team?.daptaId === args.team_id) : all;
+    const inTeam = args.team_id ? all.filter((r) => r.team?.daptaId === args.team_id) : all;
+    // A sign-in sees what its member's CURRENT role allows: an admin every event type, anyone else only their own.
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
+    const own = me && !isAdmin(me.role) ? new Set((await listEventTypeRows(deps.db, p.accountId, { memberId: me.memberId })).map((e) => e.id)) : null;
+    const rows = own ? inTeam.filter((r) => own.has(r.daptaId)) : inTeam;
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
       title: untrusted(r.title, 200),
@@ -1707,7 +1712,7 @@ const listSchedules: ToolDef = {
   name: 'list_schedules',
   title: 'List working-hours schedules',
   description:
-    "Lists the account's reusable working-hours schedules: whose each one is, its name, its time zone, and whether it is that person's default. An event type's private custom hours are not schedules and show in get_event_type instead. Needs scope availability:read. The ids work with get_schedule.",
+    "Lists the account's reusable working-hours schedules (an owner or admin sees everyone's; any other member only their own): whose each one is, its name, its time zone, and whether it is that person's default. An event type's private custom hours are not schedules and show in get_event_type instead. Needs scope availability:read. The ids work with get_schedule.",
   scope: 'availability:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -4103,7 +4108,7 @@ export const TOOLS: readonly ToolDef[] = [
   bookTeamMeeting,
   whoami,
   listMyAccounts,
-  listEventTypes,
+  listEventTypes as listEventTypeRows,
   getLink,
   getEventTypeTool,
   listOneOffLinksTool,

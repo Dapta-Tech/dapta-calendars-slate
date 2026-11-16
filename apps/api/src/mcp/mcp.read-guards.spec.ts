@@ -169,6 +169,8 @@ describe('cross-member schedule and event-type reads follow the member\'s curren
     expect(structured<{ schedule: { id: string } }>(await c.callTool({ name: 'get_schedule', arguments: { schedule_id: theirs.id } })).schedule.id).toBe(theirs.id);
     expect(structured<{ event_type: { id: string } }>(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } })).event_type.id).toBe(introId);
 
+    expect(structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} })).event_types.map((e) => e.id)).toContain(introId);
+
     // Demoted after connecting: the token still says admin, the member row says member.
     await h.db.run(sql`UPDATE member SET role = 'member' WHERE id = ${adminId}`);
     const own = structured<{ schedules: { member_id: string }[] }>(await c.callTool({ name: 'list_schedules', arguments: {} }));
@@ -176,9 +178,13 @@ describe('cross-member schedule and event-type reads follow the member\'s curren
     expect(errorText(await c.callTool({ name: 'get_schedule', arguments: { schedule_id: theirs.id } }))).toContain('FORBIDDEN');
     expect(errorText(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } }))).toContain('FORBIDDEN');
 
+    const listed = structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} }));
+    expect(listed.event_types.map((e) => e.id)).not.toContain(introId);
+
     // Their own still read.
     if (mine) expect(structured<{ schedule: { id: string } }>(await c.callTool({ name: 'get_schedule', arguments: { schedule_id: mine } })).schedule.id).toBe(mine);
     await h.db.run(sql`UPDATE event_type SET member_id = ${adminId} WHERE id = ${introId}`);
     expect(structured<{ event_type: { id: string } }>(await c.callTool({ name: 'get_event_type', arguments: { event_type_id: introId } })).event_type.id).toBe(introId);
+    expect(structured<{ event_types: { id: string }[] }>(await c.callTool({ name: 'list_event_types', arguments: {} })).event_types.map((e) => e.id)).toContain(introId);
   });
 });
