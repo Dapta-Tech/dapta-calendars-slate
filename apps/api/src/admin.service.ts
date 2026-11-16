@@ -284,12 +284,13 @@ export class AdminService {
   }
 
   // Host bookings (R29): the on-behalf path with the singular-attendee shape.
-  async listBookings(p: HostPrincipal, q: { from?: string; to?: string; status?: string; limit?: number }) {
+  // `from` / `to` are epoch ms, already read by the caller (`parseBookingsListQuery`).
+  async listBookings(p: HostPrincipal, q: { from?: number; to?: number; status?: string; limit?: number }) {
     const page = await listBookings(this.db, {
       accountId: p.accountId,
       memberId: p.memberId,
-      from: q.from ? new Date(q.from).getTime() : undefined,
-      to: q.to ? new Date(q.to).getTime() : undefined,
+      from: q.from,
+      to: q.to,
       status: q.status,
       limit: q.limit,
     });
