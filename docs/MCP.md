@@ -46,7 +46,7 @@ upgraded.
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), or one team's with `team_id`, respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
-| `get_event_type` | `event-types:read` | read | One event type with its editor settings: length, location, the hours it follows (schedule, working hours or custom hours), notice, window, buffers, confirmation, seats, questions, team hosts. Hidden ones included; respects the allowlist. |
+| `get_event_type` | `event-types:read` | read | One event type with its editor settings: length, location, the hours it follows (schedule, working hours or custom hours), notice, window, booking limits per day and week, buffers, confirmation, seats, questions, team hosts. Hidden ones included; respects the allowlist. |
 | `list_one_off_links` | `event-types:read` | read | The single-use links of one event type, newest first, each live, used (with its booking uid) or revoked. Respects the allowlist. |
 | `list_schedules` | `availability:read` | read | The account's reusable working-hours schedules, whose each is, its time zone and whether it is that person's default. |
 | `get_schedule` | `availability:read` | read | One schedule's weekly hours and its date-specific hours, wall-clock in its time zone. |
