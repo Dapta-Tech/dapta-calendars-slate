@@ -59,7 +59,7 @@ import {
   type SeriesAnchor,
 } from '@slate/engine';
 import type { AdminService } from '../admin.service';
-import { assertAdmin, assertOwnsOrAdmin } from '../permissions';
+import { assertAdmin, assertOwnsOrAdmin, isAdmin } from '../permissions';
 import type { AnalyticsEffects } from '../analytics-effects';
 import type { MachinePrincipal } from '../auth.service';
 import type { BookingService } from '../booking.service';
@@ -1727,7 +1727,11 @@ const listSchedules: ToolDef = {
   }),
   async run(_args: z.infer<typeof listSchedulesInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
-    const rows = await listAccountSchedules(deps.db, p.accountId);
+    // A sign-in sees what its member's CURRENT role allows, never the role at connect time: an admin reads every
+    // schedule, anyone else only their own, as the dashboard's Availability page does. A key acts for the account.
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
+    const all = await listAccountSchedules(deps.db, p.accountId);
+    const rows = me && !isAdmin(me.role) ? all.filter((r) => r.memberId === me.memberId) : all;
     const schedules = rows.map((r) => ({
       id: r.id,
       name: untrusted(r.name, 120),
@@ -1768,8 +1772,11 @@ const getScheduleTool: ToolDef = {
   }),
   async run(args: z.infer<typeof getScheduleInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
     const s = await getSchedule(deps.db, p.accountId, args.schedule_id);
     if (!s) throw notFound('Schedule');
+    // The dashboard's single read: the schedule's owner or an admin, by the member's current role.
+    if (me) assertOwnsOrAdmin(me, s.memberId);
     const weekly = s.rules.filter((r) => !r.date).map((r) => ({ days: r.days ?? [], start: r.startTime, end: r.endTime }));
     const dates = s.rules
       .filter((r): r is typeof r & { date: string } => Boolean(r.date))
@@ -1830,8 +1837,11 @@ const getEventTypeTool: ToolDef = {
   async run(args: z.infer<typeof getEventTypeInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
     if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    const me = p.memberId ? await actingMember(deps.db, p) : null;
     const et = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
     if (!et) throw notFound('Event type');
+    // The dashboard's single read: the event type's owner or an admin, by the member's current role.
+    if (me) assertOwnsOrAdmin(me, et.memberId);
     let bookingPageUrl: string | null = null;
     if (!et.hidden) {
       const code = await canonicalCode(deps.db, p.accountId);
