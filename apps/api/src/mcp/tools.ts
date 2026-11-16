@@ -2263,7 +2263,7 @@ const listTeamMembersTool: ToolDef = {
     const name = untrusted(team.name, 120);
     return {
       data: { team: { id: team.id, name }, members, count: members.length, truncated },
-      summary: `${members.length} member(s) on ${name}${notReady ? `, ${notReady} without working hours` : ''}.`,
+      summary: `${members.length}${truncated ? '+' : ''} member(s) on ${name}${notReady ? `, ${notReady} without working hours` : ''}.`,
     };
   },
 };
@@ -2404,7 +2404,7 @@ const listConnectionCalendarsTool: ToolDef = {
     }));
     return {
       data: { connection_id: args.connection_id, calendars, count: calendars.length, truncated },
-      summary: `${calendars.length} calendar(s): ${calendars.map((c) => c.name).slice(0, 10).join(', ')}.`,
+      summary: `${calendars.length}${truncated ? '+' : ''} calendar(s): ${calendars.map((c) => c.name).slice(0, 10).join(', ')}.`,
     };
   },
 };
