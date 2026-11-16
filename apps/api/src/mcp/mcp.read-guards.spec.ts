@@ -193,3 +193,63 @@ describe('cross-member schedule and event-type reads follow the member\'s curren
     await h.db.run(sql`UPDATE event_type SET hidden = 0 WHERE id = ${introId}`);
   });
 });
+
+describe('list_schedules pages through every schedule', () => {
+  it('returns more than 200 schedules across pages with a next_cursor, for a key and for a member\'s own', async () => {
+    const ownerId = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${h.accountId} AND role = 'owner' ORDER BY created_at LIMIT 1`))!.id;
+    const base = Date.now();
+    for (let i = 0; i < 230; i += 1) {
+      await h.db.run(
+        sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at) VALUES (${randomUUID()}, ${h.accountId}, ${ownerId}, ${`Bulk ${i}`}, 'UTC', ${base + i})`,
+      );
+    }
+    const total = Number(
+      (await h.db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM schedule WHERE account_id = ${h.accountId} AND event_type_id IS NULL`))!.n,
+    );
+    expect(total).toBeGreaterThan(230);
+
+    const c = await h.connect(await h.key(['availability:read']));
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page: { schedules: { id: string }[]; count: number; next_cursor: string | null } = structured(
+        await c.callTool({ name: 'list_schedules', arguments: cursor ? { cursor } : {} }),
+      );
+      expect(page.count).toBe(page.schedules.length);
+      expect(page.schedules.length).toBeLessThanOrEqual(200);
+      seen.push(...page.schedules.map((s) => s.id));
+      cursor = page.next_cursor;
+      pages += 1;
+    } while (cursor && pages < 10);
+    expect(pages).toBeGreaterThan(1);
+    expect(seen).toHaveLength(total);
+    expect(new Set(seen).size).toBe(total);
+
+    expect(errorText(await c.callTool({ name: 'list_schedules', arguments: { cursor: 'not-a-cursor' } }))).toContain('INVALID_ARGUMENT');
+
+    // A sign-in that is not an admin pages through only its own, with no truncation either.
+    const memberId = await addMember(h, 'admin');
+    const s = await signIn(h, memberId);
+    await h.db.run(sql`UPDATE member SET role = 'member' WHERE id = ${memberId}`);
+    for (let i = 0; i < 205; i += 1) {
+      await h.db.run(
+        sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at) VALUES (${randomUUID()}, ${h.accountId}, ${memberId}, ${`Mine ${i}`}, 'UTC', ${base + 1000 + i})`,
+      );
+    }
+    const own: string[] = [];
+    let cur: string | null = null;
+    let n = 0;
+    do {
+      const page: { schedules: { id: string; member_id: string }[]; next_cursor: string | null } = structured(
+        await s.callTool({ name: 'list_schedules', arguments: cur ? { cursor: cur } : {} }),
+      );
+      for (const sc of page.schedules) expect(sc.member_id).toBe(memberId);
+      own.push(...page.schedules.map((x) => x.id));
+      cur = page.next_cursor;
+      n += 1;
+    } while (cur && n < 10);
+    expect(own.length).toBeGreaterThanOrEqual(205);
+    expect(new Set(own).size).toBe(own.length);
+  });
+});

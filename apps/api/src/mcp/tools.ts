@@ -24,6 +24,7 @@ import {
   getAccountBranding,
   getTeamById,
   listAccountSchedules,
+  type AccountSchedulesAfter,
   listMembers,
   listTeamMembers,
   listTeams,
@@ -1580,6 +1581,7 @@ const listEventTypes: ToolDef = {
       }),
     ),
     count: z.number(),
+    truncated: z.boolean().describe('True when more exist than were returned (the list is capped).'),
   }),
   async run(args: z.infer<typeof listEventTypesInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
@@ -1601,6 +1603,7 @@ const listEventTypes: ToolDef = {
           )
         : null;
     const rows = own ? inTeam.filter((r) => own.has(r.daptaId)) : inTeam;
+    const truncated = rows.length > 100;
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
       title: untrusted(r.title, 200),
@@ -1614,7 +1617,7 @@ const listEventTypes: ToolDef = {
       booking_page_url: pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug),
       questions: questionsOf(r.bookingFields),
     }));
-    return { data: { event_types: items, count: items.length }, summary: `${items.length} event type(s): ${items.map((i) => i.title).slice(0, 10).join(', ')}.` };
+    return { data: { event_types: items, count: items.length, truncated }, summary: `${items.length} event type(s)${truncated ? ' (more exist: truncated)' : ''}: ${items.map((i) => i.title).slice(0, 10).join(', ')}.` };
   },
 };
 
@@ -1716,7 +1719,22 @@ async function calendarOwner(call: McpCall, db: Db): Promise<{ id: string; time_
 
 const weekdays = z.array(z.number()).describe('Weekdays, 0 = Sunday to 6 = Saturday.');
 
-const listSchedulesInput = z.object({});
+const listSchedulesInput = z.object({
+  cursor: z.string().max(300).optional().describe('next_cursor from the previous page, with the other arguments unchanged.'),
+});
+
+/** The opaque cursor of `list_schedules`: the last row's sort key, base64url. */
+function schedulesCursor(cursor: string | undefined): AccountSchedulesAfter | undefined {
+  if (!cursor) return undefined;
+  try {
+    const v = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
+    if (Array.isArray(v) && v.length === 3 && Number.isFinite(v[0]) && Number.isFinite(v[1]) && typeof v[2] === 'string' && v[2].length <= 64)
+      return { memberCreatedAt: v[0] as number, createdAt: v[1] as number, id: v[2] };
+  } catch {
+    /* falls through */
+  }
+  throw new ToolFailure('INVALID_ARGUMENT', 'cursor is not valid for this query.', 'Pass the next_cursor exactly as returned.');
+}
 const listSchedules: ToolDef = {
   name: 'list_schedules',
   title: 'List working-hours schedules',
@@ -1738,14 +1756,18 @@ const listSchedules: ToolDef = {
       }),
     ),
     count: z.number(),
+    next_cursor: z.string().nullable().describe('Pass it as cursor for the next page; null on the last page.'),
   }),
-  async run(_args: z.infer<typeof listSchedulesInput>, call, deps) {
+  async run(args: z.infer<typeof listSchedulesInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
     // A sign-in sees what its member's CURRENT role allows, never the role at connect time: an admin reads every
     // schedule, anyone else only their own, as the dashboard's Availability page does. A key acts for the account.
     const me = p.memberId ? await actingMember(deps.db, p) : null;
-    const all = await listAccountSchedules(deps.db, p.accountId);
-    const rows = me && !isAdmin(me.role) ? all.filter((r) => r.memberId === me.memberId) : all;
+    const page = await listAccountSchedules(deps.db, p.accountId, {
+      ...(me && !isAdmin(me.role) ? { memberId: me.memberId } : {}),
+      ...(args.cursor ? { after: schedulesCursor(args.cursor)! } : {}),
+    });
+    const rows = page.schedules;
     const schedules = rows.map((r) => ({
       id: r.id,
       name: untrusted(r.name, 120),
@@ -1755,8 +1777,12 @@ const listSchedules: ToolDef = {
       member_name: r.memberName ? untrusted(r.memberName, 120) : null,
     }));
     return {
-      data: { schedules, count: schedules.length },
-      summary: `${schedules.length} schedule(s): ${schedules
+      data: {
+        schedules,
+        count: schedules.length,
+        next_cursor: page.next ? Buffer.from(JSON.stringify([page.next.memberCreatedAt, page.next.createdAt, page.next.id])).toString('base64url') : null,
+      },
+      summary: `${schedules.length} schedule(s)${page.next ? ' (more available: pass next_cursor)' : ''}: ${schedules
         .slice(0, 10)
         .map((s) => `${s.name}${s.member_name ? ` (${s.member_name})` : ''}`)
         .join(', ')}.`,
@@ -1925,6 +1951,7 @@ const listOneOffLinksTool: ToolDef = {
       }),
     ),
     count: z.number(),
+    truncated: z.boolean().describe('True when more exist than were returned (the list is capped).'),
   }),
   async run(args: z.infer<typeof listOneOffLinksInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
@@ -1936,7 +1963,9 @@ const listOneOffLinksTool: ToolDef = {
     assertOwnsOrAdmin(me, et.memberId);
     const base = (deps.publicBookingUrl ?? deps.publicAppUrl).replace(/\/+$/, '');
     const iso = (ms: number | null) => (ms == null ? null : new Date(ms).toISOString());
-    const links = (await listOneOffLinks(deps.db, p.accountId, et.id)).slice(0, 100).map((l) => ({
+    const allLinks = await listOneOffLinks(deps.db, p.accountId, et.id);
+    const truncated = allLinks.length > 100;
+    const links = allLinks.slice(0, 100).map((l) => ({
       id: l.id,
       url: `${base}${oneOffLinkPath(l.token)}`,
       state: l.state,
@@ -1948,8 +1977,8 @@ const listOneOffLinksTool: ToolDef = {
     }));
     const live = links.filter((l) => l.state === 'live').length;
     return {
-      data: { links, count: links.length },
-      summary: `${links.length} single-use link(s) for "${untrusted(et.title, 80)}", ${live} still live.`,
+      data: { links, count: links.length, truncated },
+      summary: `${links.length}${truncated ? '+' : ''} single-use link(s) for "${untrusted(et.title, 80)}", ${live} still live.`,
     };
   },
 };
@@ -1986,6 +2015,7 @@ const listCalendarConnections: ToolDef = {
       }),
     ),
     count: z.number(),
+    truncated: z.boolean().describe('True when more exist than were returned (the list is capped at 200).'),
   }),
   async run(_args: z.infer<typeof listConnectionsInput>, call, deps) {
     const owner = await calendarOwner(call, deps.db);
@@ -2005,9 +2035,10 @@ const listCalendarConnections: ToolDef = {
                  c.last_check_at, c.last_check_ok, c.last_check_detail
           FROM connected_calendar c JOIN member m ON m.id = c.member_id
           WHERE c.member_id = ${owner.id}
-          ORDER BY m.created_at ASC, c.id ASC LIMIT 200`,
+          ORDER BY m.created_at ASC, c.id ASC LIMIT 201`,
     );
-    const connections = rows.map((r) => ({
+    const truncated = rows.length > 200;
+    const connections = rows.slice(0, 200).map((r) => ({
       id: r.id,
       member_id: r.member_id,
       member_name: r.display_name ? untrusted(r.display_name, 120) : null,
@@ -2026,7 +2057,7 @@ const listCalendarConnections: ToolDef = {
     }));
     const failing = connections.filter((c) => c.last_check?.ok === false).length;
     return {
-      data: { connections, count: connections.length },
+      data: { connections, count: connections.length, truncated },
       summary: `${connections.length} connected calendar account(s)${failing ? `, ${failing} failing its last check` : ''}.`,
     };
   },
@@ -2157,6 +2188,7 @@ const listTeamsTool: ToolDef = {
       }),
     ),
     count: z.number(),
+    truncated: z.boolean().describe('True when more exist than were returned (the list is capped).'),
   }),
   async run(_args: z.infer<typeof listTeamsInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
@@ -2168,6 +2200,7 @@ const listTeamsTool: ToolDef = {
     const countOf = new Map(counts.map((c) => [c.team_id, Number(c.n)]));
     const code = await canonicalCode(deps.db, p.accountId);
     const root = (deps.publicBookingUrl ?? deps.publicAppUrl).replace(/\/+$/, '');
+    const truncated = teams.length > 100;
     const items = teams.slice(0, 100).map((t) => ({
       id: t.id,
       name: untrusted(t.name, 120),
@@ -2177,8 +2210,8 @@ const listTeamsTool: ToolDef = {
       team_page_url: t.slug ? `${root}/${code}/team/${t.slug}` : null,
     }));
     return {
-      data: { teams: items, count: items.length },
-      summary: `${items.length} team(s): ${items.map((t) => `${t.name} (${t.member_count})`).slice(0, 10).join(', ')}.`,
+      data: { teams: items, count: items.length, truncated },
+      summary: `${items.length}${truncated ? '+' : ''} team(s): ${items.map((t) => `${t.name} (${t.member_count})`).slice(0, 10).join(', ')}.`,
     };
   },
 };
@@ -2208,12 +2241,14 @@ const listTeamMembersTool: ToolDef = {
       }),
     ),
     count: z.number(),
+    truncated: z.boolean().describe('True when more exist than were returned (the list is capped).'),
   }),
   async run(args: z.infer<typeof listTeamMembersInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
     const team = await getTeamById(deps.db, p.accountId, args.team_id);
     if (!team) throw notFound('Team');
     const rows = await listTeamMembers(deps.db, p.accountId, team.id);
+    const truncated = rows.length > 200;
     const members = rows.slice(0, 200).map((r) => ({
       member_id: r.member_id,
       name: r.display_name ? untrusted(r.display_name, 120) : null,
@@ -2227,8 +2262,8 @@ const listTeamMembersTool: ToolDef = {
     const notReady = members.filter((m) => !m.has_hours).length;
     const name = untrusted(team.name, 120);
     return {
-      data: { team: { id: team.id, name }, members, count: members.length },
-      summary: `${members.length} member(s) on ${name}${notReady ? `, ${notReady} without working hours` : ''}.`,
+      data: { team: { id: team.id, name }, members, count: members.length, truncated },
+      summary: `${members.length}${truncated ? '+' : ''} member(s) on ${name}${notReady ? `, ${notReady} without working hours` : ''}.`,
     };
   },
 };
@@ -2256,11 +2291,13 @@ const listMembersTool: ToolDef = {
       }),
     ),
     count: z.number(),
+    truncated: z.boolean().describe('True when more exist than were returned (the list is capped).'),
   }),
   async run(_args: z.infer<typeof listMembersInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
     await adminMember(deps.db, p);
     const rows = await listMembers(deps.db, p.accountId);
+    const truncated = rows.length > 500;
     const members = rows.slice(0, 500).map((m) => ({
       id: m.id,
       name: m.displayName ? untrusted(m.displayName, 120) : null,
@@ -2272,8 +2309,8 @@ const listMembersTool: ToolDef = {
     }));
     const byRole = (r: string) => members.filter((m) => m.role === r).length;
     return {
-      data: { members, count: members.length },
-      summary: `${members.length} member(s): ${byRole('owner')} owner, ${byRole('admin')} admin(s), ${byRole('member')} member(s).`,
+      data: { members, count: members.length, truncated },
+      summary: `${members.length}${truncated ? '+' : ''} member(s): ${byRole('owner')} owner, ${byRole('admin')} admin(s), ${byRole('member')} member(s).`,
     };
   },
 };
@@ -2345,6 +2382,7 @@ const listConnectionCalendarsTool: ToolDef = {
       }),
     ),
     count: z.number(),
+    truncated: z.boolean().describe('True when more exist than were returned (the list is capped).'),
   }),
   async run(args: z.infer<typeof listConnectionCalendarsInput>, call, deps) {
     const p = requireScope(call, 'availability:read');
@@ -2357,6 +2395,7 @@ const listConnectionCalendarsTool: ToolDef = {
     // The dashboard's own read, as the person who connected it: the provider is asked under their identity.
     const rows = await deps.admin.listConnectionCalendars({ accountId: p.accountId, memberId: conn.member_id, role: 'member' }, args.connection_id);
     // The provider's calendar ref is opaque and never leaves the server.
+    const truncated = rows.length > 100;
     const calendars = rows.slice(0, 100).map((c) => ({
       name: untrusted(c.name, 200),
       is_primary: Boolean(c.isPrimary),
@@ -2364,8 +2403,8 @@ const listConnectionCalendarsTool: ToolDef = {
       access_role: c.accessRole ?? null,
     }));
     return {
-      data: { connection_id: args.connection_id, calendars, count: calendars.length },
-      summary: `${calendars.length} calendar(s): ${calendars.map((c) => c.name).slice(0, 10).join(', ')}.`,
+      data: { connection_id: args.connection_id, calendars, count: calendars.length, truncated },
+      summary: `${calendars.length}${truncated ? '+' : ''} calendar(s): ${calendars.map((c) => c.name).slice(0, 10).join(', ')}.`,
     };
   },
 };
