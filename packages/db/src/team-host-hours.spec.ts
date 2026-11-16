@@ -189,6 +189,20 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       expect(await book(ev, await freeFor(ev, [alexId], inAlexDay))).toBe(alexId);
     });
 
+    it('never picks a time where the host holds a pending request (booking_no_overlap counts pending too)', async () => {
+      const ev = await makeEvent('round_robin', [{ memberId: alexId }, { memberId: await invitedMember() }]);
+      const first = await freeFor(ev, [alexId], inAlexDay);
+      const start = Date.parse(first);
+      await db.run(
+        sql`INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, start_ms, end_ms, status, created_at, updated_at)
+            VALUES (${randomUUID()}, ${accountId}, ${randomUUID()}, ${null}, ${alexId}, ${null}, ${'pending hold'},
+              ${start}, ${start + HOUR / 2}, 'pending', ${Date.now()}, ${Date.now()})`,
+      );
+      const next = await freeFor(ev, [alexId], inAlexDay);
+      expect(next).not.toBe(first);
+      expect(await book(ev, next)).toBe(alexId);
+    });
+
     it('round robin: a host outside their own hours never takes the booking', async () => {
       const owlId = await nightOwl();
       const ev = await makeEvent('round_robin', [{ memberId: alexId }, { memberId: owlId }]);
