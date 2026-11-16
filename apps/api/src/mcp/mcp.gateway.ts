@@ -168,6 +168,8 @@ export class McpGateway {
     try {
       let scoped: ReturnType<typeof forAccount>;
       try {
+        // Before any account choice is built from it: the memberships behind a sign-in are verified now.
+        ctx = await this.verifyMembers(def, args, ctx);
         scoped = forAccount(def, args, ctx);
       } catch (error) {
         // A refused account choice still counts against the caller.
@@ -179,7 +181,6 @@ export class McpGateway {
       // A sign-in that reaches no account: only what is public runs, as for an anonymous call.
       if (ctx.login && ctx.login.accounts.length === 0 && accessOf(def, (scoped.args ?? {}) as Record<string, unknown>) !== 'public')
         throw notLinked(this.deps.publicAppUrl);
-      await this.assertActiveMember(ctx);
       if (def.scope) requireScope(ctx, def.scope);
       result = await this.withTimeout(def.run(scoped.args as never, ctx, this.deps));
     } catch (error) {
@@ -212,6 +213,45 @@ export class McpGateway {
   }
 
   /**
+   * The members behind a sign-in, checked on this call before anything is built
+   * from them (`forAccount` lists accounts to choose from). Every membership of
+   * a sign-in that reaches several accounts must be an active member row of
+   * that account; those that are not are dropped, so a disabled or removed
+   * member learns no workspace name or id. A sign-in left with no account is
+   * refused outright, except on a public tool. Then the single-member check.
+   */
+  private async verifyMembers(def: ToolDef, args: unknown, call: McpCall): Promise<McpCall> {
+    if (call.login && call.login.accounts.length > 0) {
+      const checks = await Promise.all(
+        call.login.accounts.map((a) =>
+          this.deps.db.get<{ id: string }>(
+            sql`SELECT id FROM member WHERE id = ${a.memberId} AND account_id = ${a.accountId} AND status = 'active' LIMIT 1`,
+          ),
+        ),
+      );
+      const accounts = call.login.accounts.filter((_, i) => checks[i]);
+      if (accounts.length === 0) {
+        if (accessOf(def, (args ?? {}) as Record<string, unknown>) === 'public') return { ...call, principal: null, login: { ...call.login, accounts: [] } };
+        throw this.inactiveMember();
+      }
+      if (accounts.length !== call.login.accounts.length) {
+        const principal = accounts.length === 1 ? loginPrincipal(accounts[0]!, call.login.token) : null;
+        return { ...call, principal, login: { ...call.login, accounts } };
+      }
+    }
+    await this.assertActiveMember(call);
+    return call;
+  }
+
+  private inactiveMember(): ToolFailure {
+    return new ToolFailure(
+      'FORBIDDEN',
+      'The member behind this sign-in is no longer active in this workspace.',
+      'Ask a workspace admin to restore the member, then connect the app again.',
+    );
+  }
+
+  /**
    * A sign-in's token is verified offline, so it outlives the member behind it.
    * On every call, a member who is missing or no longer active is refused, for
    * every tool at once. API keys have no member and are unaffected.
@@ -222,12 +262,7 @@ export class McpGateway {
     const m = await this.deps.db.get<{ id: string }>(
       sql`SELECT id FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} AND status = 'active' LIMIT 1`,
     );
-    if (!m)
-      throw new ToolFailure(
-        'FORBIDDEN',
-        'The member behind this sign-in is no longer active in this workspace.',
-        'Ask a workspace admin to restore the member, then connect the app again.',
-      );
+    if (!m) throw this.inactiveMember();
   }
 
   private takeToken(def: ToolDef, call: McpCall): void {
