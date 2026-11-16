@@ -62,4 +62,21 @@ describe('GET /v1/host/bookings: an unreadable query value is a 400 naming the f
     expect(body.error).toBe('BAD_REQUEST');
     expect(body.message.startsWith('status: ')).toBe(true);
   });
+
+  it('forwards a valid cursor: the page after nextCursor does not repeat the first page', async () => {
+    await h.newBooking();
+    await h.newBooking();
+    const first = (await (await list('limit=1')).json()) as { items: Array<{ uid: string }>; nextCursor: string | null };
+    expect(first.nextCursor).not.toBeNull();
+    const second = (await (await list(`limit=1&cursor=${encodeURIComponent(first.nextCursor!)}`)).json()) as {
+      items: Array<{ uid: string }>;
+    };
+    expect(second.items[0]!.uid).not.toBe(first.items[0]!.uid);
+  });
+
+  it('refuses a repeated cursor with a 400 naming cursor', async () => {
+    const res = await list('cursor=a&cursor=b');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message.startsWith('cursor: ')).toBe(true);
+  });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { bookingStatus } from '@slate/types';
 import { CAL_VERSION_PINS, openapiSpec } from './openapi';
 
 describe('OpenAPI spec (E11)', () => {
@@ -148,5 +149,17 @@ describe('OpenAPI ↔ controller parity (QA fix 4)', () => {
         '/v1/bookings/{uid}/reschedule',
       ]),
     );
+  });
+});
+
+describe('OpenAPI bookings list status parameter', () => {
+  // openapi.ts is dependency-free, so its status enum is written out; this keeps
+  // it equal to the enum the list validates against.
+  it('lists exactly the booking statuses the list accepts', () => {
+    const op = (openapiSpec.paths as Record<string, { get?: { parameters?: Array<{ name: string; schema: { enum?: string[] } }> } }>)[
+      '/v1/machine/bookings'
+    ]!.get!;
+    const status = op.parameters!.find((p) => p.name === 'status')!;
+    expect(status.schema.enum).toEqual([...bookingStatus]);
   });
 });
