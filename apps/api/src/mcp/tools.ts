@@ -3138,7 +3138,7 @@ async function eventHost(
 ): Promise<{ id: string; time_zone: string | null; email: string | null } | null> {
   const row = p.memberId
     ? await db.get<{ id: string; time_zone: string | null; email: string | null }>(
-        sql`SELECT id, time_zone, email FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} LIMIT 1`,
+        sql`SELECT id, time_zone, email FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} AND status = 'active' LIMIT 1`,
       )
     : await db.get<{ id: string; time_zone: string | null; email: string | null }>(
         sql`SELECT id, time_zone, email FROM member WHERE account_id = ${p.accountId} AND role = 'owner' AND status = 'active'

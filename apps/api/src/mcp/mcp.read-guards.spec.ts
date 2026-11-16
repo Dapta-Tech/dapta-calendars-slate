@@ -135,3 +135,21 @@ describe('calendar connections', () => {
     expect(errorText(await keyed.callTool({ name: 'list_connection_calendars', arguments: { connection_id: coworkers } }))).toContain('NOT_FOUND');
   });
 });
+
+describe('create_event', () => {
+  const args = (label: string) => {
+    const d = new Date(Date.now() + 21 * 86_400_000);
+    d.setUTCDate(d.getUTCDate() + ((7 - d.getUTCDay()) % 7));
+    d.setUTCHours(8, 0, 0, 0);
+    return { title: 'Focus', start: d.toISOString(), duration_minutes: 60, time_zone: 'UTC', idempotency_key: label };
+  };
+
+  it('creates for an active member, and refuses a member disabled since connecting', async () => {
+    const memberId = await addMember(h, 'admin');
+    const c = await signIn(h, memberId);
+    const made = structured<{ event: { uid: string } }>(await c.callTool({ name: 'create_event', arguments: args('guard-event-0001') }));
+    expect(made.event.uid).toBeTruthy();
+    await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${memberId}`);
+    expect(errorText(await c.callTool({ name: 'create_event', arguments: args('guard-event-0002') }))).toContain('NOT_FOUND');
+  });
+});
