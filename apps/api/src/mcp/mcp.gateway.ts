@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { McpServer, createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
-import type { Db } from '@slate/db';
+import { sql, type Db } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { AdminService } from '../admin.service';
 import { CrmPropertyCatalogService } from '../crm-property-catalog';
@@ -179,6 +179,7 @@ export class McpGateway {
       // A sign-in that reaches no account: only what is public runs, as for an anonymous call.
       if (ctx.login && ctx.login.accounts.length === 0 && accessOf(def, (scoped.args ?? {}) as Record<string, unknown>) !== 'public')
         throw notLinked(this.deps.publicAppUrl);
+      await this.assertActiveMember(ctx);
       if (def.scope) requireScope(ctx, def.scope);
       result = await this.withTimeout(def.run(scoped.args as never, ctx, this.deps));
     } catch (error) {
@@ -208,6 +209,25 @@ export class McpGateway {
       };
     }
     return { content: [{ type: 'text' as const, text: result.summary }], structuredContent: result.data };
+  }
+
+  /**
+   * A sign-in's token is verified offline, so it outlives the member behind it.
+   * On every call, a member who is missing or no longer active is refused, for
+   * every tool at once. API keys have no member and are unaffected.
+   */
+  private async assertActiveMember(call: McpCall): Promise<void> {
+    const p = call.principal;
+    if (!p || p.kind !== 'oauth' || !p.memberId) return;
+    const m = await this.deps.db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} AND status = 'active' LIMIT 1`,
+    );
+    if (!m)
+      throw new ToolFailure(
+        'FORBIDDEN',
+        'The member behind this sign-in is no longer active in this workspace.',
+        'Ask a workspace admin to restore the member, then connect the app again.',
+      );
   }
 
   private takeToken(def: ToolDef, call: McpCall): void {

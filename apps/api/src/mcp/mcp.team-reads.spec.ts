@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '@slate/db';
-import { bootHarness, errorText, structured, type Harness } from './mcp-harness';
+import { errorText, structured } from './mcp-harness';
+import { bootOAuth, type OAuthHarness } from '../oauth/oauth-harness';
+import { signIn } from './mcp-signin';
 
 /**
  * The Teams, Members and Notifications reads: list_teams, list_team_members,
@@ -12,10 +14,10 @@ type TeamMember = { member_id: string; team_role: string; joined: boolean; has_h
 type Member = { id: string; email: string | null; role: string; status: string };
 type Notification = { key: string; audience: string; enabled: boolean; customized: boolean; subject: string; body: string };
 
-let h: Harness;
+let h: OAuthHarness;
 
 beforeAll(async () => {
-  h = await bootHarness();
+  h = await bootOAuth();
 });
 afterAll(async () => {
   await h.close();
@@ -23,6 +25,9 @@ afterAll(async () => {
 
 const read = async (name: string, args: Record<string, unknown> = {}) =>
   (await h.connect(await h.key(['event-types:read']))).callTool({ name, arguments: args });
+
+// Owner/admin-only reads, as the dashboard: through a sign-in, never an API key.
+const readAsAdmin = async (name: string) => (await signIn(h)).callTool({ name, arguments: {} });
 
 describe('list_teams and list_team_members', () => {
   it('lists the teams with their member counts and team page', async () => {
@@ -56,7 +61,7 @@ describe('list_teams and list_team_members', () => {
 
 describe('list_members', () => {
   it("lists the account's roster with role and status, and nobody from another account", async () => {
-    const got = structured<{ members: Member[]; count: number }>(await read('list_members'));
+    const got = structured<{ members: Member[]; count: number }>(await readAsAdmin('list_members'));
     const stored = await h.db.all<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${h.accountId}`);
     expect(got.members.map((m) => m.id).sort()).toEqual(stored.map((s) => s.id).sort());
     expect(got.members.filter((m) => m.role === 'owner')).toHaveLength(1);
@@ -67,7 +72,7 @@ describe('list_members', () => {
 
 describe('list_notification_settings', () => {
   it('lists each account-level email with the text it sends, defaults uncustomized', async () => {
-    const got = structured<{ notifications: Notification[]; variables: string[]; count: number }>(await read('list_notification_settings'));
+    const got = structured<{ notifications: Notification[]; variables: string[]; count: number }>(await readAsAdmin('list_notification_settings'));
     expect(got.count).toBeGreaterThan(0);
     expect(got.variables.length).toBeGreaterThan(0);
     for (const n of got.notifications) {

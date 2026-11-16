@@ -1,0 +1,155 @@
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mintOneOffLink, sql } from '@slate/db';
+import { errorText, structured } from './mcp-harness';
+import { addMember, signIn } from './mcp-signin';
+import { bootOAuth, type OAuthHarness } from '../oauth/oauth-harness';
+
+/**
+ * The read tools hold the same line as the dashboard route each mirrors: what
+ * the dashboard keeps to owners and admins (roster, notification emails, CRM
+ * status), to an event type's owner (live single-use link tokens) or to a
+ * member's own calendars is not reachable with a narrow API key, nor by a
+ * member who no longer holds the role. An API key has no member role, so it is
+ * refused, never treated as the owner.
+ */
+
+let h: OAuthHarness;
+let introId: string;
+
+beforeAll(async () => {
+  h = await bootOAuth();
+  introId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
+});
+afterAll(async () => {
+  await h.close();
+});
+
+const keyCall = async (scopes: string[], name: string, args: Record<string, unknown> = {}) =>
+  (await h.connect(await h.key(scopes))).callTool({ name, arguments: args });
+
+async function connection(memberId: string, email: string): Promise<string> {
+  const id = randomUUID();
+  await h.db.run(
+    sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id, primary_email, is_destination, check_conflicts, created_at)
+        VALUES (${id}, ${h.accountId}, ${memberId}, 'google', ${`ext-${id}`}, ${email}, 0, 1, ${Date.now()})`,
+  );
+  return id;
+}
+
+describe.each(['list_members', 'list_notification_settings', 'list_integrations'])('%s', (name) => {
+  it('refuses an API key, whatever its scopes', async () => {
+    const raw = await keyCall(['event-types:read', 'availability:read', 'bookings:read', 'bookings:write'], name);
+    expect(errorText(raw)).toContain('FORBIDDEN');
+  });
+
+  it('answers an owner or admin sign-in, and refuses the same sign-in once the member is no longer an admin', async () => {
+    const adminId = await addMember(h, 'admin');
+    const c = await signIn(h, adminId);
+    const got = structured<Record<string, unknown>>(await c.callTool({ name, arguments: {} }));
+    expect(got).toBeTruthy();
+    await h.db.run(sql`UPDATE member SET role = 'member' WHERE id = ${adminId}`);
+    expect(errorText(await c.callTool({ name, arguments: {} }))).toContain('FORBIDDEN');
+  });
+
+  it('refuses a sign-in whose member was disabled', async () => {
+    const adminId = await addMember(h, 'admin');
+    const c = await signIn(h, adminId);
+    await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${adminId}`);
+    expect(errorText(await c.callTool({ name, arguments: {} }))).toContain('FORBIDDEN');
+  });
+});
+
+describe('list_one_off_links', () => {
+  it('never hands a link token to an API key', async () => {
+    const link = (await mintOneOffLink(h.db, { accountId: h.accountId, eventTypeId: introId }))!;
+    const raw = await keyCall(['event-types:read'], 'list_one_off_links', { event_type_id: introId });
+    const text = errorText(raw);
+    expect(text).toContain('FORBIDDEN');
+    expect(JSON.stringify(raw)).not.toContain(link.token);
+  });
+
+  it("shows the links to an admin sign-in, and to a member only for an event type they own", async () => {
+    const link = (await mintOneOffLink(h.db, { accountId: h.accountId, eventTypeId: introId }))!;
+    const memberId = await addMember(h, 'admin');
+    const c = await signIn(h, memberId);
+    const asAdmin = structured<{ links: { id: string; url: string }[] }>(await c.callTool({ name: 'list_one_off_links', arguments: { event_type_id: introId } }));
+    expect(asAdmin.links.find((l) => l.id === link.id)!.url).toContain(link.token);
+
+    await h.db.run(sql`UPDATE member SET role = 'member' WHERE id = ${memberId}`);
+    expect(errorText(await c.callTool({ name: 'list_one_off_links', arguments: { event_type_id: introId } }))).toContain('FORBIDDEN');
+
+    await h.db.run(sql`UPDATE event_type SET member_id = ${memberId} WHERE id = ${introId}`);
+    const owned = structured<{ links: { id: string }[] }>(await c.callTool({ name: 'list_one_off_links', arguments: { event_type_id: introId } }));
+    expect(owned.links.map((l) => l.id)).toContain(link.id);
+  });
+});
+
+describe('calendar connections', () => {
+  it("shows a sign-in only its own member's connections and calendars", async () => {
+    const ownerId = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${h.accountId} AND role = 'owner' ORDER BY created_at LIMIT 1`))!.id;
+    const adminId = await addMember(h, 'admin');
+    const mine = await connection(adminId, 'mine@example.org');
+    const theirs = await connection(ownerId, 'theirs@example.org');
+    const c = await signIn(h, adminId);
+
+    const raw = await c.callTool({ name: 'list_calendar_connections', arguments: {} });
+    const ids = structured<{ connections: { id: string }[] }>(raw).connections.map((x) => x.id);
+    expect(ids).toContain(mine);
+    expect(ids).not.toContain(theirs);
+    expect(JSON.stringify(raw)).not.toContain('theirs@example.org');
+
+    expect(structured<{ count: number }>(await c.callTool({ name: 'list_connection_calendars', arguments: { connection_id: mine } })).count).toBe(0);
+    expect(errorText(await c.callTool({ name: 'list_connection_calendars', arguments: { connection_id: theirs } }))).toContain('NOT_FOUND');
+  });
+
+  it('refuses a sign-in whose member was disabled or removed since connecting', async () => {
+    const memberId = await addMember(h, 'admin');
+    const c = await signIn(h, memberId);
+    const id = await connection(memberId, 'gone@example.org');
+    expect(structured<{ count: number }>(await c.callTool({ name: 'list_calendar_connections', arguments: {} })).count).toBe(1);
+    await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${memberId}`);
+    for (const [name, args] of [
+      ['list_calendar_connections', {}],
+      ['list_connection_calendars', { connection_id: id }],
+    ] as const)
+      expect(errorText(await c.callTool({ name, arguments: args }))).toContain('FORBIDDEN');
+  });
+
+  it('holds an API key to the bar of check_availability and the workspace owner\'s connections', async () => {
+    const ownerId = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${h.accountId} AND role = 'owner' AND status = 'active' ORDER BY created_at LIMIT 1`))!.id;
+    const coworkerId = await addMember(h, 'member');
+    const owners = await connection(ownerId, 'owner-cal@example.org');
+    const coworkers = await connection(coworkerId, 'coworker-cal@example.org');
+
+    for (const name of ['list_calendar_connections', 'list_connection_calendars'])
+      expect(errorText(await keyCall(['availability:read'], name, { connection_id: owners }))).toContain('bookings:write');
+    expect(errorText(await (await h.connect(await h.key(['availability:read', 'bookings:write'], { eventTypeIds: [introId] }))).callTool({ name: 'list_calendar_connections', arguments: {} }))).toContain('INSUFFICIENT_SCOPE');
+
+    const keyed = await h.connect(await h.key(['availability:read', 'bookings:write']));
+    const raw = await keyed.callTool({ name: 'list_calendar_connections', arguments: {} });
+    const ids = structured<{ connections: { id: string }[] }>(raw).connections.map((x) => x.id);
+    expect(ids).toContain(owners);
+    expect(ids).not.toContain(coworkers);
+    expect(JSON.stringify(raw)).not.toContain('coworker-cal@example.org');
+    expect(errorText(await keyed.callTool({ name: 'list_connection_calendars', arguments: { connection_id: coworkers } }))).toContain('NOT_FOUND');
+  });
+});
+
+describe('create_event', () => {
+  const args = (label: string) => {
+    const d = new Date(Date.now() + 21 * 86_400_000);
+    d.setUTCDate(d.getUTCDate() + ((7 - d.getUTCDay()) % 7));
+    d.setUTCHours(8, 0, 0, 0);
+    return { title: 'Focus', start: d.toISOString(), duration_minutes: 60, time_zone: 'UTC', idempotency_key: label };
+  };
+
+  it('creates for an active member, and refuses a member disabled since connecting', async () => {
+    const memberId = await addMember(h, 'admin');
+    const c = await signIn(h, memberId, 'event-types:read availability:read bookings:read bookings:write');
+    const made = structured<{ event: { uid: string } }>(await c.callTool({ name: 'create_event', arguments: args('guard-event-0001') }));
+    expect(made.event.uid).toBeTruthy();
+    await h.db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${memberId}`);
+    expect(errorText(await c.callTool({ name: 'create_event', arguments: args('guard-event-0002') }))).toContain('NOT_FOUND');
+  });
+});

@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mintOneOffLink, revokeOneOffLink, sql } from '@slate/db';
-import { bootHarness, errorText, structured, type Harness } from './mcp-harness';
+import { errorText, structured } from './mcp-harness';
+import { bootOAuth, type OAuthHarness } from '../oauth/oauth-harness';
+import { signIn } from './mcp-signin';
 
 /**
  * The setup reads: list_schedules / get_schedule (what the Availability page
@@ -12,12 +14,12 @@ import { bootHarness, errorText, structured, type Harness } from './mcp-harness'
 type Schedule = { id: string; name: string; time_zone: string; is_default: boolean; member_id: string; member_name: string | null };
 type Link = { id: string; url: string; state: string; created_at: string; booking_uid: string | null; revoked_at: string | null };
 
-let h: Harness;
+let h: OAuthHarness;
 let introId: string;
 let teamId: string;
 
 beforeAll(async () => {
-  h = await bootHarness();
+  h = await bootOAuth();
   introId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
   teamId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'team-demo' AND account_id = ${h.accountId}`))!.id;
 });
@@ -106,7 +108,7 @@ describe('list_one_off_links', () => {
     const first = (await mintOneOffLink(h.db, { accountId: h.accountId, eventTypeId: introId }, Date.now() - 60_000))!;
     const second = (await mintOneOffLink(h.db, { accountId: h.accountId, eventTypeId: introId }))!;
     await revokeOneOffLink(h.db, h.accountId, introId, first.id);
-    const c = await h.connect(await h.key(['event-types:read']));
+    const c = await signIn(h);
     const got = structured<{ links: Link[]; count: number }>(await c.callTool({ name: 'list_one_off_links', arguments: { event_type_id: introId } }));
     const ours = got.links.filter((l) => l.id === first.id || l.id === second.id);
     expect(ours.map((l) => l.id)).toEqual([second.id, first.id]);
@@ -119,7 +121,7 @@ describe('list_one_off_links', () => {
   it("hides the links of an event type outside the allowlist, and another account's", async () => {
     const narrow = await h.connect(await h.key(['event-types:read'], { eventTypeIds: [teamId] }));
     expect(errorText(await narrow.callTool({ name: 'list_one_off_links', arguments: { event_type_id: introId } }))).toContain('NOT_FOUND');
-    const wide = await h.connect(await h.key(['event-types:read']));
+    const wide = await signIn(h);
     expect(errorText(await wide.callTool({ name: 'list_one_off_links', arguments: { event_type_id: h.other.eventTypeId } }))).toContain('NOT_FOUND');
   });
 });

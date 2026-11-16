@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '@slate/db';
-import { bootHarness, errorText, structured, type Harness } from './mcp-harness';
+import { errorText, structured } from './mcp-harness';
+import { bootOAuth, type OAuthHarness } from '../oauth/oauth-harness';
+import { signIn } from './mcp-signin';
 
 /**
  * The last reads: list_event_types by team, list_connection_calendars,
@@ -10,10 +12,10 @@ import { bootHarness, errorText, structured, type Harness } from './mcp-harness'
  * a reason rather than failing.
  */
 
-let h: Harness;
+let h: OAuthHarness;
 
 beforeAll(async () => {
-  h = await bootHarness();
+  h = await bootOAuth();
 });
 afterAll(async () => {
   await h.close();
@@ -43,7 +45,7 @@ describe('list_event_types by team', () => {
 describe('list_connection_calendars', () => {
   it("answers empty with no provider, and reports another account's connection as not found", async () => {
     const insert = async (accountId: string) => {
-      const member = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`))!;
+      const member = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${accountId} ORDER BY (role = 'owner') DESC, created_at ASC LIMIT 1`))!;
       const id = randomUUID();
       await h.db.run(
         sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
@@ -53,17 +55,19 @@ describe('list_connection_calendars', () => {
     };
     const ours = await insert(h.accountId);
     const theirs = await insert(h.other.accountId);
+    // The owner's own connection, read as the owner signed in.
+    const owner = await signIn(h);
     const got = structured<{ connection_id: string; calendars: unknown[]; count: number }>(
-      await call(['availability:read'], 'list_connection_calendars', { connection_id: ours }),
+      await owner.callTool({ name: 'list_connection_calendars', arguments: { connection_id: ours } }),
     );
     expect(got).toMatchObject({ connection_id: ours, calendars: [], count: 0 });
-    expect(errorText(await call(['availability:read'], 'list_connection_calendars', { connection_id: theirs }))).toContain('NOT_FOUND');
+    expect(errorText(await owner.callTool({ name: 'list_connection_calendars', arguments: { connection_id: theirs } }))).toContain('NOT_FOUND');
   });
 });
 
 describe('list_integrations', () => {
   it('reports the integrations and what the deployment supports, never a credential', async () => {
-    const raw = await call(['event-types:read'], 'list_integrations');
+    const raw = await (await signIn(h)).callTool({ name: 'list_integrations', arguments: {} });
     const got = structured<{ integrations: unknown[]; deployment: { enabled: boolean; can_store_credentials: boolean; required_scopes: string[] } }>(raw);
     expect(Array.isArray(got.integrations)).toBe(true);
     expect(typeof got.deployment.enabled).toBe('boolean');
