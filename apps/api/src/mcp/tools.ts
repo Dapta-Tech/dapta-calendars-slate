@@ -28,9 +28,12 @@ import {
   listTeams,
   getEventTypeById,
   getSchedule,
+  hasPendingCalendarJob,
   listOneOffLinks,
   hashApiValue,
   hostEventAttendees,
+  loadBookingForCalendarWrite,
+  loadBookingMeetingUrl,
   loadDestinationConnectionRefs,
   normalizeSchedulingMethod,
   replayHostEvent,
@@ -43,9 +46,10 @@ import {
   type SkippedDate,
 } from '@slate/db';
 import { BOOKING_UTM_KEYS, MAX_BOOKING_UTM_VALUE, hasBrandKit, type ApiScope, type BookingUtm } from '@slate/types';
-import { isValidTimeZone } from '@slate/shared';
+import { formatBookingLocation, getMessages, isValidTimeZone } from '@slate/shared';
 import { calendarFeatures } from '@slate/calendar';
 import {
+  LOCATION_KINDS,
   RECURRENCE_WEEKDAYS,
   localDateParts,
   oneOffLinkPath,
@@ -65,7 +69,9 @@ import type { CalendarEffects } from '../calendar-effects';
 import type { CalV2Service } from '../cal-v2.service';
 import type { CalV2PilotService } from '../cal-v2-pilot.service';
 import type { CrmPropertyCatalogService } from '../crm-property-catalog';
+import { wantsConferencingLink } from '../email-effects';
 import { isServiceError } from '../http';
+import { MEETING_URL_STATUSES } from '../meeting-url';
 import { queryBookings } from './bookings-query';
 import { bindHold, findHold, heldByAnother, holdOwner } from './holds';
 import {
@@ -271,6 +277,24 @@ const seriesShape = z.looseObject({
   skipped_dates: z.array(z.string()).describe('Dates left out because something else was there (YYYY-MM-DD).'),
 });
 
+/** How the meeting happens and its video link, the same on one booking and in a list. */
+const meetingFields = {
+  location_kind: openEnum(LOCATION_KINDS)
+    .nullable()
+    .describe('conferencing: a video meeting, its link in meeting_url. in_person, phone, custom: the place is in location. Null when none was set.'),
+  meeting_url: z.string().nullable().describe('The video link, once the host\'s calendar has created it.'),
+  meeting_url_status: openEnum(MEETING_URL_STATUSES).describe(
+    'ready: meeting_url has the link. pending: the calendar is still creating it; get_booking shows it about 10 seconds later, and the confirmation email carries it. on_confirmation: a request waiting for the host; the link is created when the host confirms. none: no link is coming (not a video meeting, or no calendar to create one).',
+  ),
+};
+
+const locationField = {
+  location: z
+    .string()
+    .nullable()
+    .describe('Where it happens: the place, number or wording the host set, or the kind of meeting when it has none (e.g. "Online meeting"). Null when none was set.'),
+};
+
 const bookingSummary = z.looseObject({
   uid: z.string(),
   kind: openEnum(['booking', 'event']).describe(
@@ -287,8 +311,8 @@ const bookingSummary = z.looseObject({
   event_type_title: z.string().nullable(),
   duration_minutes: z.number().nullable(),
   hosts: z.array(z.string()),
-  location: z.string().nullable(),
-  meeting_url: z.string().nullable(),
+  ...locationField,
+  ...meetingFields,
   series: seriesShape
     .nullable()
     .optional()
@@ -686,10 +710,61 @@ async function summarize(deps: McpToolDeps, accountId: string, b: Booking, tz: s
     event_type_title: meta?.event_title ? untrusted(meta.event_title, 200) : null,
     duration_minutes: b.duration ?? null,
     hosts: b.hosts.map((h) => untrusted(h.name ?? h.username ?? '', 100)).filter(Boolean),
-    location: b.location ? untrusted(b.location, 300) : null,
-    meeting_url: b.meetingUrl ? untrusted(b.meetingUrl, 500) : null,
+    ...meetingOf(deps, b),
     series: hostEvent && meta.recurring_event_id ? await seriesFor(deps.db, accountId, meta) : null,
   };
+}
+
+type MeetingOut = ReturnType<typeof meetingOf>;
+const NO_MEETING: MeetingOut = { location: null, location_kind: null, meeting_url: null, meeting_url_status: 'none' };
+
+/** Where a booking happens and its video link (`meetingFields`), the same in every tool's answer. */
+function meetingOf(deps: McpToolDeps, b: Booking) {
+  return {
+    // A kind with no text of its own (a video meeting) reads as its name, as
+    // the booking page and the email show it, with the label the calendar
+    // gives at runtime (ADR 0008).
+    location: b.location
+      ? untrusted(b.location, 300)
+      : formatBookingLocation(b.locationKind, null, getMessages('en'), deps.calendar.provider.conferencingLabel),
+    // `??`: a replayed answer stored before these fields existed has neither.
+    location_kind: b.locationKind ?? null,
+    meeting_url: b.meetingUrl ? untrusted(b.meetingUrl, 500) : null,
+    meeting_url_status: b.meetingUrlStatus ?? (b.meetingUrl ? 'ready' : 'none'),
+  };
+}
+
+/**
+ * A booking just accepted, read again once its video link exists. The link
+ * comes from the calendar write the outbox runs a few seconds after the
+ * booking (ADR 0007), so the answer waits for it, as create_event does, and
+ * answers `pending` if it is still not there; `none` at once when the host
+ * has no calendar to make one.
+ */
+async function withMeetingUrl(deps: McpToolDeps, accountId: string, b: Booking): Promise<Booking> {
+  const awaits =
+    b.status === 'accepted' &&
+    !b.meetingUrl &&
+    wantsConferencingLink(b.locationKind ?? null, b.location) &&
+    deps.calendar.provider.enabled;
+  if (!awaits) return b;
+  // The host has no calendar the booking is written to: no room is ever made.
+  if (!(await loadBookingForCalendarWrite(deps.db, b.uid))?.destinationRefs.length) return { ...b, meetingUrlStatus: 'none' };
+  await waitForMeetingUrl(
+    deps,
+    () => loadBookingMeetingUrl(deps.db, b.uid),
+    async () => !(await hasPendingCalendarJob(deps.db, b.uid)),
+  );
+  return deps.calV2.bookingResponse(accountId, b.uid);
+}
+
+/** The sentence about the video link, for an answer about a booking that is on. */
+function videoLine(b: { status: string; meeting_url: string | null; meeting_url_status: string }): string {
+  if (b.status !== 'accepted' && b.status !== 'pending') return '';
+  if (b.meeting_url_status === 'ready') return ` Video: ${b.meeting_url}.`;
+  if (b.meeting_url_status === 'pending') return ' The video link is still being created; get_booking shows it in about 10 seconds, and the confirmation email carries it.';
+  if (b.meeting_url_status === 'on_confirmation') return ' The video link is created when the host confirms.';
+  return '';
 }
 
 async function seriesFor(
@@ -944,7 +1019,7 @@ const bookMeeting: ToolDef = {
   name: 'book_meeting',
   title: 'Book a meeting on a public booking link',
   description:
-    'Book one slot on a public booking link, with no sign-in. It sends the invitee a confirmation email, so it is best called once the person has agreed to the time and the details. The start is a slot returned by find_available_slots; hold_id from hold_slot books a time that was held. A pending status means the host still has to confirm.',
+    'Book one slot on a public booking link, with no sign-in. It sends the invitee a confirmation email, so it is best called once the person has agreed to the time and the details. The start is a slot returned by find_available_slots; hold_id from hold_slot books a time that was held. A pending status means the host still has to confirm. On a video meeting the answer carries the join link the invitee gets by email (booking.meeting_url, meeting_url_status), waited for a few seconds.',
   scope: null,
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -960,6 +1035,8 @@ const bookMeeting: ToolDef = {
       time_zone: z.string(),
       event_type_title: z.string(),
       host: z.string().nullable(),
+      ...locationField,
+      ...meetingFields,
     }),
     replayed: z.boolean().describe('True when this idempotency_key had already booked this exact request.'),
     next_step: z.string(),
@@ -1002,11 +1079,15 @@ const bookMeeting: ToolDef = {
     });
     if (claim.requestHash !== requestHash)
       throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
-    const answer = (data: BookMeetingData): ToolResult => ({
-      data,
-      summary: data.replayed ? `${line(data.booking)} (replay of an earlier identical call)` : line(data.booking),
-      affected: [data.booking.uid],
-    });
+    // Where it happens and its link are read now, never stored with the answer:
+    // a retry with this key gets the link that exists by then. It is the link
+    // the invitee's confirmation email carries.
+    const answer = async (data: BookMeetingData): Promise<ToolResult> => {
+      const now = await deps.calV2.bookingResponse(accountId, data.booking.uid).catch(() => null);
+      const booking = { ...data.booking, ...(now ? meetingOf(deps, await withMeetingUrl(deps, accountId, now)) : NO_MEETING) };
+      const text = line(booking) + videoLine(booking);
+      return { data: { ...data, booking }, summary: data.replayed ? `${text} (replay of an earlier identical call)` : text, affected: [booking.uid] };
+    };
     if (claim.statusCode != null && claim.statusCode < 400) return answer({ ...(claim.responseBody as BookMeetingData), replayed: true });
     const who = { name: args.attendee.name, email: args.attendee.email, timeZone: tz };
     const storedKey = `mcp:${namespaceHash}`;
@@ -1338,7 +1419,7 @@ const bookTeamMeeting: ToolDef = {
   name: 'book_team_meeting',
   title: 'Book a meeting with a team',
   description:
-    'Book one slot on a team event. The host is picked at booking time from those free at that moment: round-robin picks one fairly (highest priority, then the lowest load for its weight, then the least recently booked), collective books every host, fixed round-robin books the fixed hosts plus one. Returns who was assigned. It emails the invitee, so it is best called once the person has agreed. The start comes from find_team_slots. Works with no sign-in on a public team link, or, signed in or with an API key holding bookings:write, by event_type_id.',
+    'Book one slot on a team event. The host is picked at booking time from those free at that moment: round-robin picks one fairly (highest priority, then the lowest load for its weight, then the least recently booked), collective books every host, fixed round-robin books the fixed hosts plus one. Returns who was assigned. It emails the invitee, so it is best called once the person has agreed. The start comes from find_team_slots. Works with no sign-in on a public team link, or, signed in or with an API key holding bookings:write, by event_type_id. On a video meeting the answer carries the join link, as book_meeting does.',
   scope: null,
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
   write: true,
@@ -1354,6 +1435,8 @@ const bookTeamMeeting: ToolDef = {
       end_utc: z.string(),
       time_zone: z.string(),
       event_type_title: z.string(),
+      ...locationField,
+      ...meetingFields,
     }),
     team: teamShape,
     assigned_hosts: z.array(z.string()).describe('Display names of the host(s) the booking was assigned to.'),
@@ -1362,7 +1445,7 @@ const bookTeamMeeting: ToolDef = {
   async run(args: z.infer<typeof bookTeamInput>, call, deps) {
     let accountId: string;
     let resolved: Resolved;
-    let booking: { uid: string; status: string; start: string; end: string; start_utc: string; end_utc: string; time_zone: string; event_type_title: string };
+    let booking: { uid: string; status: string; start: string; end: string; start_utc: string; end_utc: string; time_zone: string; event_type_title: string } & MeetingOut;
     let replayed = false;
     if (args.event_type_id) {
       const p = requireScope(call, 'bookings:write');
@@ -1390,6 +1473,8 @@ const bookTeamMeeting: ToolDef = {
         )
         .catch(async (error: unknown) => withMissing(toFailure(error), resolved.eventType.booking_fields, args.answers));
       const sum = await summarize(deps, accountId, b, args.attendee.time_zone);
+      // Read now, so a retry with this key also gets the link that exists by then.
+      const now = await withMeetingUrl(deps, accountId, await deps.calV2.bookingResponse(accountId, b.uid));
       booking = {
         uid: sum.uid,
         status: sum.status,
@@ -1399,6 +1484,7 @@ const bookTeamMeeting: ToolDef = {
         end_utc: sum.end_utc,
         time_zone: sum.time_zone,
         event_type_title: sum.event_type_title ?? untrusted(resolved.eventType.title, 200),
+        ...meetingOf(deps, now),
       };
     } else {
       const { page, ...target } = await resolveTeamPage(deps, teamPageFrom(args));
@@ -1419,7 +1505,8 @@ const bookTeamMeeting: ToolDef = {
         call,
         deps,
       );
-      const b = (done.data as BookMeetingData).booking;
+      // book_meeting already waited for the link: no second wait.
+      const b = (done.data as BookMeetingData & { booking: MeetingOut }).booking;
       replayed = (done.data as BookMeetingData).replayed;
       booking = {
         uid: b.uid,
@@ -1430,6 +1517,10 @@ const bookTeamMeeting: ToolDef = {
         end_utc: b.end_utc,
         time_zone: b.time_zone,
         event_type_title: b.event_type_title,
+        location: b.location,
+        location_kind: b.location_kind,
+        meeting_url: b.meeting_url,
+        meeting_url_status: b.meeting_url_status,
       };
     }
     const assigned = (await deps.calV2.bookingResponse(accountId, booking.uid)).hosts
@@ -1445,7 +1536,7 @@ const bookTeamMeeting: ToolDef = {
           ? 'This request had already been booked; nothing was sent again.'
           : 'Booked. The invitee was emailed a confirmation with a link to reschedule or cancel.',
       },
-      summary: `${line(booking)} Assigned to ${assigned.join(', ') || 'the team'}.${replayed ? ' (replay of an earlier identical call)' : ''}`,
+      summary: `${line(booking)}${videoLine(booking)} Assigned to ${assigned.join(', ') || 'the team'}.${replayed ? ' (replay of an earlier identical call)' : ''}`,
       affected: [booking.uid],
     };
   },
@@ -2456,6 +2547,7 @@ const bookingRows = z.looseObject({
       attendee_count: z.number(),
       rescheduled_from_uid: z.string().nullable(),
       rescheduled_to_uid: z.string().nullable(),
+      ...meetingFields,
     }),
   ),
   next_cursor: z.string().nullable(),
@@ -2546,6 +2638,9 @@ async function bookingPage(
     attendee_count: b.attendeeCount,
     rescheduled_from_uid: b.rescheduledFromUid,
     rescheduled_to_uid: b.rescheduledToUid,
+    location_kind: b.locationKind,
+    meeting_url: b.meetingUrl ? untrusted(b.meetingUrl, 500) : null,
+    meeting_url_status: b.meetingUrlStatus,
   }));
   return {
     data: {
@@ -2562,7 +2657,7 @@ const listBookings: ToolDef = {
   name: 'list_bookings',
   title: 'List bookings',
   description:
-    'List bookings with minimal fields (no notes, answers or names). Needs scope bookings:read and respects an API key\'s event-type allowlist. get_booking returns one booking\'s details. To learn about new or changed bookings, pass updated_since (the next_updated_since of your previous call) instead of re-reading the whole list; a booking moved with reschedule_booking shows as the old one cancelled with rescheduled_to_uid and the new one with rescheduled_from_uid; to be told as they happen, without polling, a workspace admin adds a webhook in the web app (API and webhooks, then Webhooks). Events made with create_event are listed too, with kind event and their own title (webhooks do not report them).',
+    'List bookings with minimal fields (no notes, answers or names), each with how the meeting happens (location_kind) and its video link once it exists (meeting_url). Needs scope bookings:read and respects an API key\'s event-type allowlist. get_booking returns one booking\'s details. To learn about new or changed bookings, pass updated_since (the next_updated_since of your previous call) instead of re-reading the whole list; a booking moved with reschedule_booking shows as the old one cancelled with rescheduled_to_uid and the new one with rescheduled_from_uid; to be told as they happen, without polling, a workspace admin adds a webhook in the web app (API and webhooks, then Webhooks). Events made with create_event are listed too, with kind event and their own title (webhooks do not report them).',
   scope: 'bookings:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2663,7 +2758,7 @@ const getBooking: ToolDef = {
           utm: campaignOut(b.utm),
         },
       },
-      summary: line(summary),
+      summary: line(summary) + videoLine(summary),
       affected: [b.uid],
     };
   },
@@ -2689,7 +2784,7 @@ const createBooking: ToolDef = {
   name: 'create_booking',
   title: 'Create a booking',
   description:
-    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee and the host (guests are invited by the host\'s connected calendar, not emailed by dCal), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held.',
+    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee and the host (guests are invited by the host\'s connected calendar, not emailed by dCal), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held. On a video meeting it waits a few seconds for the link (booking.meeting_url, meeting_url_status).',
   scope: 'bookings:write',
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -2724,8 +2819,8 @@ const createBooking: ToolDef = {
       const et = failure.code === 'BOOKING_FIELDS_INVALID' ? await deps.calV2.resolveEvent(p.accountId, { eventTypeId: args.event_type_id }).catch(() => null) : null;
       return withMissing(failure, et?.eventType.booking_fields, args.answers);
     });
-    const summary = await summarize(deps, p.accountId, b, args.attendee.time_zone);
-    return { data: { booking: summary }, summary: line(summary), affected: [b.uid] };
+    const summary = await summarize(deps, p.accountId, await withMeetingUrl(deps, p.accountId, b), args.attendee.time_zone);
+    return { data: { booking: summary }, summary: line(summary) + videoLine(summary), affected: [b.uid] };
   },
 };
 
@@ -2894,8 +2989,8 @@ const rescheduleBooking: ToolDef = {
       p.eventTypeIds,
       { refuseHeld: true },
     );
-    const summary = await summarize(deps, p.accountId, b, zone);
-    return { data: { booking: summary, previous_uid: args.booking_uid }, summary: `Moved. ${line(summary)}`, affected: [args.booking_uid, b.uid] };
+    const summary = await summarize(deps, p.accountId, await withMeetingUrl(deps, p.accountId, b), zone);
+    return { data: { booking: summary, previous_uid: args.booking_uid }, summary: `Moved. ${line(summary)}${videoLine(summary)}`, affected: [args.booking_uid, b.uid] };
   },
 };
 
@@ -3101,16 +3196,28 @@ async function eventHost(
 export const MEETING_URL_WAIT_MS = 12_000;
 const MEETING_URL_POLL_MS = 400;
 
+/** How long a booking's wait trusts "no calendar write queued": the write is queued right after the booking commits. */
+const MEETING_URL_QUEUE_GRACE_MS = 1_000;
+
 /**
  * Wait, briefly, for the video link the calendar write creates. The write runs
  * in the outbox (never inline, invariant 5); a host event's write is due at
  * once, so the link usually lands within a few seconds. Null when it has not.
+ * `over`, when given, says the write has ended (or was never queued): a link
+ * that is not there by then is not coming, so the wait stops.
  */
-async function waitForMeetingUrl(deps: McpToolDeps, read: () => Promise<string | null>): Promise<string | null> {
-  const until = Date.now() + (deps.meetingUrlWaitMs ?? MEETING_URL_WAIT_MS);
+async function waitForMeetingUrl(
+  deps: McpToolDeps,
+  read: () => Promise<string | null>,
+  over?: () => Promise<boolean>,
+): Promise<string | null> {
+  const started = Date.now();
+  const until = started + (deps.meetingUrlWaitMs ?? MEETING_URL_WAIT_MS);
   for (;;) {
     const url = await read();
     if (url || Date.now() >= until) return url;
+    // Read once more: the write stores the link before it ends.
+    if (over && Date.now() - started >= MEETING_URL_QUEUE_GRACE_MS && (await over())) return read();
     await new Promise((resolve) => setTimeout(resolve, MEETING_URL_POLL_MS));
   }
 }
@@ -3927,7 +4034,9 @@ async function decide(
         );
       else throw failureFor(out.reason, 'The booking could not be changed.');
     }
-    const b = await deps.calV2.bookingResponse(p.accountId, uid);
+    const read = await deps.calV2.bookingResponse(p.accountId, uid);
+    // A confirmation writes the meeting to the calendar now: wait for its link.
+    const b = kind === 'confirm' && !already ? await withMeetingUrl(deps, p.accountId, read) : read;
     const booking = await summarize(deps, p.accountId, b, args.time_zone ?? (await hostZone(deps.db, p.accountId, uid)));
     return {
       booking,
@@ -3943,7 +4052,7 @@ async function decide(
     };
   });
   const out = replayed ? { ...data, already_applied: true } : data;
-  return { data: out, summary: `${kind === 'confirm' ? 'Confirmed' : 'Declined'}. ${line(out.booking)}`, affected: [uid] };
+  return { data: out, summary: `${kind === 'confirm' ? 'Confirmed' : 'Declined'}. ${line(out.booking)}${videoLine(out.booking)}`, affected: [uid] };
 }
 
 const confirmBooking: ToolDef = {

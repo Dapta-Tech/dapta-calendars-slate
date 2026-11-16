@@ -1,5 +1,7 @@
 import type { Db } from '@slate/db';
 import { sql } from '@slate/db';
+import { isLocationKind, type LocationKind } from '@slate/engine';
+import { bookingMeetingUrlSql, calendarWritingSql, meetingUrlStatus, type MeetingUrlStatus } from '../meeting-url';
 import { ToolFailure } from './support';
 
 /**
@@ -33,6 +35,10 @@ export interface BookingListRow {
   rescheduledFromUid: string | null;
   /** The booking that replaced this one, or null. */
   rescheduledToUid: string | null;
+  /** What kind of place it is; the place's own text stays out of a list. */
+  locationKind: LocationKind | null;
+  meetingUrl: string | null;
+  meetingUrlStatus: MeetingUrlStatus;
 }
 
 export type BookingOrder = 'asc' | 'desc';
@@ -110,6 +116,10 @@ export async function queryBookings(
     attendee_count: number | string;
     rescheduled_from_uid: string | null;
     rescheduled_to_uid: string | null;
+    location: string | null;
+    location_kind: string | null;
+    meeting_url: string | null;
+    calendar_writing: number | string;
   }>(
     // LEFT JOIN: an event type can be deleted while its bookings stay, and a
     // later change to one of them (a cancellation) must still reach the
@@ -118,7 +128,8 @@ export async function queryBookings(
     sql`SELECT b.uid, b.status, b.start_ms, b.end_ms, b.event_type_id, COALESCE(et.title, '') AS event_title,
                CASE WHEN b.event_type_id IS NULL THEN b.title ELSE NULL END AS host_event_title,
                CASE WHEN b.event_type_id IS NULL THEN b.recurring_event_id ELSE NULL END AS series_id,
-               b.rescheduled_from_uid, b.rescheduled_to_uid,
+               b.rescheduled_from_uid, b.rescheduled_to_uid, b.location, b.location_kind,
+               ${bookingMeetingUrlSql} AS meeting_url, ${calendarWritingSql} AS calendar_writing,
                (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
                   ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS primary_email,
                (SELECT COUNT(*) FROM booking_attendee bc WHERE bc.booking_id = b.id) AS attendee_count
@@ -144,6 +155,15 @@ export async function queryBookings(
       attendeeCount: Number(r.attendee_count),
       rescheduledFromUid: r.rescheduled_from_uid ?? null,
       rescheduledToUid: r.rescheduled_to_uid ?? null,
+      locationKind: isLocationKind(r.location_kind) ? r.location_kind : null,
+      meetingUrl: r.meeting_url ?? null,
+      meetingUrlStatus: meetingUrlStatus({
+        status: r.status,
+        locationKind: r.location_kind,
+        location: r.location,
+        meetingUrl: r.meeting_url,
+        calendarWriting: Number(r.calendar_writing) === 1,
+      }),
     })),
     nextCursor: hasMore && last ? encodeCursor(args.order, Number(last.start_ms), last.uid) : null,
   };
