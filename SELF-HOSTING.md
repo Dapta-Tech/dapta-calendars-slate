@@ -627,9 +627,10 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `MCP_ALLOWED_HOSTS` | unset | comma-separated hostnames `/mcp` answers to (DNS-rebinding guard). Unset = no Host check | no |
 | `MCP_RATE_LIMIT_CAPACITY` | `30` | tool-call burst per API key (per client address when anonymous). Per process, so N replicas allow up to N times this | no |
 | `MCP_RATE_LIMIT_REFILL_PER_SEC` | `1` | sustained refill for the above | no |
-| `MCP_WRITE_RATE_LIMIT_CAPACITY` | `10` | tighter burst for the write tools (`hold_slot`, `book_meeting`, `book_team_meeting`, `create_booking`, `reschedule_booking`, `confirm_booking`, `decline_booking`, `cancel_booking`, `create_event`) | no |
+| `MCP_WRITE_RATE_LIMIT_CAPACITY` | `10` | tighter burst for the write tools (`hold_slot`, `book_meeting`, `book_team_meeting`, `create_booking`, `reschedule_booking`, `confirm_booking`, `decline_booking`, `cancel_booking`, `create_event`, `update_event_type`, `create_event_type`) | no |
 | `MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC` | `0.2` | sustained refill for write tools | no |
 | `MCP_TOOL_TIMEOUT_MS` | `20000` | how long one tool call may run before the caller gets a timeout error | no |
+| `MCP_EVENT_TYPE_WRITE_ENABLED` | `false` | serve the MCP tools that change and create event types (`update_event_type`, `create_event_type`; see [docs/MCP.md](docs/MCP.md) and ADR 0013). Off, neither is listed nor callable, whatever scope a caller holds. Read when the API starts: restart it after a change. With an external OAuth authorization server, every owner and admin who signs in holds their scope, so this switch is the gate there | no |
 
 **Webhook deliveries** are POSTed with `X-Slate-Event` (the event name),
 `X-Slate-Signature` (`sha256=` HMAC of the body with the webhook's secret) and

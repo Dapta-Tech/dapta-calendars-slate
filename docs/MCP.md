@@ -31,22 +31,23 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 
 ## Tools
 
-The `develop` branch exposes 33 tools. Use `tools/list` on your deployed endpoint
-to see its actual catalog: a deployment stays on its released version until
-upgraded.
+The `develop` branch exposes 35 tools, two of them (`update_event_type` and
+`create_event_type`) only where `MCP_EVENT_TYPE_WRITE_ENABLED` is on. Use
+`tools/list` on your deployed endpoint to see its actual catalog: a deployment
+stays on its released version until upgraded.
 
 | Tool | Needs | Kind | What it does |
 |---|---|---|---|
 | `find_available_slots` | public page link, or `availability:read` (by `event_type_id`) | read | Open times for one event, grouped by local date, each with its offset in the `time_zone` you ask for plus UTC. Range capped at 31 days. |
 | `find_team_slots` | public team link, or `availability:read` (by `event_type_id`) | read | The same for one team event, plus the team, its scheduling method (round-robin, collective, fixed round-robin) and host count. A team page that offers one event is enough. |
 | `hold_slot` | public page link, or `bookings:write` (by `event_type_id`) | write | Holds one offered slot for about 10 minutes and returns an opaque `hold_id`. One-host events only. |
-| `book_meeting` | nothing (public page) | write, emails the invitee | Books one offered slot. Same validation as the public booking page. Takes an optional `hold_id`. |
-| `book_team_meeting` | public team link, or `bookings:write` (by `event_type_id`) | write, emails the invitee | Books a team event; the host is picked at booking time and returned. |
+| `book_meeting` | nothing (public page) | write, emails the invitee | Books one offered slot. Same validation as the public booking page. Takes an optional `hold_id`. On a video meeting it waits a few seconds for the link. |
+| `book_team_meeting` | public team link, or `bookings:write` (by `event_type_id`) | write, emails the invitee | Books a team event; the host is picked at booking time and returned. On a video meeting it waits a few seconds for the link. |
 | `whoami` | any key or connection | read | Workspace, owner time zone, the key's (or connection's) scopes and allowlist. |
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), or one team's with `team_id`, respecting the allowlist. Capped; says `truncated: true` when more exist than were returned. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
-| `get_event_type` | `event-types:read` | read | One event type with its editor settings: length, location, the hours it follows (schedule, working hours or custom hours), notice, window, buffers, confirmation, seats, questions, team hosts. Hidden ones included; respects the allowlist. |
+| `get_event_type` | `event-types:read` | read | One event type with its editor settings: length, location, the hours it follows (schedule, working hours or custom hours), notice, window, booking limits per day and week, buffers, confirmation, seats, questions, team hosts. Hidden ones included; respects the allowlist. |
 | `list_one_off_links` | `event-types:read` | read | The single-use links of one event type, newest first, each live, used (with its booking uid) or revoked. Carries live booking tokens, so a sign-in as the event type's owner or an admin only; an API key is refused. Respects the allowlist. Capped; says `truncated: true` when more exist than were returned. |
 | `list_schedules` | `availability:read` | read | The account's reusable working-hours schedules, whose each is, its time zone and whether it is that person's default. Pages with `cursor` and `next_cursor`. |
 | `get_schedule` | `availability:read` | read | One schedule's weekly hours and its date-specific hours, wall-clock in its time zone. |
@@ -60,27 +61,31 @@ upgraded.
 | `list_connection_calendars` | `availability:read` | read | The calendars inside one connected account, as the provider reports them now (name, primary, access). The provider's calendar refs stay on the server. Only the caller's own connection, as `list_calendar_connections`. Capped; says `truncated: true` when more exist than were returned. |
 | `list_integrations` | `event-types:read` | read | The CRM integration's status, last check and any scopes the token lacks, plus what the deployment supports. Never a credential. Owners and admins only. Needs a sign-in; an API key is refused. |
 | `list_crm_contact_properties` | `event-types:read` | read | The connected CRM's contact properties booking answers can map to, or an empty list with the reason. |
-| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain. Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
+| `list_bookings` | `bookings:read` | read | Minimal fields only: uid, kind, status, times, event type (an event's own title), invitee email domain, the location kind and the video link ([Video links](#video-links-on-bookings)). Cursor pagination. `updated_since` lists what was created or changed since an instant (a change feed: pass back `next_updated_since`; webhooks push the same changes). |
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. `updated_since` / `next_updated_since` work as on `list_bookings`, for requests that arrived or changed. |
-| `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
-| `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
+| `get_booking` | `bookings:read` | read | One booking, with its location and video link. Invitee name, email, notes, intake answers and the campaign (`utm`, null when none) sit inside `invitee_supplied`. |
+| `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. On a video meeting it waits a few seconds for the link. |
 | `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. For a date of a repeating event, `scope` moves that date, it and the later ones, or every date not started. |
-| `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
+| `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. On a video meeting it waits a few seconds for the link. |
 | `decline_booking` | `bookings:write` | **destructive**, emails the invitee | Declines a pending request and frees its time. Never touches an accepted booking. |
 | `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. For a date of a repeating event, `scope` cancels that date, it and the later ones, or every date not started ([Repeating events](#repeating-events)). |
 | `create_event` | `bookings:write`, a key with no event-type allowlist | write, writes to the host's calendar | Puts an event of the host's own on their calendar: any title, start and length, 0 to 10 attendees, once or repeating, with a video link the calendar creates. See [Host events](#host-events). |
 | `check_attendee_availability` | `availability:read`; an API key also needs `bookings:write` and no event-type allowlist | read | When the host and up to 20 people are free, through the host's connected calendar: given times (once, or the dates of a repeating rule), or free times found in a range. A calendar it cannot see is unknown, never free. See [Who is free](#who-is-free). |
+| `update_event_type` | `event-types:write`, and `MCP_EVENT_TYPE_WRITE_ENABLED` | **destructive** | Changes the title, description, length, location, intake questions, hidden flag, minimum notice, confirmation or booking window of one event type; nothing else. Replacing the questions needs `if_revision`. Respects the allowlist. See [Editing event types](#editing-event-types). |
+| `create_event_type` | `event-types:write`, a key with no event-type allowlist, and `MCP_EVENT_TYPE_WRITE_ENABLED` | write | Creates a personal event type with the same fields, hidden unless `hidden: false`, its link name the `slug` given or one from the title. See [Editing event types](#editing-event-types). |
 
 Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint`, an input schema, and an output schema with `structuredContent`
 (plus a short text summary). Destructive means the tool cancels, declines or
-replaces a booking; open world means it emails people or writes to a host's
+replaces a booking, or replaces an event type's questions; open world means it emails people or writes to a host's
 calendar (`create_event` does not email; it writes to the host's calendar, which
 invites the attendees). Descriptions and the server instructions say what a tool does and
 never give the model orders, as the Claude and ChatGPT connector directories
 require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
-exposed over MCP: webhooks, API keys, team administration, event-type edits
-(see [Coverage of the dashboard API](#coverage-of-the-dashboard-api)).
+exposed over MCP: webhooks, API keys, team administration, deleting an event
+type, and every event-type field outside the list in [Editing event
+types](#editing-event-types) (see [Coverage of the dashboard
+API](#coverage-of-the-dashboard-api)).
 
 Output schemas are open: every object in them allows properties it does not
 list, and a value from a set (an event's `kind`, a team's `scheduling_type`)
@@ -351,6 +356,80 @@ To cancel this date and the later ones, call `cancel_booking` with
 `booking_uid` set to the returned uid and `scope: "this_and_following"`. For a
 move, call `reschedule_booking` with `booking_uid` set to that uid, the new
 `start`, a new `idempotency_key`, and the desired scope.
+
+### Editing event types
+
+`update_event_type` and `create_event_type` change the safe part of an event
+type. Why it is this part and no more: [ADR 0013](adr/0013-agents-edit-event-types-through-an-allowlist.md).
+
+- **Off unless switched on.** With `MCP_EVENT_TYPE_WRITE_ENABLED` unset or
+  false, neither tool is listed or callable, whatever scope a caller holds.
+  The API reads it when it starts: a change needs a restart.
+- **Who may.** An API key needs `event-types:write`, its own checkbox. This
+  API's own OAuth server never grants it on a first connection: the first call
+  answers 403 `insufficient_scope` and the person approves it (step-up). An
+  external authorization server has no scopes of ours, so its sign-ins hold
+  it through the member's owner or admin role: there the switch and the role
+  are the gate. A key held to some event types updates only those and cannot
+  create. Team event types can be edited by owners and admins and by keys
+  without an allowlist; never their hosts or assignment.
+- **Nine fields.** `title`, `description`, `length_minutes`, `location`
+  (`kind` and `detail`), `questions`, `hidden`, `minimum_notice_minutes`,
+  `requires_confirmation` and `booking_window_days` (1 to 730 days ahead,
+  `null` for no limit); `create_event_type` also takes `slug`. Fields left
+  out of an update stay as they are. Any other field is refused, naming it:
+  the redirect after booking, tracking, reminders, CRM mappings, calendar
+  templates, hosts, team, schedules and an existing event type's link name
+  stay in the dashboard.
+- **Text rules.** No link or web address in any text field
+  (`URL_NOT_ALLOWED` names the field): after NFKC normalization, nothing
+  with `://`, `www.`, a `//host`, a `javascript:`-style scheme, a bare
+  `name.com` on a common top-level domain, a `name.tld/path` or an IPv4
+  address (`Next.js`, `e.g.` and `v1.2` pass; a bare email address does
+  not). No control, format, private-use or blank characters; line breaks
+  only in the description. A `conferencing` location takes no detail; a
+  `phone` one takes a phone number.
+- **Questions.** `questions` is the whole list, in order: at most 30, each
+  named with lowercase letters, digits and `_`, `select` and `checkbox` with
+  1 to 50 options, no `guests` type. It needs `if_revision`, the `revision`
+  that `get_event_type` and `list_event_types` return; one that is stale
+  answers `CONFLICT` and nothing changes. A `guests` question already there
+  keeps its place and its name, and a question the CRM mapping reads keeps
+  its name and type (`CRM_MAPPED_QUESTION`). A label, placeholder or option
+  sent back exactly as a read showed it keeps the stored text; an event type
+  whose questions a read cannot show whole (over 30 questions or 50 options,
+  or text over 200 characters) is edited in the dashboard.
+- **New ones are hidden.** `create_event_type` makes a personal event type
+  for the signed-in member, or for the workspace owner with an API key,
+  hidden unless `hidden: false`; `update_event_type` with `hidden: false`
+  publishes it. Its link name is the `slug` given (lowercase letters and
+  digits joined by `-`, at most 80; one the host already uses answers
+  `CONFLICT` naming it), or one made from the title, with a number added
+  when it is taken.
+- **Retries and answers.** Both take an `idempotency_key`. Both return the
+  event type as `get_event_type` does, with its new `revision`, and `changed`,
+  the names of the fields the call changed.
+
+### Video links on bookings
+
+A booking on an event type whose location is a video meeting gets its link from
+the host's connected calendar, a few seconds after it is booked or confirmed.
+Every booking answer says where it stands: `location_kind` (`conferencing` for a
+video meeting), `location` (the place, or `Online meeting` when it has no text of
+its own), `meeting_url` and `meeting_url_status`:
+
+- `ready`: `meeting_url` holds the link, the same one the confirmation email carries.
+- `pending`: the calendar is still creating it. `book_meeting`, `book_team_meeting`,
+  `create_booking`, `confirm_booking` and `reschedule_booking` already wait a few
+  seconds for it; `get_booking` shows it about 10 seconds later, and the
+  confirmation email carries it.
+- `on_confirmation`: a request waiting for the host; the link is created once
+  `confirm_booking` (or the host) accepts it.
+- `none`: no link is coming (another kind of place, or no calendar to create one).
+
+`book_meeting` and `book_team_meeting` answer with the link with no sign-in too:
+whoever books gets the same link the invitee's confirmation email carries. A
+retry with the same `idempotency_key` reads the link as it is by then.
 
 ### Requests that wait for the host
 
@@ -648,9 +727,10 @@ token.
   version, caller (key prefix such as `dcl_1a2b3c4d`, `oauth:<connection id>`
   plus the OAuth `client`, `login:<member id prefix>` plus the `client` and
   `sid` an external server's token carries, or `anonymous`), account id,
-  tool, a hash of the redacted arguments, affected booking uids, result and
-  latency. It never contains the key, names, emails, notes, answers or
-  idempotency keys. Refused validation (a malformed call the SDK rejects before
+  tool, a hash of the redacted arguments, affected booking uids (or the event
+  type's id), result and latency, plus `changed`, the names of the fields an
+  event-type write changed. It never contains the key, names, emails, notes,
+  answers, idempotency keys or the values an event-type write set. Refused validation (a malformed call the SDK rejects before
   our code runs) is not audited.
 - **Usage analytics.** With product analytics configured
   (`PRODUCT_ANALYTICS_PROVIDER` and its key), the API also enqueues one
@@ -684,8 +764,9 @@ token.
   429), messages the SDK rejects as malformed before any tool runs, and calls
   refused as `RATE_LIMITED`. Reporting runs after the tool has answered and is
   never awaited by it, and with analytics off nothing is read or enqueued.
-- **Least privilege.** Separate read, write and cancel scopes, plus the optional
-  event-type allowlist on the key. Create keys with only what the agent needs.
+- **Least privilege.** Separate read, write and cancel scopes, a separate
+  `event-types:write` for editing event types, plus the optional event-type
+  allowlist on the key. Create keys with only what the agent needs.
 
 ## Configuration
 
@@ -700,6 +781,7 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 | `MCP_RATE_LIMIT_CAPACITY` / `MCP_RATE_LIMIT_REFILL_PER_SEC` | `30` / `1` |
 | `MCP_WRITE_RATE_LIMIT_CAPACITY` / `MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC` | `10` / `0.2` |
 | `MCP_TOOL_TIMEOUT_MS` | `20000` |
+| `MCP_EVENT_TYPE_WRITE_ENABLED` | `false` (on: `update_event_type` and `create_event_type` are served; read at start) |
 | `OAUTH_ENABLED` | `false` (on requires `MCP_PUBLIC_URL`, `OAUTH_ISSUER`, `OAUTH_SIGNING_JWK`) |
 | `OAUTH_ACCESS_TOKEN_TTL_SECONDS` / `OAUTH_GRANT_TTL_DAYS` | `3600` / `90` |
 | `OAUTH_REFRESH_REUSE_GRACE_SECONDS` | `10` |
