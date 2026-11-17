@@ -341,6 +341,8 @@ export class BookingService {
       timeZone: safeTimeZone(result.timeZone),
       // result.slots are already {startUtc, spotsLeft?, capacity?} (group-aware).
       slots: result.slots,
+      // Times a booking limit closed: the page draws their day "Full".
+      fullSlots: result.fullSlots,
       // Machine-readable config-error reason (only when slots is empty). The
       // code is public-safe; clients own the copy (admin actionable, public generic).
       emptyReason: result.emptyReason,
@@ -395,7 +397,8 @@ export class BookingService {
         };
       return {
         error: 'INVALID_SLOT',
-        message: 'That time is not available to hold.',
+        // The event's booking limit, when that is why, says so.
+        message: held.message ?? 'That time is not available to hold.',
         status: 400,
       };
     }
@@ -556,7 +559,9 @@ export class BookingService {
         return { error: 'NOT_FOUND', message: ONE_OFF_NOT_FOUND_MESSAGE, status: 404 };
       return {
         error: 'SLOT_TAKEN',
-        message: 'That time was just booked. Pick another slot.',
+        // The event's booking limit, when that is why (the last time of a day
+        // taken meanwhile), says so.
+        message: outcome.message ?? 'That time was just booked. Pick another slot.',
         status: 409,
       };
     }
@@ -808,7 +813,7 @@ export class BookingService {
         : undefined,
       accountId: opts.accountId,
     });
-    if (!out.ok) return this.mapMutation(out.reason);
+    if (!out.ok) return this.mapMutation(out.reason, out.message);
     // Idempotent retry (already cancelled): skip side-effects so a retried
     // cancel doesn't send a second email / fire a second webhook.
     if (!out.alreadyApplied) {
@@ -883,7 +888,7 @@ export class BookingService {
       // policy as create (no-op when the provider is disabled). FRESH (ADR 0009).
       this.calendar.provider,
     );
-    if (!out.ok) return this.mapMutation(out.reason);
+    if (!out.ok) return this.mapMutation(out.reason, out.message);
     // Idempotent retry (same Idempotency-Key): the booking was NOT moved again,
     // so skip all side-effects (no duplicate calendar move / email / webhook).
     if (!out.alreadyApplied) {
@@ -939,6 +944,15 @@ export class BookingService {
   }
 
   private mapMutation(
+    reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' | 'CALENDAR_UNAVAILABLE',
+    /** The repository's own words, when it has some (the event's booking limit is why). */
+    message?: string,
+  ): ServiceError {
+    const refused = this.mutationError(reason);
+    return message ? { ...refused, message } : refused;
+  }
+
+  private mutationError(
     reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' | 'CALENDAR_UNAVAILABLE',
   ): ServiceError {
     switch (reason) {
@@ -1045,6 +1059,7 @@ export class BookingService {
       eventType: await this.gatedEventType(result.eventType, accountCode),
       timeZone: safeTimeZone(result.timeZone),
       slots: result.slots.map((startUtc) => ({ startUtc })),
+      fullSlots: result.fullSlots,
       emptyReason: result.emptyReason,
     });
   }
@@ -1154,7 +1169,7 @@ export class BookingService {
         return { error: 'NOT_FOUND', message: ONE_OFF_NOT_FOUND_MESSAGE, status: 404 };
       return {
         error: 'SLOT_TAKEN',
-        message: 'That time is taken.',
+        message: out.message ?? 'That time is taken.',
         status: 409,
       };
     }

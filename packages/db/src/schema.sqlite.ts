@@ -199,6 +199,11 @@ export const eventType = sqliteTable('event_type', {
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
   /** Booking window in calendar days ahead; NULL = no limit. See schema.pg.ts. */
   bookingWindowDays: integer('booking_window_days'),
+  /** Booking limits per day and per week; NULL = no limit. See schema.pg.ts. */
+  maxBookingsPerDay: integer('max_bookings_per_day'),
+  maxBookingsPerWeek: integer('max_bookings_per_week'),
+  maxMinutesPerDay: integer('max_minutes_per_day'),
+  maxMinutesPerWeek: integer('max_minutes_per_week'),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),

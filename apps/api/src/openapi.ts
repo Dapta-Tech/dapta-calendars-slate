@@ -415,6 +415,18 @@ export const openapiSpec = {
           },
           location: { type: ['string', 'null'] },
           meetingUrl: { type: ['string', 'null'] },
+          // LOCATION_KINDS in @slate/engine and MEETING_URL_STATUSES in meeting-url.ts (this file is dependency-free).
+          locationKind: {
+            type: ['string', 'null'],
+            enum: ['conferencing', 'in_person', 'phone', 'custom', null],
+            description: 'What kind of place location is. conferencing is a video meeting: its link is meetingUrl, and location may be null.',
+          },
+          meetingUrlStatus: {
+            type: 'string',
+            enum: ['ready', 'pending', 'on_confirmation', 'none'],
+            description:
+              'ready: meetingUrl has the link. pending: the host\'s calendar is still creating it; read the booking again in about 10 seconds. on_confirmation: the booking waits for the host, and the link is created once it is confirmed. none: no link is coming.',
+          },
           destinationCalendarId: { type: ['string', 'null'] },
           cancellationReason: { type: ['string', 'null'] },
           cancelledByEmail: { type: ['string', 'null'] },
