@@ -645,6 +645,29 @@ body {
   color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
   cursor: default;
 }
+/* Full: the day has hours, but a booking limit of the event has closed every
+   time. Dimmed like an empty day, with the word under the number so it never
+   reads as a blank day. Today's dot steps aside for the word. */
+.branded-surface .bp-cal-day[data-state='full'] {
+  flex-direction: column;
+  gap: 0.0625rem;
+  color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  cursor: default;
+}
+.branded-surface .bp-cal-day-full {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.branded-surface .bp-cal-day[data-state='full'][data-today='true']::after {
+  display: none;
+}
 /* Not yet known: the month's times are still being read. The day stands where
    it will settle, the same cell at the same size, with a soft fill instead of a
    verdict, so nothing moves when it becomes bookable or not (R22: a skeleton,

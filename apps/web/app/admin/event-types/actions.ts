@@ -36,6 +36,11 @@ export interface EventTypePayload {
   minimumBookingNotice: number;
   /** Booking window in calendar days ahead; null ⇒ no limit. */
   bookingWindowDays: number | null;
+  /** Booking limits per day and per week; null ⇒ no limit. */
+  maxBookingsPerDay: number | null;
+  maxBookingsPerWeek: number | null;
+  maxMinutesPerDay: number | null;
+  maxMinutesPerWeek: number | null;
   slotInterval: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;

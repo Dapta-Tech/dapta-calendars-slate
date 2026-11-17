@@ -16,6 +16,7 @@ import {
   t,
   validateBookingFieldValue,
   weekStartsOnFor,
+  zonedDayKey,
   type DisplaySlot,
   type Slot,
 } from '@slate/shared';
@@ -603,6 +604,13 @@ export function BookingFlow({
   const { ensureMonth, isKnown } = progress;
   /** Whether the month on screen has been read: its days settle when it has. */
   const monthKnown = isKnown(month, timeZone);
+  // Days a booking limit closed: they have hours, but no time left to book, so
+  // they read "Full" instead of as a blank day. In the zone on screen.
+  const fullDayKeys = useMemo(
+    () =>
+      new Set(progress.fullSlots.map((iso) => zonedDayKey(iso, timeZone)).filter((key) => !availableDayKeys.has(key))),
+    [progress.fullSlots, timeZone, availableDayKeys],
+  );
 
   // "Next day with times" only names a day the page can vouch for: every month
   // from the chosen day's to that day's has been read, so no earlier day with
@@ -1380,6 +1388,7 @@ export function BookingFlow({
           m={messages}
           monthKey={month}
           availableDayKeys={availableDayKeys}
+          fullDayKeys={fullDayKeys}
           todayKey={todayKey}
           selectedDayKey={selectedDay}
           locale={locale}
