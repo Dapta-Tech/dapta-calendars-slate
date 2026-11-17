@@ -30,10 +30,28 @@ In **General**, choose **Duration** and **Minimum notice**. Notice offers 1, 2,
 choices, such as 30 minutes, stays available when you edit that event.
 
 Expand **Advanced settings** for buffers before and after a meeting, group
-seats, the booking window and how often start times are offered. Notice and
-these rules still apply when an agent books an event type through MCP.
-`create_event` is a different action for the host's own calendar and does not
-use an event type's slot grid or notice.
+seats, the booking window, booking limits and how often start times are
+offered. Notice and these rules still apply when an agent books an event type
+through MCP. `create_event` is a different action for the host's own calendar
+and does not use an event type's slot grid or notice.
+
+**Booking limits** cap how many bookings of the event a day or a week (Monday
+to Sunday) can take, by count or by total minutes. Days and weeks are read in
+the schedule's time zone; a team event reads them in the team's time zone, with
+every host's bookings counted together. Accepted and pending bookings count,
+cancelled and declined ones do not, and a seated time counts once. A booking
+that crosses midnight counts entirely on the day it starts. A minutes limit
+must be at least the event's length.
+
+When a day or week is full, its other times close: the booking page shows the
+day as **Full**, and a booking, hold or reschedule into it is refused with a
+message that names the limit. A hold (the few minutes a time is kept while the
+invitee fills in the form, or an agent's `hold_slot`) does not count and
+reserves no place against a limit, so a held time can still be refused at
+booking if the day fills meanwhile. A booking you make yourself outside
+availability, and one made with an API key through
+`POST /v1/machine/bookings` on the host's behalf, is not limited, but it
+counts. Leave a field empty for no limit.
 
 ## Give a personal event its own weekly hours
 

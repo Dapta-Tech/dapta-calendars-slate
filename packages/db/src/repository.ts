@@ -9,8 +9,10 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
 import {
+  bookingLimitBreach,
   classifyEmptyReason,
   computeSlots,
+  computeSlotsDetailed,
   generateManageToken,
   isOneOffTokenShape,
   isExclusionViolation,
@@ -19,6 +21,7 @@ import {
   plainCalendarTitle,
   type AvailabilityEmptyReason,
   type AvailabilityRule,
+  type BookingLimitPeriod,
   type EventLocation,
   type Interval,
 } from '@slate/engine';
@@ -26,6 +29,15 @@ import type { CalendarProvider } from '@slate/calendar';
 import { normalizeEventTracking, type EventTracking } from '@slate/types';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
+import {
+  limitGuardBreachPg,
+  limitGuardBreachSqlite,
+  limitGuardFor,
+  limitReachedMessage,
+  loadBookingLimits,
+  type BookingLimitColumns,
+  type LimitGuard,
+} from './booking-limits';
 import { applyCalendarTemplates, applySharedFallback, markSharedSql } from './calendar-text';
 import { canonicalPublicCode } from './short-links';
 import {
@@ -138,7 +150,8 @@ export interface MemberRow {
   time_zone: string;
   default_schedule_id: string | null;
 }
-export interface EventTypeRow {
+/** `max_*`: the event's booking limits (`booking-limits.ts`); NULL on every event without one. */
+export interface EventTypeRow extends BookingLimitColumns {
   id: string;
   account_id: string;
   member_id: string | null;
@@ -206,6 +219,8 @@ export type BookingOutcome =
          * never existed" are different things to tell a person.
          */
         | 'ONE_OFF_GONE';
+      /** SLOT_TAKEN only: set when the event's booking limit is why (`limitReachedMessage`). */
+      message?: string;
     }
   | { ok: false; reason: 'INVALID'; message: string };
 
@@ -395,6 +410,7 @@ export async function getEventType(
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice, booking_window_days,
+               max_bookings_per_day, max_bookings_per_week, max_minutes_per_day, max_minutes_per_week,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
                prevent_duplicate_bookings, seats_per_time_slot, tracking
         FROM event_type
@@ -415,6 +431,7 @@ export async function getEventTypeRowById(db: Db, id: string): Promise<EventType
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice, booking_window_days,
+               max_bookings_per_day, max_bookings_per_week, max_minutes_per_day, max_minutes_per_week,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
                prevent_duplicate_bookings, seats_per_time_slot, tracking
         FROM event_type WHERE id = ${id} LIMIT 1`,
@@ -453,9 +470,21 @@ export async function isSlotBookable(
     calendar?: CalendarProvider;
   },
 ): Promise<boolean> {
+  return (await slotVerdict(db, args)) === 'ok';
+}
+
+/**
+ * {@link isSlotBookable}, saying why not when the event's booking limit is the
+ * reason: 'ok', the period a limit closed ('day' or 'week'), or 'no' for any
+ * other reason (hours, notice, busy, an unreadable calendar).
+ */
+export async function slotVerdict(
+  db: Db,
+  args: Parameters<typeof isSlotBookable>[1],
+): Promise<'ok' | 'no' | BookingLimitPeriod> {
   const eventType = await getEventTypeRowById(db, args.eventTypeId);
   const member = await getMemberById(db, args.hostMemberId);
-  if (!eventType || !member) return false;
+  if (!eventType || !member) return 'no';
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
   const scheduleId = args.hostScheduleId !== undefined ? args.hostScheduleId : eventType.schedule_id;
@@ -485,7 +514,7 @@ export async function isSlotBookable(
   try {
     externalBusy = await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs, eventType.id);
   } catch {
-    return false;
+    return 'no';
   }
   const busy: Interval[] = [
     ...busyRows,
@@ -493,7 +522,13 @@ export async function isSlotBookable(
     ...externalBusy,
   ];
 
-  const slots = computeSlots({
+  // The booking being moved does not count against its own move. A team
+  // event's limits come in the team's zone (`loadBookingLimits`).
+  const limits = await loadBookingLimits(db, eventType, args.startMs, endMs, {
+    excludeBookingId: args.excludeBookingId,
+    seated: (eventType.seats_per_time_slot ?? 1) > 1,
+  });
+  const { slots, full } = computeSlotsDetailed({
     fromUtc: new Date(args.startMs),
     toUtc: new Date(endMs),
     timeZone: scheduleTimeZone,
@@ -505,9 +540,48 @@ export async function isSlotBookable(
     afterBufferMin: eventType.after_event_buffer,
     minimumBookingNoticeMin: eventType.minimum_booking_notice,
     bookingWindowDays: eventType.booking_window_days,
+    bookingLimits: limits,
     now: args.now ?? new Date(),
   });
-  return slots.some((d) => d.getTime() === args.startMs);
+  if (slots.some((d) => d.getTime() === args.startMs)) return 'ok';
+  // Offered but for the limit: name the period, for the refusal's words.
+  if (limits && full.some((d) => d.getTime() === args.startMs))
+    return bookingLimitBreach(limits, scheduleTimeZone, args.startMs, eventType.length_minutes) ?? 'no';
+  return 'no';
+}
+
+/**
+ * The zone a personal event's day and week are read in: the schedule the slot
+ * reads use (`scheduleId`, else the member's default), else the member's own
+ * zone. A team event reads the team's instead (`limitGuardFor`).
+ */
+export async function scheduleZoneFor(db: Db, memberId: string, scheduleId: string | null): Promise<string> {
+  const member = await getMemberById(db, memberId);
+  const schedule =
+    (await resolveScheduleTimeZone(db, scheduleId)) ??
+    (member ? await resolveScheduleTimeZone(db, member.default_schedule_id) : undefined);
+  return schedule?.timeZone ?? member?.time_zone ?? 'UTC';
+}
+
+/**
+ * The limit check a move's locked write runs (v1 and v2 reschedules alike): the
+ * booking's event limits, in the team's zone or the organizer's schedule zone,
+ * with the booking being moved left out so it never counts against its own
+ * move. null when the booking has no event type or its event has no limit.
+ */
+export async function moveLimitGuard(
+  db: Db,
+  m: { eventTypeId: string | null; bookingId: string; organizerId: string | null; startMs: number; durationMs: number },
+): Promise<LimitGuard | null> {
+  const et = m.eventTypeId ? await getEventTypeRowById(db, m.eventTypeId) : undefined;
+  if (!et) return null;
+  const zone = async () => (m.organizerId ? scheduleZoneFor(db, m.organizerId, et.schedule_id) : 'UTC');
+  return limitGuardFor(db, et, zone, {
+    startMs: m.startMs,
+    durationMin: m.durationMs / 60_000,
+    excludeBookingId: m.bookingId,
+    seated: (et.seats_per_time_slot ?? 1) > 1,
+  });
 }
 
 export interface PublicProfile {
@@ -643,6 +717,8 @@ export interface AvailabilityResult {
   timeZone: string;
   /** Each offered instant. `spotsLeft`/`capacity` are set only for group events (R23). */
   slots: Array<{ startUtc: string; spotsLeft?: number; capacity?: number }>;
+  /** Times the hours offer that a booking limit of the event has closed; absent when none. */
+  fullSlots?: string[];
   /**
    * Present only when `slots` is empty because of a CONFIGURATION error
    * (missing schedule, no hours, unreachable external calendar) — never for
@@ -857,7 +933,7 @@ export async function getAvailability(
     ...externalBusy,
   ];
 
-  const slots = computeSlots({
+  const { slots, full } = computeSlotsDetailed({
     fromUtc: new Date(args.fromMs),
     toUtc: new Date(args.toMs),
     timeZone: scheduleTimeZone,
@@ -869,6 +945,7 @@ export async function getAvailability(
     afterBufferMin: eventType.after_event_buffer,
     minimumBookingNoticeMin: eventType.minimum_booking_notice,
     bookingWindowDays: eventType.booking_window_days,
+    bookingLimits: await loadBookingLimits(db, eventType, args.fromMs, args.toMs, { seated: isGroup }),
     now: args.now ?? new Date(),
   });
 
@@ -887,7 +964,12 @@ export async function getAvailability(
     outSlots = slots.map((d) => ({ startUtc: d.toISOString() }));
   }
 
-  return { eventType: eventTypeOut, timeZone: displayTz, slots: outSlots };
+  return {
+    eventType: eventTypeOut,
+    timeZone: displayTz,
+    slots: outSlots,
+    ...(full.length > 0 ? { fullSlots: full.map((d) => d.toISOString()) } : {}),
+  };
 }
 
 /**
@@ -1117,12 +1199,13 @@ export async function createBooking(
       : await resolveScheduleTimeZone(db, member.default_schedule_id);
     const schedule = referenced ?? fallback;
     const rules = schedule ? await loadAvailabilityRules(db, schedule.id) : [];
+    const zone = schedule?.timeZone ?? member.time_zone;
     const offered =
       rules.length > 0 &&
       computeSlots({
         fromUtc: new Date(args.startMs),
         toUtc: new Date(args.startMs + eventType.length_minutes * 60_000),
-        timeZone: schedule?.timeZone ?? member.time_zone,
+        timeZone: zone,
         availability: rules,
         durationMin: eventType.length_minutes,
         slotIntervalMin: eventType.slot_interval,
@@ -1134,6 +1217,13 @@ export async function createBooking(
         now: new Date(),
       }).some((d) => d.getTime() === args.startMs);
     if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
+    // A day or week the event's limits have filled is not offered either, and
+    // the refusal says so.
+    const limits = await loadBookingLimits(db, eventType, args.startMs, args.startMs, {
+      seated: (eventType.seats_per_time_slot ?? 1) > 1,
+    });
+    const full = limits && bookingLimitBreach(limits, zone, args.startMs, eventType.length_minutes);
+    if (full) return { ok: false, reason: 'INVALID', message: limitReachedMessage(full) };
   }
 
   // Idempotency: return the prior booking for a repeated key. Scoped to the
@@ -1442,19 +1532,38 @@ export async function createBooking(
   // Another caller's hold over this time, when the caller asked for holds to
   // count (`refuseHeld`), checked under the same lock as the overlap below.
   const heldByOthers = args.refuseHeld ? memberHeldSql(member.id, startMs, endMs, now, args.reservationUid) : null;
+  // The event's booking limits, counted again under the same lock, so two
+  // people booking the last time of a day (with holds, or at once) cannot both
+  // win: the loser is answered as a time taken meanwhile. A host's own booking
+  // (on behalf) is not limited, as it is not by hours or notice, but counts.
+  const limitGuard = args.onBehalf
+    ? null
+    : await limitGuardFor(db, eventType, () => scheduleZoneFor(db, member.id, eventType.schedule_id), {
+        startMs,
+        durationMin: eventType.length_minutes,
+        seated: capacity > 1,
+      });
+  // Taken meanwhile; when the event's limit is why, the words say so.
+  const taken = (full: BookingLimitPeriod | 'conflict'): BookingOutcome => ({
+    ok: false,
+    reason: 'SLOT_TAKEN',
+    ...(full === 'conflict' ? {} : { message: limitReachedMessage(full) }),
+  });
 
   if (db.dialect === 'sqlite') {
     // IMMEDIATE: a second API process on the same file waits for this write
     // lock and then sees this booking, as the hold write does.
-    const outcome = db.sqlite!.txn<'ok' | 'conflict'>(() => {
+    const outcome = db.sqlite!.txn<'ok' | 'conflict' | BookingLimitPeriod>(() => {
       if (overlapExists(db, member.id, startMs, endMs)) return 'conflict';
       if (heldByOthers && db.sqlite!.drizzle.get(heldByOthers)) return 'conflict';
+      const full = limitGuard && limitGuardBreachSqlite(db, limitGuard);
+      if (full) return full;
       db.sqlite!.drizzle.run(insertBooking);
       db.sqlite!.drizzle.run(insertAttendee);
       for (const attendee of insertAdditionalAttendees) db.sqlite!.drizzle.run(attendee);
       return 'ok';
     }, { immediate: true });
-    if (outcome === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
+    if (outcome !== 'ok') return taken(outcome);
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
     // The booking is committed — burn the link (#110). AFTER the write, never
     // before: burning first would kill the link on every SLOT_TAKEN and strand
@@ -1466,7 +1575,7 @@ export async function createBooking(
   // Postgres: async transaction; the EXCLUDE constraint is the ultimate backstop.
   const pg = db.pg!.drizzle;
   try {
-    const conflicted = await pg.transaction(async (tx) => {
+    const outcome = await pg.transaction(async (tx): Promise<'ok' | 'conflict' | BookingLimitPeriod> => {
       // The host's row, locked: every guarded write that can give this host a
       // booking (this one, a team booking naming them as a co-host, a move, a
       // confirmation) takes it first, so two of them cannot both pass the
@@ -1475,14 +1584,16 @@ export async function createBooking(
       const rows = (await tx.execute(hostOverlapSql(member.id, startMs, endMs))) as unknown as Array<{
         id: string;
       }>;
-      if (rows.length > 0) return true;
-      if (heldByOthers && ((await tx.execute(heldByOthers)) as unknown as unknown[]).length > 0) return true;
+      if (rows.length > 0) return 'conflict';
+      if (heldByOthers && ((await tx.execute(heldByOthers)) as unknown as unknown[]).length > 0) return 'conflict';
+      const full = limitGuard && (await limitGuardBreachPg(tx, limitGuard));
+      if (full) return full;
       await tx.execute(insertBooking);
       await tx.execute(insertAttendee);
       for (const attendee of insertAdditionalAttendees) await tx.execute(attendee);
-      return false;
+      return 'ok';
     });
-    if (conflicted) return { ok: false, reason: 'SLOT_TAKEN' };
+    if (outcome !== 'ok') return taken(outcome);
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
     // Committed — burn the link (#110), same ordering as the SQLite branch.
     if (live) await consumeOneOffLink(db, live.id, bookingId);

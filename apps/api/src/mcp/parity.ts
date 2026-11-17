@@ -30,6 +30,8 @@ export const API_ROUTE_TOOLS: Readonly<Record<string, string>> = {
 
   'GET /v1/event-types': 'list_event_types',
   'GET /v1/event-types/:id': 'get_event_type',
+  'POST /v1/event-types': 'create_event_type',
+  'PATCH /v1/event-types/:id': 'update_event_type',
   'GET /v1/event-types/:id/one-off-links': 'list_one_off_links',
 
   'GET /v1/schedules': 'list_schedules',
@@ -71,7 +73,8 @@ export interface RouteExclusion {
   reason: string;
 }
 
-const EVENT_TYPE_EDITS = 'Event-type edits are not exposed over MCP (docs/MCP.md).';
+const EVENT_TYPE_DELETE =
+  'Deleting an event type is not exposed over MCP (docs/MCP.md): it takes a public booking page down and cannot be undone.';
 const TEAM_ADMIN = 'Team administration is not exposed over MCP (docs/MCP.md).';
 const WEBHOOKS = 'Webhooks are not exposed over MCP (docs/MCP.md): one sends booking data to any address it names.';
 const API_KEYS = 'API keys are not exposed over MCP (docs/MCP.md): an agent does not mint or revoke credentials.';
@@ -87,9 +90,7 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'POST /v1/me/workspaces/:accountId/accept': dashboardOnly("Joining another account is the person's own consent, given in the dashboard."),
 
   // Event types
-  'POST /v1/event-types': excluded(EVENT_TYPE_EDITS),
-  'PATCH /v1/event-types/:id': excluded(EVENT_TYPE_EDITS),
-  'DELETE /v1/event-types/:id': excluded(EVENT_TYPE_EDITS),
+  'DELETE /v1/event-types/:id': excluded(EVENT_TYPE_DELETE),
   'POST /v1/event-types/reminder-preview': notYet('No tool renders a reminder email.'),
   'POST /v1/event-types/:id/one-off-links': notYet('No tool creates a single-use link.'),
   'DELETE /v1/event-types/:id/one-off-links/:linkId': notYet('No tool revokes a single-use link.'),

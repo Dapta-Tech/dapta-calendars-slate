@@ -62,6 +62,8 @@ const spanKey = (s: Span) => `${s.fromMs}:${s.toMs}`;
 interface State {
   /** Every time read so far, in start order, once each. */
   slots: Slot[];
+  /** Every time read so far that a booking limit closed (ISO UTC), once each. */
+  fullSlots: string[];
   /** The spans read and answered. */
   known: Span[];
   /** A configuration reason the event offers nothing (it holds for every window). */
@@ -112,6 +114,7 @@ export function useProgressiveSlots({
 
   const [state, setState] = useState<State>(() => ({
     slots: staticSlots ?? [],
+    fullSlots: [],
     known: progressive ? [] : [whole],
     unavailable: false,
     busy: false,
@@ -197,6 +200,7 @@ export function useProgressiveSlots({
       }
       return {
         slots: mergeSlots(s.slots, chunk.slots),
+        fullSlots: chunk.fullSlots?.length ? [...new Set([...s.fullSlots, ...chunk.fullSlots])] : s.fullSlots,
         known: addSpan(s.known, span),
         // A later window answering clears an earlier one that did not.
         unavailable: false,
@@ -282,6 +286,7 @@ export function useProgressiveSlots({
   return {
     progressive,
     slots: state.slots,
+    fullSlots: state.fullSlots,
     emptyReason: state.emptyReason,
     unavailable: state.unavailable,
     busy: state.busy,

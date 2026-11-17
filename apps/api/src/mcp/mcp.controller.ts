@@ -14,7 +14,7 @@ import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
 import { loginPrincipal, signInKey, type McpCall } from './support';
 import { clientInfoOf } from './mcp-usage';
-import { TOOLS, accessOf } from './tools';
+import { TOOLS, accessOf, type ToolDef } from './tools';
 
 const TOOL_BY_NAME = new Map(TOOLS.map((def) => [def.name, def]));
 
@@ -25,9 +25,10 @@ const scopeList = (...groups: readonly (readonly string[])[]): string[] => [...n
  * What the `tools/call` messages in a body need before they may run: whether
  * any needs a credential at all, and every scope they need. Read from the raw
  * JSON-RPC (a single message or a batch); anything malformed or unknown is
- * left to the SDK, which answers it with a protocol error.
+ * left to the SDK, which answers it with a protocol error. Only the tools the
+ * deployment serves count: one its switches turn off is unknown here too.
  */
-export function toolCallNeeds(body: unknown): { credential: boolean; scopes: ApiScope[] } {
+export function toolCallNeeds(body: unknown, tools: ReadonlyMap<string, ToolDef> = TOOL_BY_NAME): { credential: boolean; scopes: ApiScope[] } {
   const messages = Array.isArray(body) ? body : [body];
   let credential = false;
   const scopes = new Set<ApiScope>();
@@ -35,7 +36,7 @@ export function toolCallNeeds(body: unknown): { credential: boolean; scopes: Api
     if (!message || typeof message !== 'object') continue;
     const { method, params } = message as { method?: unknown; params?: { name?: unknown; arguments?: unknown } };
     if (method !== 'tools/call' || typeof params?.name !== 'string') continue;
-    const def = TOOL_BY_NAME.get(params.name);
+    const def = tools.get(params.name);
     if (!def) continue;
     const args = params.arguments && typeof params.arguments === 'object' ? (params.arguments as Record<string, unknown>) : {};
     const access = accessOf(def, args);
@@ -216,14 +217,14 @@ export class McpController {
       if (principal?.kind === 'oauth' && principal.grantId) this.oauth.noteUse(principal.grantId);
     }
 
-    if (this.external.enabled && principal === null && login === null && toolCallNeeds(req.body).credential) {
+    if (this.external.enabled && principal === null && login === null && toolCallNeeds(req.body, this.gateway.tools).credential) {
       // No scope in the challenge: the external server's scopes are not ours.
       rpcError(res, 401, -32001, 'Sign-in required for this tool.', { 'WWW-Authenticate': this.external.challenge() });
       return;
     }
 
     if (this.oauth.enabled && (principal === null || principal.kind === 'oauth')) {
-      const needs = toolCallNeeds(req.body);
+      const needs = toolCallNeeds(req.body, this.gateway.tools);
       if (needs.credential && principal === null) {
         rpcError(res, 401, -32001, 'Sign-in required for this tool.', {
           'WWW-Authenticate': this.oauth.challenge(scopeList(BASELINE_SCOPES, needs.scopes)),
