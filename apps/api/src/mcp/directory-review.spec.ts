@@ -53,9 +53,9 @@ describe('connector directory review', () => {
     }
   });
 
-  it('marks destructive exactly the tools that cancel, decline or replace a booking', () => {
+  it('marks destructive exactly the tools that cancel, decline or replace a booking, or replace questions', () => {
     expect(TOOLS.filter((t) => t.annotations.destructiveHint).map((t) => t.name).sort()).toEqual(
-      ['cancel_booking', 'decline_booking', 'reschedule_booking'].sort(),
+      ['cancel_booking', 'decline_booking', 'reschedule_booking', 'update_event_type'].sort(),
     );
   });
 

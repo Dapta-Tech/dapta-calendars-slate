@@ -70,6 +70,12 @@ describe('the MCP against the dashboard API reference', () => {
     }
   });
 
+  it('serves creating and changing an event type, and keeps deleting one out for its own reason', () => {
+    expect(API_ROUTE_TOOLS['POST /v1/event-types']).toBe('create_event_type');
+    expect(API_ROUTE_TOOLS['PATCH /v1/event-types/:id']).toBe('update_event_type');
+    expect(API_ROUTE_EXCLUSIONS['DELETE /v1/event-types/:id']).toMatchObject({ kind: 'excluded', reason: expect.stringContaining('Deleting') });
+  });
+
   it('counts every route once', () => {
     const c = parityCoverage();
     expect(c.tool + c.excluded + c['dashboard-only'] + c['not-yet']).toBe(Object.keys(API_REFERENCE).length);
