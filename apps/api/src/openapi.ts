@@ -1497,11 +1497,14 @@ export const openapiSpec = {
           name,
           in: 'query',
           required: false,
-          schema: { type: 'string' },
+          schema:
+            name === 'status'
+              ? { type: 'string', enum: ['accepted', 'pending', 'cancelled', 'rejected'] }
+              : { type: 'string' },
         })),
         responses: {
           '200': { description: '{items,nextCursor}' },
-          '400': { description: 'from or to is not a date, or limit is not an integer' },
+          '400': { description: 'from or to is not a date, limit is not an integer, cursor is repeated, or status is repeated or not one of accepted, pending, cancelled, rejected' },
         },
       },
     },

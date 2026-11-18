@@ -92,6 +92,7 @@ import { canClaimVanitySlug, templateIssueMessage, validateTemplate } from '@sla
 import { CrmAuthError } from '@slate/crm';
 import {
   clampAvailabilityWindow,
+  type BookingStatus,
   type IntegrationCapabilities,
   type IntegrationConnectInput,
   type IntegrationStatusView,
@@ -285,7 +286,7 @@ export class AdminService {
 
   // Host bookings (R29): the on-behalf path with the singular-attendee shape.
   // `from` / `to` are epoch ms, already read by the caller (`parseBookingsListQuery`).
-  async listBookings(p: HostPrincipal, q: { from?: number; to?: number; status?: string; limit?: number }) {
+  async listBookings(p: HostPrincipal, q: { from?: number; to?: number; status?: BookingStatus; limit?: number; cursor?: string }) {
     const page = await listBookings(this.db, {
       accountId: p.accountId,
       memberId: p.memberId,
@@ -293,6 +294,7 @@ export class AdminService {
       to: q.to,
       status: q.status,
       limit: q.limit,
+      cursor: q.cursor,
     });
     // A date of a repeating event reads as one (ADR 0012); every other booking has `repeats: null`.
     const repeats = await loadSeriesRepeats(this.db, p.accountId, page.items.map((b) => b.uid));
