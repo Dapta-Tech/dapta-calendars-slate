@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import { authProvider, getSession } from '@/lib/auth-session';
 import { getLocale } from '@/lib/locale';
+import { SCREEN_PARAM, SIGN_UP_SCREEN, wantsSignUp } from '@/lib/login-screen';
+import { firstParam } from '@/lib/return-to';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 
@@ -20,11 +22,24 @@ export const dynamic = 'force-dynamic';
  *    page — logged-in users land on /admin, anonymous users go STRAIGHT to the
  *    hosted login (no intermediate sign-in card).
  *  - local/OSS fork: keep the clone-and-run landing with the demo booking page.
+ *
+ * `?screen=sign-up` is a landing's "create an account" call to action
+ * (lib/login-screen.ts). It points here, not at the login route, because the
+ * middleware parks the call to action's campaign tags on a page and never on
+ * an `/api/` route. Anonymous visitors take it on to the login route, which
+ * opens the hosted sign-up screen; a signed-in one still goes to /admin.
  */
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ screen?: string | string[] }>;
+}) {
   if (authProvider() === 'workos') {
     const session = await getSession();
-    redirect(session ? '/admin' : '/api/auth/login');
+    if (session) redirect('/admin');
+    // Rebuilt from the constants, never copied from the request.
+    const signUp = wantsSignUp(firstParam((await searchParams)[SCREEN_PARAM]));
+    redirect(signUp ? `/api/auth/login?${SCREEN_PARAM}=${SIGN_UP_SCREEN}` : '/api/auth/login');
   }
 
   // In the document's language, which `<html lang>` already declares.
