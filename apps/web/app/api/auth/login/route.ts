@@ -63,8 +63,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // identity service already carries its sign-up hint onto the authorize URL,
   // so unlike `prompt` there is nothing to patch on its answer. Every other
   // arrival, the /login redirect of a signed-out dashboard visit included,
-  // sends nothing and opens on the sign-in screen as before.
-  const signUp = wantsSignUp(new URL(req.url).searchParams.get(SCREEN_PARAM));
+  // sends nothing and opens on the sign-in screen as before. A repeated
+  // parameter is not a choice, as on the root page: it reads as none.
+  const screens = new URL(req.url).searchParams.getAll(SCREEN_PARAM);
+  const signUp = screens.length === 1 && wantsSignUp(screens[0]);
 
   const returnTo = `${origin}/api/auth/callback`;
   const res = await fetch(

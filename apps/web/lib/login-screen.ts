@@ -7,10 +7,11 @@
  * login route: the root is a page, so the middleware parks the campaign tags
  * and the landing's analytics id there for the login round trip, which it
  * never does on an `/api/` route. The call to action adds `?screen=sign-up`;
- * the root passes it on to `/api/auth/login`, which asks the identity service
- * for its sign-up screen. Everything else opens on sign-in exactly as before,
- * including the `/login` redirect a signed-out visit to a dashboard page goes
- * through, which never carries it.
+ * on a WorkOS build the root passes it on to `/api/auth/login`, which asks
+ * the identity service for its sign-up screen (a local build has no hosted
+ * screen to pick, and ignores it). Everything else opens on sign-in exactly
+ * as before, including the `/login` redirect a signed-out visit to a
+ * dashboard page goes through, which never carries it.
  *
  * One allowlisted value, compared exactly: the parameter arrives from any URL
  * and the route turns it into a parameter of the identity service. `screen`

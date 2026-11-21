@@ -197,8 +197,10 @@ describe('GET /api/auth/login sign-up screen', () => {
     'screen=%20sign-up',
     // The decoded value is `sign-up&prompt=none`: never spliced onto the request.
     'screen=sign-up%26prompt%3Dnone',
-    // The first value is the one read, the same as `prompt`.
+    // A repeated parameter is not a choice, in either order, as on the root page.
     'screen=evil&screen=sign-up',
+    'screen=sign-up&screen=evil',
+    'screen=sign-up&screen=sign-up',
     // The identity service's own names are not this route's parameter.
     'screenHint=sign-up',
     'screen_hint=sign-up',
