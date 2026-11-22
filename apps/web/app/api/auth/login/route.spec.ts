@@ -5,6 +5,8 @@ const cookieJar = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
 vi.mock('next/headers', () => ({ cookies: vi.fn(async () => cookieJar) }));
 const provider = vi.fn(() => 'workos');
 vi.mock('@/lib/auth-session', () => ({ authProvider: () => provider() }));
+const scheduleLoginStarted = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/analytics/login-started', () => ({ scheduleLoginStarted }));
 
 import { GET } from './route';
 
@@ -256,5 +258,60 @@ describe('GET /api/auth/login sign-up screen', () => {
 
     expect(res.headers.get('location')).toBe('https://calendars.example.com/login');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/auth/login records the start (calendars_login_started)', () => {
+  const fetchMock = vi.fn();
+  const LANDING_ID = '0192f0a4-7c1e-7d2b-9a3c-5e6f7a8b9c0d';
+  const TAGS = JSON.stringify({ utm_source: 'linkedin' });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubEnv('IAM_BASE_URL', 'https://iam.example.com/iam');
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ loginUrl: AUTHORIZE }) });
+    cookieJar.get.mockImplementation((name: string) =>
+      name === 'slate.ph_id' ? { value: LANDING_ID } : name === 'slate.attribution' ? { value: TAGS } : undefined,
+    );
+    provider.mockReturnValue('workos');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('hands the start, its screen and the parked cookies to the analytics hook', async () => {
+    const res = await GET(
+      new NextRequest('https://calendars.example.com/api/auth/login?screen=sign-up', {
+        headers: { 'user-agent': 'Mozilla/5.0 Test' },
+      }),
+    );
+
+    expect(res.headers.get('location')).toBe(AUTHORIZE);
+    expect(scheduleLoginStarted).toHaveBeenCalledTimes(1);
+    expect(scheduleLoginStarted).toHaveBeenCalledWith({
+      screen: 'sign-up',
+      landingCookie: LANDING_ID,
+      attributionCookie: TAGS,
+      origin: 'https://calendars.example.com',
+      userAgent: 'Mozilla/5.0 Test',
+    });
+  });
+
+  it('a plain login is a sign-in start, prompt=login included', async () => {
+    await GET(req('/api/auth/login?prompt=login'));
+
+    expect(scheduleLoginStarted).toHaveBeenCalledWith(expect.objectContaining({ screen: 'sign-in' }));
+  });
+
+  it('records nothing when the login never reaches the hosted screen', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
+    await GET(req('/api/auth/login?screen=sign-up'));
+    provider.mockReturnValue('local');
+    await GET(req('/api/auth/login?screen=sign-up'));
+
+    expect(scheduleLoginStarted).not.toHaveBeenCalled();
   });
 });

@@ -102,6 +102,20 @@ the deployment prunes it.
 | `calendars_invite_accepted` | An invitation turns active: the invitee joins from the switcher or the invitation page, or a login through a token for that account adopts it. About the **invitee** | `role` |
 | `$mcp_tool_call` | An MCP tool call finished, whatever its result. Not `initialize` or `tools/list`, not a request refused at the door (401, 403, 429) or a message the SDK rejects as malformed, and never a call refused as `RATE_LIMITED`, so error rates are a floor. About the **agent's credential** (see the audiences above). Takes no place in the account's outbox order lane | `$mcp_tool_name`, `$mcp_resource_name` (both the tool), `$mcp_is_error`, `$mcp_error_type` (the error code as a lowercase label), `$mcp_duration_ms`, `$mcp_protocol_version`, `$mcp_client_name` and `$mcp_client_version` (a plain, not host-shaped label or `other`; usually only from clients that send the per-call `_meta` envelope), `$mcp_client_user_agent` (only the product tokens: a dot-free name and a numeric version with at most a pre-release tag, IP addresses and keys redacted; 200 characters at most), `$mcp_vendor_client` (`anthropic`, `openai`), `$mcp_server_name` (`dCal`), `$mcp_server_version`, `$mcp_source` (`posthog_mcp_analytics`), `credential_type` (`api_key`, `oauth`, `none`), `staff_access` (the same as `is_internal`, the name dForms uses), `$process_person_profile: false` unless filed under a member's email. Details in [`docs/MCP.md`](docs/MCP.md) |
 
+### Web server (login route)
+
+Sent by the web server itself, because no page loads between the landing's
+call to action and the hosted sign-in screen: the root and `/login` redirect
+to the login route, which redirects to the identity provider. Sent with Next's
+`after` once the redirect is on its way (3 second timeout, failures logged and
+dropped), so it never slows or fails a login. Not sent for a client that
+identifies as automated (crawlers and link previewers follow the redirect too)
+or that sends no user agent.
+
+| Event | When | Properties |
+|---|---|---|
+| `calendars_login_started` | The login route sends someone to the hosted screen (not when the identity service fails, nor on the local provider) | `screen` (`sign-up` when the landing's call to action asked for it with `?screen=sign-up`, else `sign-in`), `has_ph_id`, `utm_source` (from the parked campaign cookie, only when it is a plain label, the rule of `attribution_captured`), `$host`, `$geoip_disable: true` (the request comes from the server, whose address says nothing about the person). Filed under the parked landing id (`slate.ph_id`) when there is one, which the first dashboard page aliases onto the host, so the landing visit, the start and `calendars_signup_completed` are one person; otherwise under a random `calendars-login-<uuid>` with `$process_person_profile: false` |
+
 ### Browser, host (dashboard and wizard only)
 
 | Event | When | Properties |
