@@ -108,7 +108,8 @@ Sent by the web server itself, because no page loads between the landing's
 call to action and the hosted sign-in screen: the root and `/login` redirect
 to the login route, which redirects to the identity provider. Sent with Next's
 `after` once the redirect is on its way (3 second timeout, failures logged and
-dropped), so it never slows or fails a login. Not sent for a client that
+dropped), so it never slows or fails a login; it carries the redirect's time
+as its timestamp, so it never sorts after the sign-up it led to. Not sent for a client that
 identifies as automated (crawlers and link previewers follow the redirect too)
 or that sends no user agent.
 

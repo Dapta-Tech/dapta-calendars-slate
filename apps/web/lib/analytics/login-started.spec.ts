@@ -37,6 +37,7 @@ const start = (over: Partial<LoginStart> = {}): LoginStart => ({
   attributionCookie: JSON.stringify({ utm_source: 'linkedin', utm_campaign: 'q4', gclid: 'click-1' }),
   origin: 'https://app.dcal.example',
   userAgent: CHROME,
+  at: new Date('2026-11-22T21:00:00.000Z'),
   ...over,
 });
 
@@ -45,6 +46,7 @@ describe('loginStartedEvent', () => {
     expect(loginStartedEvent(start())).toEqual({
       event: 'calendars_login_started',
       distinct_id: LANDING_ID,
+      timestamp: '2026-11-22T21:00:00.000Z',
       properties: {
         product: 'calendars',
         screen: 'sign-up',

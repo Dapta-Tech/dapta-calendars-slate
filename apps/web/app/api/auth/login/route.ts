@@ -104,6 +104,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     attributionCookie: jar.get(ATTRIBUTION_COOKIE)?.value,
     origin,
     userAgent: req.headers.get('user-agent'),
+    at: new Date(),
   });
   return NextResponse.redirect(target.toString());
 }

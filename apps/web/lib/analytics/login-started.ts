@@ -57,6 +57,13 @@ export interface LoginStart {
   origin: string;
   /** The `user-agent` header. */
   userAgent: string | null;
+  /**
+   * When the route sent the redirect. The send runs later (after the response),
+   * and without its own timestamp the vendor would use ingestion time, which a
+   * fast sign-up could beat: the start would sort after `calendars_signup_completed`
+   * and an ordered funnel would read a finished sign-up as a drop-off.
+   */
+  at: Date;
 }
 
 /**
@@ -105,6 +112,7 @@ export function loginStartedEvent(
   return {
     event: analyticsEventName('login_started'),
     distinct_id: landingId ?? `calendars-login-${newId()}`,
+    timestamp: start.at.toISOString(),
     properties,
   };
 }

@@ -297,6 +297,7 @@ describe('GET /api/auth/login records the start (calendars_login_started)', () =
       attributionCookie: TAGS,
       origin: 'https://calendars.example.com',
       userAgent: 'Mozilla/5.0 Test',
+      at: expect.any(Date),
     });
   });
 
