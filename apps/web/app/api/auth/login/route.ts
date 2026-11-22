@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
+import { ATTRIBUTION_COOKIE, LANDING_ID_COOKIE } from '@slate/shared';
+import { scheduleLoginStarted } from '@/lib/analytics/login-started';
 import { authProvider } from '@/lib/auth-session';
 import { SCREEN_PARAM, wantsSignUp } from '@/lib/login-screen';
 import { requestOrigin } from '@/lib/request-origin';
@@ -93,5 +95,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // The IAM does not forward `prompt` onto the authorize URL yet, so patch it on
   // ourselves. Forwarded above as well, so nothing changes here the day it does.
   if (prompt) target.searchParams.set('prompt', prompt);
+  // `calendars_login_started` (lib/analytics/login-started.ts), the only record
+  // of someone who opens the hosted screen and leaves. Sent after this redirect
+  // is on its way, never in front of it; a no-op with analytics off.
+  scheduleLoginStarted({
+    screen: signUp ? 'sign-up' : 'sign-in',
+    landingCookie: jar.get(LANDING_ID_COOKIE)?.value,
+    attributionCookie: jar.get(ATTRIBUTION_COOKIE)?.value,
+    origin,
+    userAgent: req.headers.get('user-agent'),
+    at: new Date(),
+  });
   return NextResponse.redirect(target.toString());
 }
