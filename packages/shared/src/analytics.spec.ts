@@ -5,6 +5,7 @@ import {
   BROWSER_ANALYTICS_EVENTS,
   POSTHOG_DEFAULT_HOST,
   SERVER_ANALYTICS_EVENTS,
+  WEB_SERVER_ANALYTICS_EVENTS,
   analyticsCampaignValue,
   analyticsEventName,
   isInternalEmail,
@@ -85,9 +86,9 @@ describe('error tracking switch (PRODUCT_ANALYTICS_ERRORS)', () => {
 });
 
 describe('event names', () => {
-  it('prefixes every event, and the two lists never share a name', () => {
+  it('prefixes every event, and the lists never share a name', () => {
     expect(analyticsEventName('booking_created')).toBe('calendars_booking_created');
-    const all = [...SERVER_ANALYTICS_EVENTS, ...BROWSER_ANALYTICS_EVENTS];
+    const all = [...SERVER_ANALYTICS_EVENTS, ...BROWSER_ANALYTICS_EVENTS, ...WEB_SERVER_ANALYTICS_EVENTS];
     expect(new Set(all).size).toBe(all.length);
     for (const e of all) expect(analyticsEventName(e).startsWith(ANALYTICS_EVENT_PREFIX)).toBe(true);
   });

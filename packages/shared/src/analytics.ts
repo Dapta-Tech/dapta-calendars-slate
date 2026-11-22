@@ -71,7 +71,16 @@ export const BROWSER_ANALYTICS_EVENTS = [
 ] as const;
 export type BrowserAnalyticsEvent = (typeof BROWSER_ANALYTICS_EVENTS)[number];
 
-export type AnalyticsEvent = ServerAnalyticsEvent | BrowserAnalyticsEvent;
+/**
+ * Events the WEB server emits: things that happen before any page can load
+ * the browser library. The login hand-off is one redirect, so a person who
+ * starts a login and gives up on the hosted screen left no browser event at
+ * all; the login route records the start itself (`lib/analytics/login-started.ts`).
+ */
+export const WEB_SERVER_ANALYTICS_EVENTS = ['login_started'] as const;
+export type WebServerAnalyticsEvent = (typeof WEB_SERVER_ANALYTICS_EVENTS)[number];
+
+export type AnalyticsEvent = ServerAnalyticsEvent | BrowserAnalyticsEvent | WebServerAnalyticsEvent;
 
 /** Event properties: small, flat, and never personal. */
 export type AnalyticsProps = Record<string, string | number | boolean | null>;
