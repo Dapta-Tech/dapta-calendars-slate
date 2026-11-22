@@ -61,12 +61,13 @@ export interface LoginStart {
 
 /**
  * Clients that are not a person opening a login: crawlers and link previewers
- * follow the root's redirect too, and every one would be a start that can
+ * follow the root's redirect too (WhatsApp's and Viber's fetchers name only
+ * the app, hence the anchored entries), and every one would be a start that can
  * never finish. The browser library drops these on its own; a server event has
  * to do it here.
  */
 const AUTOMATED_AGENT =
-  /bot\b|bot\/|crawl|spider|slurp|preview|headless|lighthouse|facebookexternalhit|embedly|curl\/|wget\/|python-|go-http-client|okhttp|axios\/|node-fetch|undici/i;
+  /^whatsapp\/|^viber|bot\b|bot\/|crawl|spider|slurp|preview|headless|lighthouse|facebookexternalhit|embedly|curl\/|wget\/|python-|go-http-client|okhttp|axios\/|node-fetch|undici/i;
 
 /** The parked campaign source, or null when there is none or it is not a plain label. */
 function parkedUtmSource(raw: string | undefined): string | null {
