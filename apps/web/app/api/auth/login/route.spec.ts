@@ -137,3 +137,124 @@ describe('GET /api/auth/login keeps the page the sign-in returns to', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * `?screen=sign-up` (lib/login-screen.ts): a landing's "create an account"
+ * call to action, passed on by the root page, asks the identity service for
+ * its sign-up screen. The identity service call is asserted as a whole string,
+ * so "without the flag" means byte for byte the request this route has always
+ * sent, and "with it" means that same request plus one trailing parameter.
+ */
+describe('GET /api/auth/login sign-up screen', () => {
+  const fetchMock = vi.fn();
+  const PAGE = '/admin/bookings/6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10';
+  const iamCall = () => String(fetchMock.mock.calls[0]?.[0]);
+  const stateCookie = () => cookieJar.set.mock.calls.find((c) => c[0] === 'slate_oauth_state');
+  /** The identity service request this route sent before the flag existed, plus `extra`. */
+  const iamUrl = (origin: string, extra = '') =>
+    'https://iam.example.com/iam/auth/login-url' +
+    `?returnTo=${encodeURIComponent(`${origin}/api/auth/callback`)}` +
+    `&state=${encodeURIComponent(String(stateCookie()?.[1]))}` +
+    extra;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubEnv('IAM_BASE_URL', 'https://iam.example.com/iam');
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ loginUrl: AUTHORIZE }) });
+    cookieJar.get.mockReturnValue(undefined);
+    provider.mockReturnValue('workos');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('asks the identity service for the sign-up screen', async () => {
+    const res = await GET(req('/api/auth/login?screen=sign-up'));
+
+    expect(iamCall()).toBe(iamUrl('https://calendars.example.com', '&screenHint=sign-up'));
+    // The identity service puts the hint on the authorize URL itself, so its
+    // answer is followed untouched.
+    expect(res.headers.get('location')).toBe(AUTHORIZE);
+  });
+
+  it('sends exactly the request it always sent without it', async () => {
+    const res = await GET(req('/api/auth/login'));
+
+    expect(iamCall()).toBe(iamUrl('https://calendars.example.com'));
+    expect(res.headers.get('location')).toBe(AUTHORIZE);
+  });
+
+  it.each([
+    'screen=signup',
+    'screen=Sign-Up',
+    'screen=sign-in',
+    'screen=',
+    'screen',
+    'screen=sign-up%20',
+    'screen=%20sign-up',
+    // The decoded value is `sign-up&prompt=none`: never spliced onto the request.
+    'screen=sign-up%26prompt%3Dnone',
+    // A repeated parameter is not a choice, in either order, as on the root page.
+    'screen=evil&screen=sign-up',
+    'screen=sign-up&screen=evil',
+    'screen=sign-up&screen=sign-up',
+    // The identity service's own names are not this route's parameter.
+    'screenHint=sign-up',
+    'screen_hint=sign-up',
+  ])('ignores anything but exactly screen=sign-up (%s)', async (query) => {
+    const res = await GET(req(`/api/auth/login?${query}`));
+
+    expect(iamCall()).toBe(iamUrl('https://calendars.example.com'));
+    expect(res.headers.get('location')).toBe(AUTHORIZE);
+  });
+
+  it('keeps prompt=login and the return target beside it', async () => {
+    const res = await GET(req(`/api/auth/login?screen=sign-up&prompt=login&next=${encodeURIComponent(PAGE)}`));
+
+    expect(iamCall()).toBe(iamUrl('https://calendars.example.com', '&prompt=login&screenHint=sign-up'));
+    expect(new URL(res.headers.get('location')!).searchParams.get('prompt')).toBe('login');
+    expect(cookieJar.set).toHaveBeenCalledWith('slate_return_to', PAGE, expect.objectContaining({ maxAge: 600 }));
+  });
+
+  it.each([
+    ['with it', '?screen=sign-up', '&screenHint=sign-up'],
+    ['without it', '', ''],
+  ])('returns to the public origin behind the proxy, %s', async (_label, query, extra) => {
+    // Behind the load balancer `req.url` is the bind address; the callback is
+    // built from the forwarded headers, as it always was.
+    const proxied = new NextRequest(`https://0.0.0.0:3000/api/auth/login${query}`, {
+      headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'app.example.org, internal.example' },
+    });
+
+    await GET(proxied);
+
+    expect(iamCall()).toBe(iamUrl('https://app.example.org', extra));
+  });
+
+  it('parks the same state cookie, the login-CSRF guard the callback checks', async () => {
+    await GET(req('/api/auth/login?screen=sign-up'));
+
+    expect(stateCookie()?.[1]).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(stateCookie()?.[2]).toMatchObject({ httpOnly: true, sameSite: 'lax', path: '/', maxAge: 600 });
+  });
+
+  it('lands on the same error card when the identity service fails', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
+
+    const res = await GET(req('/api/auth/login?screen=sign-up'));
+
+    expect(res.headers.get('location')).toBe('https://calendars.example.com/login?error=login');
+  });
+
+  it('the local provider has no hosted screen to pick: the login form, as before', async () => {
+    provider.mockReturnValue('local');
+
+    const res = await GET(req('/api/auth/login?screen=sign-up'));
+
+    expect(res.headers.get('location')).toBe('https://calendars.example.com/login');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

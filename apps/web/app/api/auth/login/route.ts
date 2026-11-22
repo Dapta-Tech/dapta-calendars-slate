@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { authProvider } from '@/lib/auth-session';
+import { SCREEN_PARAM, wantsSignUp } from '@/lib/login-screen';
 import { requestOrigin } from '@/lib/request-origin';
 import { RETURN_TO_COOKIE, RETURN_TO_PARAM, safeReturnTo, withReturnTo } from '@/lib/return-to';
 import { deleteHostCookie, writeHostCookie } from '@/lib/session';
@@ -56,11 +57,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // /login sends no prompt, keeping the silent SSO for arrivals from the
   // platform.
   const prompt = new URL(req.url).searchParams.get('prompt') === 'login' ? 'login' : null;
+  // `?screen=sign-up` (lib/login-screen.ts): a landing's "create an account"
+  // call to action, passed on by the root page. Allowlisted the same way, and
+  // what goes on the wire is a constant, never the value that arrived. The
+  // identity service already carries its sign-up hint onto the authorize URL,
+  // so unlike `prompt` there is nothing to patch on its answer. Every other
+  // arrival, the /login redirect of a signed-out dashboard visit included,
+  // sends nothing and opens on the sign-in screen as before. A repeated
+  // parameter is not a choice, as on the root page: it reads as none.
+  const screens = new URL(req.url).searchParams.getAll(SCREEN_PARAM);
+  const signUp = screens.length === 1 && wantsSignUp(screens[0]);
 
   const returnTo = `${origin}/api/auth/callback`;
   const res = await fetch(
     `${iam}/auth/login-url?returnTo=${encodeURIComponent(returnTo)}&state=${encodeURIComponent(state)}` +
-      (prompt ? `&prompt=${prompt}` : ''),
+      (prompt ? `&prompt=${prompt}` : '') +
+      (signUp ? '&screenHint=sign-up' : ''),
     { cache: 'no-store' },
   ).catch(() => null);
   const loginUrl = res && res.ok ? ((await res.json().catch(() => ({}))) as { loginUrl?: string }).loginUrl : undefined;
