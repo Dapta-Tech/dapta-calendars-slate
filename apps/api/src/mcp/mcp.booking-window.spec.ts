@@ -66,11 +66,15 @@ beforeAll(async () => {
   h = await bootHarness({ MCP_WRITE_RATE_LIMIT_CAPACITY: '400', MCP_RATE_LIMIT_CAPACITY: '800', RATE_LIMIT_CAPACITY: '800' });
   introId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
   teamId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'team-demo' AND account_id = ${h.accountId}`))!.id;
-  // Before any window: two weeks of weekday times, so some fall past day 3.
+  // Before any window: weekday times past day 3. The tools list at most 60 slots
+  // (`truncated`), and from a Monday the first four weekdays fill all 60 inside
+  // the window, so the search starts the day after the window's last day instead
+  // of at now: the times past it are listed whatever day the suite runs on.
   const anon = await h.connect();
   const last = lastWindowDay();
-  beyond = (await slots(anon, { booking_page_url: PAGE })).filter((s) => hostDay(s.start_utc) > last);
-  beyondTeam = (await slots(anon, { booking_page_url: TEAM }, 'find_team_slots')).filter((s) => hostDay(s.start_utc) > last);
+  const after = new Date(Date.parse(`${last}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  beyond = (await slots(anon, { booking_page_url: PAGE, start: after })).filter((s) => hostDay(s.start_utc) > last);
+  beyondTeam = (await slots(anon, { booking_page_url: TEAM, start: after }, 'find_team_slots')).filter((s) => hostDay(s.start_utc) > last);
   expect(beyond.length).toBeGreaterThanOrEqual(4);
   expect(beyondTeam.length).toBeGreaterThanOrEqual(1);
   await h.db.run(sql`UPDATE event_type SET booking_window_days = ${WINDOW_DAYS} WHERE id IN (${introId}, ${teamId})`);
@@ -173,9 +177,14 @@ describe('the booking window, through the MCP tools', () => {
   });
 });
 
+/**
+ * Bookings of the two event types under test at one instant. The seed also holds
+ * a booking of another event type ("Globex Chat") a few weekdays out, which on
+ * some days of the week lands on exactly a time this file looks at.
+ */
 async function bookingsAt(startUtc: string): Promise<number> {
   const r = await h.db.get<{ n: number | string }>(
-    sql`SELECT COUNT(*) AS n FROM booking WHERE start_ms = ${new Date(startUtc).getTime()} AND status IN ('accepted', 'pending')`,
+    sql`SELECT COUNT(*) AS n FROM booking WHERE start_ms = ${new Date(startUtc).getTime()} AND status IN ('accepted', 'pending') AND event_type_id IN (${introId}, ${teamId})`,
   );
   return Number(r!.n);
 }
