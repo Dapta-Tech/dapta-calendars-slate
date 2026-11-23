@@ -92,8 +92,18 @@ describe('loginStartedEvent', () => {
     'curl/8.4.0',
     'WhatsApp/2.23.20.0 A',
     'Viber/13.3.0.16',
+    'kube-probe/1.31+',
+    'ELB-HealthChecker/2.0',
+    'GoogleHC/1.0',
+    'Mozilla/5.0 (compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)',
   ])('sends nothing for an automated client (%s)', (userAgent) => {
     expect(loginStartedEvent(start({ userAgent }))).toBeNull();
+  });
+
+  it('still counts a real browser first visit with no landing id', () => {
+    const first = loginStartedEvent(start({ landingCookie: undefined, attributionCookie: undefined }), () => 'abc');
+    expect(first).toMatchObject({ distinct_id: 'calendars-login-abc' });
+    expect(first?.properties).toMatchObject({ has_ph_id: false, $process_person_profile: false });
   });
 
   it('sends nothing without a user agent', () => {
