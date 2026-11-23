@@ -72,9 +72,15 @@ export interface LoginStart {
  * the app, hence the anchored entries), and every one would be a start that can
  * never finish. The browser library drops these on its own; a server event has
  * to do it here.
+ *
+ * Health checks are in the list too, and they are the loudest of all: the
+ * kubelet's `kube-probe` requests `/` every few seconds per pod, and the root
+ * redirects to this route on the same host, which the kubelet follows, so every
+ * probe walks through the login route (and so would the load balancer's
+ * `ELB-HealthChecker`, `GoogleHC` and similar monitors).
  */
 const AUTOMATED_AGENT =
-  /^whatsapp\/|^viber|bot\b|bot\/|crawl|spider|slurp|preview|headless|lighthouse|facebookexternalhit|embedly|curl\/|wget\/|python-|go-http-client|okhttp|axios\/|node-fetch|undici/i;
+  /^whatsapp\/|^viber|bot\b|bot\/|crawl|spider|slurp|preview|headless|lighthouse|facebookexternalhit|embedly|curl\/|wget\/|python-|go-http-client|okhttp|axios\/|node-fetch|undici|kube-probe|elb-healthchecker|googlehc|health-?check|uptime/i;
 
 /** The parked campaign source, or null when there is none or it is not a plain label. */
 function parkedUtmSource(raw: string | undefined): string | null {
