@@ -12,11 +12,17 @@ import {
   scopedIdempotencyKey,
   sql,
 } from "@slate/db";
+import { isLocationKind } from "@slate/engine";
 import { isValidTimeZone, zoneOffsetMinutes, zonedDayKey } from "@slate/shared";
 import { normalizeBookingUtm } from "@slate/types";
 import { z } from "zod";
 import { BookingService } from "./booking.service";
 import { isServiceError } from "./http";
+import {
+  bookingMeetingUrlSql,
+  calendarWritingSql,
+  meetingUrlStatus,
+} from "./meeting-url";
 import { stableStringify } from "./stable-stringify";
 import { DB } from "./tokens";
 
@@ -500,6 +506,7 @@ export class CalV2Service {
       start_ms: number;
       end_ms: number;
       location: string | null;
+      location_kind: string | null;
       responses: unknown;
       metadata: unknown;
       utm: unknown;
@@ -513,6 +520,7 @@ export class CalV2Service {
       length_minutes: number | null;
       destination_calendar_id: string | null;
       meeting_url: string | null;
+      calendar_writing: number | string;
       cancellation_reason: string | null;
       cancelled_by: string | null;
       rescheduled_from_uid: string | null;
@@ -520,19 +528,13 @@ export class CalV2Service {
       rescheduling_reason: string | null;
       rescheduled_by_email: string | null;
     }>(
-      sql`SELECT b.id, b.uid, b.title, b.status, b.start_ms, b.end_ms, b.location,
+      sql`SELECT b.id, b.uid, b.title, b.status, b.start_ms, b.end_ms, b.location, b.location_kind,
                  b.responses, b.metadata, b.utm, b.created_at, b.updated_at, b.event_type_id,
                  et.slug AS event_slug, et.description AS event_description, b.calendar_description,
                  et.length_minutes, et.destination_calendar_id, b.cancellation_reason,
                  b.cancelled_by, b.rescheduled_from_uid, b.rescheduled_to_uid,
                  b.rescheduling_reason, b.rescheduled_by_email,
-                 COALESCE(
-                   (SELECT br.meeting_url FROM booking_reference br
-                    WHERE br.booking_id = b.id AND br.meeting_url IS NOT NULL LIMIT 1),
-                   -- A date of a repeating host event: the series' one room (ADR 0012).
-                   (SELECT s.meeting_url FROM host_event_series s
-                    WHERE s.id = b.recurring_event_id AND b.event_type_id IS NULL)
-                 ) AS meeting_url
+                 ${bookingMeetingUrlSql} AS meeting_url, ${calendarWritingSql} AS calendar_writing
           FROM booking b
           LEFT JOIN event_type et ON et.id = b.event_type_id
           WHERE b.account_id = ${accountId} AND b.uid = ${uid}
@@ -647,6 +649,19 @@ export class CalV2Service {
       ],
       metadata: internal._publicMetadata ?? {},
       meetingUrl: booking.meeting_url,
+      // Not Cal.com fields: additions a Cal.com client ignores. What kind of
+      // place `location` is (a video meeting has no text of its own), and
+      // where its link stands while the calendar write is still on its way.
+      locationKind: isLocationKind(booking.location_kind)
+        ? booking.location_kind
+        : null,
+      meetingUrlStatus: meetingUrlStatus({
+        status: booking.status,
+        locationKind: booking.location_kind,
+        location: booking.location,
+        meetingUrl: booking.meeting_url,
+        calendarWriting: Number(booking.calendar_writing) === 1,
+      }),
       destinationCalendarId:
         internal._destinationCalendar?.id ?? booking.destination_calendar_id,
       cancellationReason: booking.cancellation_reason,

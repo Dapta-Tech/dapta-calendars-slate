@@ -1,0 +1,12 @@
+---
+"@slate/db": minor
+"@slate/engine": minor
+"@slate/types": minor
+"@slate/shared": minor
+---
+
+An event type can cap its bookings per day and per week: "at most N bookings" and "at most N minutes of bookings", each for a day and for a week (Monday to Sunday). Four new nullable columns, `event_type.max_bookings_per_day`, `max_bookings_per_week`, `max_minutes_per_day` and `max_minutes_per_week` (Postgres migration 0042 bounded by `lock_timeout`, SQLite 0041 in one transaction; additive), hold whole numbers from 1 to 1440 (a day) or 10080 (a week); a minutes limit is never shorter than the event. NULL, every existing event, keeps today's behavior (no limit).
+
+The event's own accepted and pending bookings count, by the day and the week their start falls on (a booking that crosses midnight counts entirely on its first day); cancelled and declined ones never do, and a seated time counts once. Days and weeks are read in the schedule's time zone for a personal event and in the team's time zone for a team event, whose hosts' bookings all count together, so what a team page offers is what any of its hosts may take. A time is offered only while one more booking of its length keeps every limit, so a full day or week offers nothing, wherever the booking window applies: every slot read and every hold, booking and reschedule check, personal and team. The limit is counted again inside the locked write that creates a booking, a hold or a move (a per-event advisory lock on Postgres, after the member locks), so two people booking the last time of a day cannot both win. A booking being moved never counts against its own move. A refusal keeps its code (`INVALID_SLOT`, or `SLOT_TAKEN` for a time taken meanwhile) and says which limit is full. A hold does not count. A host's own booking made outside availability is not limited, but counts.
+
+`@slate/engine` adds `booking-limits.ts` (`BookingLimits`, `bookingLimitPeriods`, `bookingLimitTally`, `bookingLimitBreach`), the `bookingLimits` input of `computeSlots` (with an optional zone of its own, for a team), and `computeSlotsDetailed`, which also returns the times a limit closed; `@slate/types` adds the four fields to the event type input, `MAX_BOOKING_LIMIT_PER_DAY` / `_PER_WEEK`, `bookingMinutesLimitProblem`, and the optional `fullSlots` on the availability response; `@slate/db` reads, writes and applies them, and adds `slotVerdict`; `@slate/shared` adds the EN and ES copy under `admin.eventTypes.bookingLimits` and `bookingPage.dayFull`.

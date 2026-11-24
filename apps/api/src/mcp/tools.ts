@@ -20,6 +20,7 @@ import {
   claimApiIdempotency,
   completeApiIdempotency,
   createHostEvent,
+  deleteEventType,
   getAccountByCode,
   getAccountBranding,
   getTeamById,
@@ -30,9 +31,12 @@ import {
   listTeams,
   getEventTypeById,
   getSchedule,
+  hasPendingCalendarJob,
   listOneOffLinks,
   hashApiValue,
   hostEventAttendees,
+  loadBookingForCalendarWrite,
+  loadBookingMeetingUrl,
   loadDestinationConnectionRefs,
   normalizeSchedulingMethod,
   replayHostEvent,
@@ -43,14 +47,28 @@ import {
   type HostEventSeries,
   type SeriesConflict,
   type SkippedDate,
+  type EventTypeView,
 } from '@slate/db';
-import { BOOKING_UTM_KEYS, MAX_BOOKING_UTM_VALUE, hasBrandKit, type ApiScope, type BookingUtm } from '@slate/types';
-import { isValidTimeZone } from '@slate/shared';
+import {
+  BOOKING_UTM_KEYS,
+  MAX_BOOKING_UTM_VALUE,
+  MAX_BOOKING_WINDOW_DAYS,
+  eventTypeInputSchema,
+  hasBrandKit,
+  type ApiScope,
+  type BookingUtm,
+  type EventTypeInput,
+} from '@slate/types';
+import type { ServerEnv } from '@slate/config/env';
+import { formatBookingLocation, getMessages, isValidTimeZone } from '@slate/shared';
 import { calendarFeatures } from '@slate/calendar';
 import {
+  LOCATION_DETAIL_MAX,
+  LOCATION_KINDS,
   RECURRENCE_WEEKDAYS,
   localDateParts,
   oneOffLinkPath,
+  parseEventLocation,
   recurrenceProblem,
   seriesOccurrences,
   seriesWallClockToUtc,
@@ -68,11 +86,27 @@ import type { CalendarEffects } from '../calendar-effects';
 import type { CalV2Service } from '../cal-v2.service';
 import type { CalV2PilotService } from '../cal-v2-pilot.service';
 import type { CrmPropertyCatalogService } from '../crm-property-catalog';
+import { wantsConferencingLink } from '../email-effects';
 import { isServiceError } from '../http';
+import { assertMappingsAreDeliverable, createEventTypeChecked, updateEventTypeChecked, type EventTypeWriter } from '../event-type-write';
+import { MEETING_URL_STATUSES } from '../meeting-url';
+import {
+  MAX_OPTIONS,
+  MAX_OPTION_LENGTH,
+  MAX_QUESTIONS,
+  MCP_QUESTION_TYPES,
+  checkEventTypeEdit,
+  eventTypeRevision,
+  mappedQuestionProblem,
+  slugFromTitle,
+  type GuardProblem,
+  type QuestionEdit,
+} from './event-type-guard';
 import { queryBookings } from './bookings-query';
 import { bindHold, findHold, heldByAnother, holdOwner } from './holds';
 import {
   type McpCall,
+  BOOKING_LIMIT,
   ToolFailure,
   callerId,
   emailDomain,
@@ -129,7 +163,12 @@ export interface ToolResult {
   summary: string;
   /** Ids this call touched, for the audit line. */
   affected?: string[];
+  /** The fields a write changed, by name (never their values), for the audit line. */
+  changed?: string[];
 }
+
+/** The switches that withdraw a tool from a deployment (`ToolDef.enabled`). */
+export type ToolSwitches = Pick<ServerEnv, 'MCP_EVENT_TYPE_WRITE_ENABLED'>;
 
 export interface ToolDef {
   name: string;
@@ -152,6 +191,8 @@ export interface ToolDef {
   accountArg?: boolean;
   /** Counts against the tighter write bucket. */
   write: boolean;
+  /** Whether this deployment serves the tool. Absent: always. Off, it is neither listed nor callable. */
+  enabled?(env: ToolSwitches): boolean;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -274,6 +315,24 @@ const seriesShape = z.looseObject({
   skipped_dates: z.array(z.string()).describe('Dates left out because something else was there (YYYY-MM-DD).'),
 });
 
+/** How the meeting happens and its video link, the same on one booking and in a list. */
+const meetingFields = {
+  location_kind: openEnum(LOCATION_KINDS)
+    .nullable()
+    .describe('conferencing: a video meeting, its link in meeting_url. in_person, phone, custom: the place is in location. Null when none was set.'),
+  meeting_url: z.string().nullable().describe('The video link, once the host\'s calendar has created it.'),
+  meeting_url_status: openEnum(MEETING_URL_STATUSES).describe(
+    'ready: meeting_url has the link. pending: the calendar is still creating it; get_booking shows it about 10 seconds later, and the confirmation email carries it. on_confirmation: a request waiting for the host; the link is created when the host confirms. none: no link is coming (not a video meeting, or no calendar to create one).',
+  ),
+};
+
+const locationField = {
+  location: z
+    .string()
+    .nullable()
+    .describe('Where it happens: the place, number or wording the host set, or the kind of meeting when it has none (e.g. "Online meeting"). Null when none was set.'),
+};
+
 const bookingSummary = z.looseObject({
   uid: z.string(),
   kind: openEnum(['booking', 'event']).describe(
@@ -290,8 +349,8 @@ const bookingSummary = z.looseObject({
   event_type_title: z.string().nullable(),
   duration_minutes: z.number().nullable(),
   hosts: z.array(z.string()),
-  location: z.string().nullable(),
-  meeting_url: z.string().nullable(),
+  ...locationField,
+  ...meetingFields,
   series: seriesShape
     .nullable()
     .optional()
@@ -529,14 +588,24 @@ function fieldsOf(raw: unknown): Record<string, unknown>[] {
   return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
 }
 
+/**
+ * The intake questions as an agent reads them: cleaned (`untrusted`) and
+ * capped where update_event_type caps what it takes. What a read cannot show
+ * whole is protected on the write: update_event_type keeps the stored text an
+ * agent sends back as it read it, and refuses a question edit on an event type
+ * whose questions go past these caps (`beyondRead`).
+ */
 function questionsOf(raw: unknown) {
   const fields = fieldsOf(raw);
-  return fields.slice(0, 20).map((f: Record<string, unknown>) => ({
+  return fields.slice(0, MAX_QUESTIONS).map((f: Record<string, unknown>) => ({
     name: untrusted(f['name'], 64),
     label: untrusted(f['label'], 200),
     type: untrusted(f['type'], 20),
     required: f['required'] === true,
-    options: Array.isArray(f['options']) ? (f['options'] as unknown[]).slice(0, 30).map((o) => untrusted(o, 100)) : undefined,
+    placeholder: typeof f['placeholder'] === 'string' && f['placeholder'] ? untrusted(f['placeholder'], 200) : undefined,
+    options: Array.isArray(f['options'])
+      ? (f['options'] as unknown[]).slice(0, MAX_OPTIONS).map((o) => untrusted(o, MAX_OPTION_LENGTH))
+      : undefined,
   }));
 }
 
@@ -689,10 +758,61 @@ async function summarize(deps: McpToolDeps, accountId: string, b: Booking, tz: s
     event_type_title: meta?.event_title ? untrusted(meta.event_title, 200) : null,
     duration_minutes: b.duration ?? null,
     hosts: b.hosts.map((h) => untrusted(h.name ?? h.username ?? '', 100)).filter(Boolean),
-    location: b.location ? untrusted(b.location, 300) : null,
-    meeting_url: b.meetingUrl ? untrusted(b.meetingUrl, 500) : null,
+    ...meetingOf(deps, b),
     series: hostEvent && meta.recurring_event_id ? await seriesFor(deps.db, accountId, meta) : null,
   };
+}
+
+type MeetingOut = ReturnType<typeof meetingOf>;
+const NO_MEETING: MeetingOut = { location: null, location_kind: null, meeting_url: null, meeting_url_status: 'none' };
+
+/** Where a booking happens and its video link (`meetingFields`), the same in every tool's answer. */
+function meetingOf(deps: McpToolDeps, b: Booking) {
+  return {
+    // A kind with no text of its own (a video meeting) reads as its name, as
+    // the booking page and the email show it, with the label the calendar
+    // gives at runtime (ADR 0008).
+    location: b.location
+      ? untrusted(b.location, 300)
+      : formatBookingLocation(b.locationKind, null, getMessages('en'), deps.calendar.provider.conferencingLabel),
+    // `??`: a replayed answer stored before these fields existed has neither.
+    location_kind: b.locationKind ?? null,
+    meeting_url: b.meetingUrl ? untrusted(b.meetingUrl, 500) : null,
+    meeting_url_status: b.meetingUrlStatus ?? (b.meetingUrl ? 'ready' : 'none'),
+  };
+}
+
+/**
+ * A booking just accepted, read again once its video link exists. The link
+ * comes from the calendar write the outbox runs a few seconds after the
+ * booking (ADR 0007), so the answer waits for it, as create_event does, and
+ * answers `pending` if it is still not there; `none` at once when the host
+ * has no calendar to make one.
+ */
+async function withMeetingUrl(deps: McpToolDeps, accountId: string, b: Booking): Promise<Booking> {
+  const awaits =
+    b.status === 'accepted' &&
+    !b.meetingUrl &&
+    wantsConferencingLink(b.locationKind ?? null, b.location) &&
+    deps.calendar.provider.enabled;
+  if (!awaits) return b;
+  // The host has no calendar the booking is written to: no room is ever made.
+  if (!(await loadBookingForCalendarWrite(deps.db, b.uid))?.destinationRefs.length) return { ...b, meetingUrlStatus: 'none' };
+  await waitForMeetingUrl(
+    deps,
+    () => loadBookingMeetingUrl(deps.db, b.uid),
+    async () => !(await hasPendingCalendarJob(deps.db, b.uid)),
+  );
+  return deps.calV2.bookingResponse(accountId, b.uid);
+}
+
+/** The sentence about the video link, for an answer about a booking that is on. */
+function videoLine(b: { status: string; meeting_url: string | null; meeting_url_status: string }): string {
+  if (b.status !== 'accepted' && b.status !== 'pending') return '';
+  if (b.meeting_url_status === 'ready') return ` Video: ${b.meeting_url}.`;
+  if (b.meeting_url_status === 'pending') return ' The video link is still being created; get_booking shows it in about 10 seconds, and the confirmation email carries it.';
+  if (b.meeting_url_status === 'on_confirmation') return ' The video link is created when the host confirms.';
+  return '';
 }
 
 async function seriesFor(
@@ -947,7 +1067,7 @@ const bookMeeting: ToolDef = {
   name: 'book_meeting',
   title: 'Book a meeting on a public booking link',
   description:
-    'Book one slot on a public booking link, with no sign-in. It sends the invitee a confirmation email, so it is best called once the person has agreed to the time and the details. The start is a slot returned by find_available_slots; hold_id from hold_slot books a time that was held. A pending status means the host still has to confirm.',
+    'Book one slot on a public booking link, with no sign-in. It sends the invitee a confirmation email, so it is best called once the person has agreed to the time and the details. The start is a slot returned by find_available_slots; hold_id from hold_slot books a time that was held. A pending status means the host still has to confirm. On a video meeting the answer carries the join link the invitee gets by email (booking.meeting_url, meeting_url_status), waited for a few seconds.',
   scope: null,
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -963,6 +1083,8 @@ const bookMeeting: ToolDef = {
       time_zone: z.string(),
       event_type_title: z.string(),
       host: z.string().nullable(),
+      ...locationField,
+      ...meetingFields,
     }),
     replayed: z.boolean().describe('True when this idempotency_key had already booked this exact request.'),
     next_step: z.string(),
@@ -1005,11 +1127,15 @@ const bookMeeting: ToolDef = {
     });
     if (claim.requestHash !== requestHash)
       throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
-    const answer = (data: BookMeetingData): ToolResult => ({
-      data,
-      summary: data.replayed ? `${line(data.booking)} (replay of an earlier identical call)` : line(data.booking),
-      affected: [data.booking.uid],
-    });
+    // Where it happens and its link are read now, never stored with the answer:
+    // a retry with this key gets the link that exists by then. It is the link
+    // the invitee's confirmation email carries.
+    const answer = async (data: BookMeetingData): Promise<ToolResult> => {
+      const now = await deps.calV2.bookingResponse(accountId, data.booking.uid).catch(() => null);
+      const booking = { ...data.booking, ...(now ? meetingOf(deps, await withMeetingUrl(deps, accountId, now)) : NO_MEETING) };
+      const text = line(booking) + videoLine(booking);
+      return { data: { ...data, booking }, summary: data.replayed ? `${text} (replay of an earlier identical call)` : text, affected: [booking.uid] };
+    };
     if (claim.statusCode != null && claim.statusCode < 400) return answer({ ...(claim.responseBody as BookMeetingData), replayed: true });
     const who = { name: args.attendee.name, email: args.attendee.email, timeZone: tz };
     const storedKey = `mcp:${namespaceHash}`;
@@ -1191,7 +1317,7 @@ const holdSlot: ToolDef = {
   name: 'hold_slot',
   title: 'Hold a time slot for about 10 minutes',
   description:
-    'Keep one offered slot for about 10 minutes while the details are confirmed with the person: meanwhile no slot list offers it, the MCP booking tools do not book it for anyone else (reschedule_booking does not move any booking into it), and new team bookings leave its host out (a one-host booking made straight through the REST API is not checked against holds yet). book_meeting (public link) or create_booking (event_type_id) then books it with the returned hold_id and the same start. A hold made signed in or with an API key can be used only by that same person or key; the hold_id of an anonymous hold works for whoever presents it, so it is best kept within this conversation. An unused hold just expires. One-host events only: a team event picks its host at booking time, so team events go straight to book_team_meeting. Works with no sign-in on a public booking link, or, signed in or with an API key holding bookings:write, by event_type_id.',
+    'Keep one offered slot for about 10 minutes while the details are confirmed with the person: meanwhile no slot list offers it, the MCP booking tools do not book it for anyone else (reschedule_booking does not move any booking into it), and new team bookings leave its host out (a one-host booking made straight through the REST API is not checked against holds yet). book_meeting (public link) or create_booking (event_type_id) then books it with the returned hold_id and the same start. A hold made signed in or with an API key can be used only by that same person or key; the hold_id of an anonymous hold works for whoever presents it, so it is best kept within this conversation. An unused hold just expires. A hold does not count toward the booking limits of the event type (max bookings or minutes a day or week), so it reserves no place against them: a booking with its hold_id is refused when the day or week filled up meanwhile. One-host events only: a team event picks its host at booking time, so team events go straight to book_team_meeting. Works with no sign-in on a public booking link, or, signed in or with an API key holding bookings:write, by event_type_id.',
   scope: null,
   // A public page holds like the booking page does; an event type by id is the account's own.
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
@@ -1265,6 +1391,8 @@ const holdSlot: ToolDef = {
           if (held.error === 'NOT_FOUND') throw notFound('Booking page');
           if (held.error === 'RATE_LIMITED') throw failureFor('TOO_MANY_HOLDS', held.message);
           if (held.error === 'CALENDAR_UNAVAILABLE') throw failureFor('CALENDAR_UNAVAILABLE', held.message);
+          // A full day or week: the event's booking limit says so, and no retry opens it.
+          if (BOOKING_LIMIT.test(held.message)) throw failureFor('INVALID_SLOT', held.message);
           // With an earlier attempt still open, the hold in the way is most
           // likely that attempt's own (it timed out and is still finishing).
           throw new ToolFailure(
@@ -1341,7 +1469,7 @@ const bookTeamMeeting: ToolDef = {
   name: 'book_team_meeting',
   title: 'Book a meeting with a team',
   description:
-    'Book one slot on a team event. The host is picked at booking time from those free at that moment: round-robin picks one fairly (highest priority, then the lowest load for its weight, then the least recently booked), collective books every host, fixed round-robin books the fixed hosts plus one. Returns who was assigned. It emails the invitee, so it is best called once the person has agreed. The start comes from find_team_slots. Works with no sign-in on a public team link, or, signed in or with an API key holding bookings:write, by event_type_id.',
+    'Book one slot on a team event. The host is picked at booking time from those free at that moment: round-robin picks one fairly (highest priority, then the lowest load for its weight, then the least recently booked), collective books every host, fixed round-robin books the fixed hosts plus one. Returns who was assigned. It emails the invitee, so it is best called once the person has agreed. The start comes from find_team_slots. Works with no sign-in on a public team link, or, signed in or with an API key holding bookings:write, by event_type_id. On a video meeting the answer carries the join link, as book_meeting does.',
   scope: null,
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
   write: true,
@@ -1357,6 +1485,8 @@ const bookTeamMeeting: ToolDef = {
       end_utc: z.string(),
       time_zone: z.string(),
       event_type_title: z.string(),
+      ...locationField,
+      ...meetingFields,
     }),
     team: teamShape,
     assigned_hosts: z.array(z.string()).describe('Display names of the host(s) the booking was assigned to.'),
@@ -1365,7 +1495,7 @@ const bookTeamMeeting: ToolDef = {
   async run(args: z.infer<typeof bookTeamInput>, call, deps) {
     let accountId: string;
     let resolved: Resolved;
-    let booking: { uid: string; status: string; start: string; end: string; start_utc: string; end_utc: string; time_zone: string; event_type_title: string };
+    let booking: { uid: string; status: string; start: string; end: string; start_utc: string; end_utc: string; time_zone: string; event_type_title: string } & MeetingOut;
     let replayed = false;
     if (args.event_type_id) {
       const p = requireScope(call, 'bookings:write');
@@ -1393,6 +1523,8 @@ const bookTeamMeeting: ToolDef = {
         )
         .catch(async (error: unknown) => withMissing(toFailure(error), resolved.eventType.booking_fields, args.answers));
       const sum = await summarize(deps, accountId, b, args.attendee.time_zone);
+      // Read now, so a retry with this key also gets the link that exists by then.
+      const now = await withMeetingUrl(deps, accountId, await deps.calV2.bookingResponse(accountId, b.uid));
       booking = {
         uid: sum.uid,
         status: sum.status,
@@ -1402,6 +1534,7 @@ const bookTeamMeeting: ToolDef = {
         end_utc: sum.end_utc,
         time_zone: sum.time_zone,
         event_type_title: sum.event_type_title ?? untrusted(resolved.eventType.title, 200),
+        ...meetingOf(deps, now),
       };
     } else {
       const { page, ...target } = await resolveTeamPage(deps, teamPageFrom(args));
@@ -1422,7 +1555,8 @@ const bookTeamMeeting: ToolDef = {
         call,
         deps,
       );
-      const b = (done.data as BookMeetingData).booking;
+      // book_meeting already waited for the link: no second wait.
+      const b = (done.data as BookMeetingData & { booking: MeetingOut }).booking;
       replayed = (done.data as BookMeetingData).replayed;
       booking = {
         uid: b.uid,
@@ -1433,6 +1567,10 @@ const bookTeamMeeting: ToolDef = {
         end_utc: b.end_utc,
         time_zone: b.time_zone,
         event_type_title: b.event_type_title,
+        location: b.location,
+        location_kind: b.location_kind,
+        meeting_url: b.meeting_url,
+        meeting_url_status: b.meeting_url_status,
       };
     }
     const assigned = (await deps.calV2.bookingResponse(accountId, booking.uid)).hosts
@@ -1448,7 +1586,7 @@ const bookTeamMeeting: ToolDef = {
           ? 'This request had already been booked; nothing was sent again.'
           : 'Booked. The invitee was emailed a confirmation with a link to reschedule or cancel.',
       },
-      summary: `${line(booking)} Assigned to ${assigned.join(', ') || 'the team'}.${replayed ? ' (replay of an earlier identical call)' : ''}`,
+      summary: `${line(booking)}${videoLine(booking)} Assigned to ${assigned.join(', ') || 'the team'}.${replayed ? ' (replay of an earlier identical call)' : ''}`,
       affected: [booking.uid],
     };
   },
@@ -1578,6 +1716,7 @@ const listEventTypes: ToolDef = {
         questions: z.array(
           z.looseObject({ name: z.string(), label: z.string(), type: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }),
         ),
+        revision: z.string().describe('Changes whenever an editable field does; update_event_type takes it as if_revision.'),
       }),
     ),
     count: z.number(),
@@ -1604,6 +1743,7 @@ const listEventTypes: ToolDef = {
         : null;
     const rows = own ? inTeam.filter((r) => own.has(r.daptaId)) : inTeam;
     const truncated = rows.length > 100;
+    const revisions = await revisionsOf(deps.db, p.accountId);
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
       title: untrusted(r.title, 200),
@@ -1616,6 +1756,7 @@ const listEventTypes: ToolDef = {
       scheduling_type: r.schedulingType,
       booking_page_url: pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug),
       questions: questionsOf(r.bookingFields),
+      revision: revisions.get(r.daptaId) ?? '',
     }));
     return { data: { event_types: items, count: items.length, truncated }, summary: `${items.length} event type(s)${truncated ? ' (more exist: truncated)' : ''}: ${items.map((i) => i.title).slice(0, 10).join(', ')}.` };
   },
@@ -1830,6 +1971,147 @@ const getScheduleTool: ToolDef = {
   },
 };
 
+/** One event type as the editor shows it: get_event_type, and what the event-type write tools return. */
+const eventTypeShape = z.looseObject({
+  id: z.string(),
+  title: z.string(),
+  slug: z.string(),
+  description: z.string().nullable(),
+  kind: openEnum(['personal', 'team']),
+  member_id: z.string().nullable(),
+  team_id: z.string().nullable(),
+  duration_minutes: z.number(),
+  hidden: z.boolean(),
+  location: z.looseObject({ kind: z.string(), detail: z.string().nullable() }).nullable(),
+  schedule_id: z.string().nullable().describe("The schedule it follows. Null with no custom_hours: the host's working hours."),
+  custom_hours: z
+    .looseObject({ time_zone: z.string(), ranges: z.array(z.looseObject({ days: weekdays, start: z.string(), end: z.string() })) })
+    .nullable(),
+  scheduling_type: z.string().nullable(),
+  minimum_notice_minutes: z.number(),
+  booking_window_days: z.number().nullable().describe('How many days ahead it can be booked. Null: no limit.'),
+  max_bookings_per_day: z.number().nullable().describe('Most bookings of this event a day holds. Null: no limit.'),
+  max_bookings_per_week: z.number().nullable().describe('Most bookings of this event a week (Monday to Sunday) holds. Null: no limit.'),
+  max_minutes_per_day: z.number().nullable().describe('Most minutes of bookings of this event a day holds. Null: no limit.'),
+  max_minutes_per_week: z.number().nullable().describe('Most minutes of bookings of this event a week holds. Null: no limit.'),
+  buffer_before_minutes: z.number(),
+  buffer_after_minutes: z.number(),
+  slot_interval_minutes: z.number().nullable(),
+  requires_confirmation: z.boolean(),
+  prevent_duplicate_bookings: z.boolean(),
+  seats_per_slot: z.number().nullable(),
+  questions: z.array(
+    z.looseObject({ name: z.string(), label: z.string(), type: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }),
+  ),
+  hosts: z.array(
+    z.looseObject({ member_id: z.string(), is_fixed: z.boolean(), priority: z.number().nullable(), weight: z.number().nullable() }),
+  ),
+  booking_page_url: z.string().nullable().describe('Null for a hidden event type, which has no public page.'),
+  revision: z.string().describe('Changes whenever an editable field does; update_event_type takes it as if_revision.'),
+});
+
+/** The editable fields of a stored event type, for its revision. */
+function revisionOf(
+  et: Pick<
+    EventTypeView,
+    'title' | 'description' | 'lengthMinutes' | 'location' | 'bookingFields' | 'hidden' | 'minimumBookingNotice' | 'requiresConfirmation' | 'bookingWindowDays'
+  >,
+): string {
+  return eventTypeRevision({
+    title: et.title,
+    description: et.description,
+    lengthMinutes: et.lengthMinutes,
+    location: et.location,
+    bookingFields: et.bookingFields,
+    hidden: et.hidden,
+    minimumBookingNotice: et.minimumBookingNotice,
+    requiresConfirmation: et.requiresConfirmation,
+    bookingWindowDays: et.bookingWindowDays,
+  });
+}
+
+/** Every event type's revision in one account, read the way `getEventTypeById` reads each field. */
+async function revisionsOf(db: Db, accountId: string): Promise<Map<string, string>> {
+  const rows = await db.all<{
+    id: string;
+    title: string;
+    description: string | null;
+    length_minutes: number;
+    locations: unknown;
+    booking_fields: unknown;
+    hidden: number | boolean;
+    minimum_booking_notice: number;
+    requires_confirmation: number | boolean;
+    booking_window_days: number | null;
+  }>(
+    sql`SELECT id, title, description, length_minutes, locations, booking_fields, hidden, minimum_booking_notice,
+               requires_confirmation, booking_window_days
+        FROM event_type WHERE account_id = ${accountId}`,
+  );
+  return new Map(
+    rows.map((r) => [
+      r.id,
+      revisionOf({
+        title: r.title,
+        description: r.description,
+        lengthMinutes: r.length_minutes,
+        location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
+        bookingFields: parseJsonColumn<unknown[]>(r.booking_fields, []),
+        hidden: !!r.hidden,
+        minimumBookingNotice: r.minimum_booking_notice,
+        requiresConfirmation: !!r.requires_confirmation,
+        bookingWindowDays: r.booking_window_days ?? null,
+      }),
+    ]),
+  );
+}
+
+/** One event type as `eventTypeShape`, its public link only when it is visible. */
+async function eventTypeOut(deps: McpToolDeps, p: MachinePrincipal, et: EventTypeView): Promise<z.infer<typeof eventTypeShape>> {
+  let bookingPageUrl: string | null = null;
+  if (!et.hidden) {
+    const code = await canonicalCode(deps.db, p.accountId);
+    const r = (await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds)).find((x) => x.daptaId === et.id);
+    if (r) {
+      const kind = r.type === 'team' ? 'team' : 'personal';
+      bookingPageUrl = pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, kind, (kind === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
+    }
+  }
+  return {
+    id: et.id,
+    title: untrusted(et.title, 200),
+    slug: et.slug,
+    description: et.description ? untrusted(et.description, 2000) : null,
+    kind: (et.teamId ? 'team' : 'personal') as 'team' | 'personal',
+    member_id: et.memberId,
+    team_id: et.teamId,
+    duration_minutes: et.lengthMinutes,
+    hidden: et.hidden,
+    location: et.location ? { kind: et.location.kind, detail: et.location.detail ? untrusted(et.location.detail, 300) : null } : null,
+    schedule_id: et.scheduleId,
+    custom_hours: et.customHours
+      ? { time_zone: et.customHours.timeZone, ranges: et.customHours.ranges.map((r) => ({ days: r.days, start: r.start, end: r.end })) }
+      : null,
+    scheduling_type: et.schedulingType,
+    minimum_notice_minutes: et.minimumBookingNotice,
+    booking_window_days: et.bookingWindowDays,
+    max_bookings_per_day: et.maxBookingsPerDay,
+    max_bookings_per_week: et.maxBookingsPerWeek,
+    max_minutes_per_day: et.maxMinutesPerDay,
+    max_minutes_per_week: et.maxMinutesPerWeek,
+    buffer_before_minutes: et.beforeEventBuffer,
+    buffer_after_minutes: et.afterEventBuffer,
+    slot_interval_minutes: et.slotInterval,
+    requires_confirmation: et.requiresConfirmation,
+    prevent_duplicate_bookings: et.preventDuplicateBookings,
+    seats_per_slot: et.seatsPerTimeSlot,
+    questions: questionsOf(et.bookingFields),
+    hosts: et.hosts.map((h) => ({ member_id: h.memberId, is_fixed: h.isFixed, priority: h.priority, weight: h.weight })),
+    booking_page_url: bookingPageUrl,
+    revision: revisionOf(et),
+  };
+}
+
 const getEventTypeInput = z.object({ event_type_id: z.string().min(1).max(64).describe('From list_event_types.') });
 const getEventTypeTool: ToolDef = {
   name: 'get_event_type',
@@ -1840,40 +2122,7 @@ const getEventTypeTool: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: getEventTypeInput,
-  output: z.looseObject({
-    event_type: z.looseObject({
-      id: z.string(),
-      title: z.string(),
-      slug: z.string(),
-      description: z.string().nullable(),
-      kind: openEnum(['personal', 'team']),
-      member_id: z.string().nullable(),
-      team_id: z.string().nullable(),
-      duration_minutes: z.number(),
-      hidden: z.boolean(),
-      location: z.looseObject({ kind: z.string(), detail: z.string().nullable() }).nullable(),
-      schedule_id: z.string().nullable().describe("The schedule it follows. Null with no custom_hours: the host's working hours."),
-      custom_hours: z
-        .looseObject({ time_zone: z.string(), ranges: z.array(z.looseObject({ days: weekdays, start: z.string(), end: z.string() })) })
-        .nullable(),
-      scheduling_type: z.string().nullable(),
-      minimum_notice_minutes: z.number(),
-      booking_window_days: z.number().nullable().describe('How many days ahead it can be booked. Null: no limit.'),
-      buffer_before_minutes: z.number(),
-      buffer_after_minutes: z.number(),
-      slot_interval_minutes: z.number().nullable(),
-      requires_confirmation: z.boolean(),
-      prevent_duplicate_bookings: z.boolean(),
-      seats_per_slot: z.number().nullable(),
-      questions: z.array(
-        z.looseObject({ name: z.string(), label: z.string(), type: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }),
-      ),
-      hosts: z.array(
-        z.looseObject({ member_id: z.string(), is_fixed: z.boolean(), priority: z.number().nullable(), weight: z.number().nullable() }),
-      ),
-      booking_page_url: z.string().nullable().describe('Null for a hidden event type, which has no public page.'),
-    }),
-  }),
+  output: z.looseObject({ event_type: eventTypeShape }),
   async run(args: z.infer<typeof getEventTypeInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
     if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
@@ -1882,47 +2131,10 @@ const getEventTypeTool: ToolDef = {
     if (!et) throw notFound('Event type');
     // The dashboard's single read: the event type's owner or an admin, by the member's current role.
     if (me) assertOwnsOrAdmin(me, et.memberId);
-    let bookingPageUrl: string | null = null;
-    if (!et.hidden) {
-      const code = await canonicalCode(deps.db, p.accountId);
-      const r = (await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds)).find((x) => x.daptaId === et.id);
-      if (r) {
-        const kind = r.type === 'team' ? 'team' : 'personal';
-        bookingPageUrl = pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, kind, (kind === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
-      }
-    }
-    const title = untrusted(et.title, 200);
-    const event_type = {
-      id: et.id,
-      title,
-      slug: et.slug,
-      description: et.description ? untrusted(et.description, 2000) : null,
-      kind: (et.teamId ? 'team' : 'personal') as 'team' | 'personal',
-      member_id: et.memberId,
-      team_id: et.teamId,
-      duration_minutes: et.lengthMinutes,
-      hidden: et.hidden,
-      location: et.location ? { kind: et.location.kind, detail: et.location.detail ? untrusted(et.location.detail, 300) : null } : null,
-      schedule_id: et.scheduleId,
-      custom_hours: et.customHours
-        ? { time_zone: et.customHours.timeZone, ranges: et.customHours.ranges.map((r) => ({ days: r.days, start: r.start, end: r.end })) }
-        : null,
-      scheduling_type: et.schedulingType,
-      minimum_notice_minutes: et.minimumBookingNotice,
-      booking_window_days: et.bookingWindowDays,
-      buffer_before_minutes: et.beforeEventBuffer,
-      buffer_after_minutes: et.afterEventBuffer,
-      slot_interval_minutes: et.slotInterval,
-      requires_confirmation: et.requiresConfirmation,
-      prevent_duplicate_bookings: et.preventDuplicateBookings,
-      seats_per_slot: et.seatsPerTimeSlot,
-      questions: questionsOf(et.bookingFields),
-      hosts: et.hosts.map((h) => ({ member_id: h.memberId, is_fixed: h.isFixed, priority: h.priority, weight: h.weight })),
-      booking_page_url: bookingPageUrl,
-    };
+    const event_type = await eventTypeOut(deps, p, et);
     return {
       data: { event_type },
-      summary: `"${title}": ${et.lengthMinutes} min, ${event_type.kind}${et.hidden ? ', hidden' : ''}${et.requiresConfirmation ? ', needs confirmation' : ''}.`,
+      summary: `"${event_type.title}": ${et.lengthMinutes} min, ${event_type.kind}${et.hidden ? ', hidden' : ''}${et.requiresConfirmation ? ', needs confirmation' : ''}.`,
     };
   },
 };
@@ -2569,6 +2781,7 @@ const bookingRows = z.looseObject({
       attendee_count: z.number(),
       rescheduled_from_uid: z.string().nullable(),
       rescheduled_to_uid: z.string().nullable(),
+      ...meetingFields,
     }),
   ),
   next_cursor: z.string().nullable(),
@@ -2659,6 +2872,9 @@ async function bookingPage(
     attendee_count: b.attendeeCount,
     rescheduled_from_uid: b.rescheduledFromUid,
     rescheduled_to_uid: b.rescheduledToUid,
+    location_kind: b.locationKind,
+    meeting_url: b.meetingUrl ? untrusted(b.meetingUrl, 500) : null,
+    meeting_url_status: b.meetingUrlStatus,
   }));
   return {
     data: {
@@ -2675,7 +2891,7 @@ const listBookings: ToolDef = {
   name: 'list_bookings',
   title: 'List bookings',
   description:
-    'List bookings with minimal fields (no notes, answers or names). Needs scope bookings:read and respects an API key\'s event-type allowlist. get_booking returns one booking\'s details. To learn about new or changed bookings, pass updated_since (the next_updated_since of your previous call) instead of re-reading the whole list; a booking moved with reschedule_booking shows as the old one cancelled with rescheduled_to_uid and the new one with rescheduled_from_uid; to be told as they happen, without polling, a workspace admin adds a webhook in the web app (API and webhooks, then Webhooks). Events made with create_event are listed too, with kind event and their own title (webhooks do not report them).',
+    'List bookings with minimal fields (no notes, answers or names), each with how the meeting happens (location_kind) and its video link once it exists (meeting_url). Needs scope bookings:read and respects an API key\'s event-type allowlist. get_booking returns one booking\'s details. To learn about new or changed bookings, pass updated_since (the next_updated_since of your previous call) instead of re-reading the whole list; a booking moved with reschedule_booking shows as the old one cancelled with rescheduled_to_uid and the new one with rescheduled_from_uid; to be told as they happen, without polling, a workspace admin adds a webhook in the web app (API and webhooks, then Webhooks). Events made with create_event are listed too, with kind event and their own title (webhooks do not report them).',
   scope: 'bookings:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2776,7 +2992,7 @@ const getBooking: ToolDef = {
           utm: campaignOut(b.utm),
         },
       },
-      summary: line(summary),
+      summary: line(summary) + videoLine(summary),
       affected: [b.uid],
     };
   },
@@ -2802,7 +3018,7 @@ const createBooking: ToolDef = {
   name: 'create_booking',
   title: 'Create a booking',
   description:
-    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee and the host (guests are invited by the host\'s connected calendar, not emailed by dCal), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held.',
+    'Book a slot on any event type of the workspace. Needs scope bookings:write. It emails the invitee and the host (guests are invited by the host\'s connected calendar, not emailed by dCal), so it is best called once the person has agreed. The start is an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, and find_available_slots then lists the times still open. hold_id from hold_slot books a time that was held. On a video meeting it waits a few seconds for the link (booking.meeting_url, meeting_url_status).',
   scope: 'bookings:write',
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -2837,8 +3053,8 @@ const createBooking: ToolDef = {
       const et = failure.code === 'BOOKING_FIELDS_INVALID' ? await deps.calV2.resolveEvent(p.accountId, { eventTypeId: args.event_type_id }).catch(() => null) : null;
       return withMissing(failure, et?.eventType.booking_fields, args.answers);
     });
-    const summary = await summarize(deps, p.accountId, b, args.attendee.time_zone);
-    return { data: { booking: summary }, summary: line(summary), affected: [b.uid] };
+    const summary = await summarize(deps, p.accountId, await withMeetingUrl(deps, p.accountId, b), args.attendee.time_zone);
+    return { data: { booking: summary }, summary: line(summary) + videoLine(summary), affected: [b.uid] };
   },
 };
 
@@ -3007,8 +3223,8 @@ const rescheduleBooking: ToolDef = {
       p.eventTypeIds,
       { refuseHeld: true },
     );
-    const summary = await summarize(deps, p.accountId, b, zone);
-    return { data: { booking: summary, previous_uid: args.booking_uid }, summary: `Moved. ${line(summary)}`, affected: [args.booking_uid, b.uid] };
+    const summary = await summarize(deps, p.accountId, await withMeetingUrl(deps, p.accountId, b), zone);
+    return { data: { booking: summary, previous_uid: args.booking_uid }, summary: `Moved. ${line(summary)}${videoLine(summary)}`, affected: [args.booking_uid, b.uid] };
   },
 };
 
@@ -3214,16 +3430,28 @@ async function eventHost(
 export const MEETING_URL_WAIT_MS = 12_000;
 const MEETING_URL_POLL_MS = 400;
 
+/** How long a booking's wait trusts "no calendar write queued": the write is queued right after the booking commits. */
+const MEETING_URL_QUEUE_GRACE_MS = 1_000;
+
 /**
  * Wait, briefly, for the video link the calendar write creates. The write runs
  * in the outbox (never inline, invariant 5); a host event's write is due at
  * once, so the link usually lands within a few seconds. Null when it has not.
+ * `over`, when given, says the write has ended (or was never queued): a link
+ * that is not there by then is not coming, so the wait stops.
  */
-async function waitForMeetingUrl(deps: McpToolDeps, read: () => Promise<string | null>): Promise<string | null> {
-  const until = Date.now() + (deps.meetingUrlWaitMs ?? MEETING_URL_WAIT_MS);
+async function waitForMeetingUrl(
+  deps: McpToolDeps,
+  read: () => Promise<string | null>,
+  over?: () => Promise<boolean>,
+): Promise<string | null> {
+  const started = Date.now();
+  const until = started + (deps.meetingUrlWaitMs ?? MEETING_URL_WAIT_MS);
   for (;;) {
     const url = await read();
     if (url || Date.now() >= until) return url;
+    // Read once more: the write stores the link before it ends.
+    if (over && Date.now() - started >= MEETING_URL_QUEUE_GRACE_MS && (await over())) return read();
     await new Promise((resolve) => setTimeout(resolve, MEETING_URL_POLL_MS));
   }
 }
@@ -3856,6 +4084,398 @@ const checkAttendeeAvailability: ToolDef = {
   },
 };
 
+// --- Event-type edits (ADR 0013) -------------------------------------------------
+//
+// The safe part of an event type: what a booking page asks and shows, never
+// where its data goes (redirect, tracking, CRM mappings, reminders), who hosts
+// it or its link name. Every write goes through the dashboard's own checks
+// (`event-type-write.ts`) after the MCP guard (`event-type-guard.ts`), and the
+// tools exist only while MCP_EVENT_TYPE_WRITE_ENABLED is on.
+
+const eventTypeWritesOn = (env: ToolSwitches): boolean => env.MCP_EVENT_TYPE_WRITE_ENABLED === true;
+
+const questionInput = z.strictObject({
+  name: z
+    .string()
+    .min(1)
+    .max(64)
+    .describe("The key its answers are stored under, e.g. budget: lowercase letters, digits and _. Keep a question's name to keep its answers together."),
+  label: z.string().trim().min(1).max(200).describe('What the booking page asks.'),
+  type: z.enum(MCP_QUESTION_TYPES),
+  required: z.boolean().optional().describe('Defaults to false.'),
+  placeholder: z.string().max(200).optional(),
+  options: z
+    .array(z.string().trim().min(1).max(MAX_OPTION_LENGTH))
+    .max(MAX_OPTIONS)
+    .optional()
+    .describe(`select and checkbox only: the choices, 1 to ${MAX_OPTIONS}.`),
+});
+
+const editableFields = {
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().max(2000).nullable().optional().describe('Shown on the booking page. Null clears it.'),
+  length_minutes: z.number().int().min(1).max(1440).optional().describe('How long the meeting is, in minutes.'),
+  location: z
+    .strictObject({
+      kind: z.enum(LOCATION_KINDS),
+      detail: z.string().max(LOCATION_DETAIL_MAX).nullable().optional(),
+    })
+    .nullable()
+    .optional()
+    .describe('Where it happens. conferencing: the calendar makes a meeting link (no detail). in_person: an address. phone: a phone number. custom: a short text. Null clears it.'),
+  questions: z
+    .array(questionInput)
+    .max(MAX_QUESTIONS)
+    .optional()
+    .describe(
+      `The intake questions, in order, ${MAX_QUESTIONS} at most. The list replaces the current one, so it needs if_revision. Questions of type guests stay as they are and are left out of this list.`,
+    ),
+  hidden: z.boolean().optional().describe('True takes it off the public pages; false publishes it.'),
+  minimum_notice_minutes: z.number().int().min(0).max(525_600).optional().describe('How long before a meeting it can still be booked.'),
+  requires_confirmation: z.boolean().optional().describe('True: each booking waits for the host to confirm or decline it.'),
+  booking_window_days: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_BOOKING_WINDOW_DAYS)
+    .nullable()
+    .optional()
+    .describe(`How many days ahead it can be booked, today being day 0 (1 to ${MAX_BOOKING_WINDOW_DAYS}). Null: no limit.`),
+};
+
+/** The editable fields by their MCP names, in the order `changed` lists them. */
+const EDITABLE = [
+  'title',
+  'description',
+  'length_minutes',
+  'location',
+  'questions',
+  'hidden',
+  'minimum_notice_minutes',
+  'requires_confirmation',
+  'booking_window_days',
+] as const;
+type Editable = (typeof EDITABLE)[number];
+type EditArgs = { [K in Editable]?: z.infer<(typeof editableFields)[K]> };
+
+const sentFields = (args: EditArgs): Editable[] => EDITABLE.filter((f) => args[f] !== undefined);
+
+/** What each editable field reads as on a stored event type, to tell what a write changed. */
+const STORED: Record<Editable, (et: EventTypeView) => unknown> = {
+  title: (et) => et.title,
+  description: (et) => et.description,
+  length_minutes: (et) => et.lengthMinutes,
+  location: (et) => et.location,
+  questions: (et) => et.bookingFields,
+  hidden: (et) => et.hidden,
+  minimum_notice_minutes: (et) => et.minimumBookingNotice,
+  requires_confirmation: (et) => et.requiresConfirmation,
+  booking_window_days: (et) => et.bookingWindowDays,
+};
+const changedFields = (before: EventTypeView, after: EventTypeView): Editable[] =>
+  EDITABLE.filter((f) => JSON.stringify(STORED[f](before)) !== JSON.stringify(STORED[f](after)));
+
+function refuse(problem: GuardProblem | null): void {
+  if (!problem) return;
+  const hint =
+    problem.code === 'URL_NOT_ALLOWED'
+      ? 'Leave the link out; links are kept out of what an agent writes. A person can add one in the dashboard.'
+      : problem.code === 'CRM_MAPPED_QUESTION'
+        ? 'Keep that question, or ask the person to change the CRM mapping in the dashboard first.'
+        : undefined;
+  // Every refusal names its field, as a schema error does (`questions[2].name: ...`).
+  const message = problem.message.startsWith(problem.field) ? problem.message : `${problem.field}: ${problem.message}`;
+  throw new ToolFailure(problem.code, message, hint);
+}
+
+/**
+ * The questions as the event type stores them. A phone question keeps the
+ * country its field starts on, and questions of type guests, which these
+ * tools neither add nor take, keep their place.
+ */
+function bookingFieldsFrom(questions: readonly QuestionEdit[], before: readonly Record<string, unknown>[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = questions.map((q) => {
+    const was = before.find((b) => b['name'] === q.name && b['type'] === q.type);
+    return {
+      name: q.name,
+      label: q.label,
+      type: q.type,
+      required: q.required ?? false,
+      ...(q.placeholder ? { placeholder: q.placeholder } : {}),
+      ...(q.type === 'select' || q.type === 'checkbox' ? { options: q.options ?? [] } : {}),
+      ...(q.type === 'phone' && typeof was?.['defaultCountry'] === 'string' ? { defaultCountry: was['defaultCountry'] } : {}),
+    };
+  });
+  before.forEach((b, i) => {
+    if (b['type'] === 'guests') out.splice(Math.min(i, out.length), 0, b);
+  });
+  return out;
+}
+
+/** A stored question a read shows cleaned or cut (`questionsOf`), whose text an edit could not send back. */
+function beyondRead(b: Record<string, unknown>): boolean {
+  const long = (v: unknown, max: number) => typeof v === 'string' && v.length > max;
+  const options = Array.isArray(b['options']) ? (b['options'] as unknown[]) : [];
+  return long(b['name'], 64) || long(b['label'], 200) || long(b['placeholder'], 200) || options.length > MAX_OPTIONS || options.some((o) => long(o, MAX_OPTION_LENGTH));
+}
+
+/**
+ * The questions with the host's stored text kept: a label, placeholder or
+ * option an agent sends back exactly as a read showed it (`untrusted`) is the
+ * stored one, markup and all, and is not checked again (`trusted`).
+ */
+function keepStoredText(questions: readonly QuestionEdit[], before: readonly Record<string, unknown>[]) {
+  const trusted = new Set<string>();
+  const kept = questions.map((q, i) => {
+    const was = before.find((b) => b['name'] === q.name && b['type'] === q.type);
+    if (!was) return q;
+    const shown = (v: unknown, max: number) => (typeof v === 'string' && v ? untrusted(v, max) : undefined);
+    const keep = <T>(field: string, incoming: T, stored: unknown, max: number): T | string => {
+      if (incoming === undefined || incoming !== shown(stored, max)) return incoming;
+      trusted.add(`questions[${i}].${field}`);
+      return stored as string;
+    };
+    const stored = Array.isArray(was['options']) ? (was['options'] as unknown[]) : [];
+    return {
+      ...q,
+      label: keep('label', q.label, was['label'], 200),
+      placeholder: keep('placeholder', q.placeholder, was['placeholder'], 200),
+      options: q.options?.map((o, j) => {
+        const match = stored.find((so) => shown(so, MAX_OPTION_LENGTH) === o);
+        if (match === undefined) return o;
+        trusted.add(`questions[${i}].options[${j}]`);
+        return String(match);
+      }),
+    } as QuestionEdit;
+  });
+  return { questions: kept, trusted };
+}
+
+/** The fields the call sent, as the event-type contract names them. */
+function contractFields(args: EditArgs, bookingFields: Record<string, unknown>[] | undefined): Partial<EventTypeInput> {
+  const location =
+    args.location === undefined
+      ? undefined
+      : args.location && { kind: args.location.kind, detail: args.location.kind === 'conferencing' ? null : args.location.detail?.trim() || null };
+  return {
+    title: args.title,
+    description: args.description,
+    lengthMinutes: args.length_minutes,
+    location,
+    bookingFields: bookingFields as EventTypeInput['bookingFields'],
+    hidden: args.hidden,
+    minimumBookingNotice: args.minimum_notice_minutes,
+    requiresConfirmation: args.requires_confirmation,
+    bookingWindowDays: args.booking_window_days,
+  };
+}
+
+/**
+ * Who writes: the member a sign-in or connection acts as, with the role the
+ * account gives them now; for an API key, which belongs to the workspace,
+ * its oldest active owner (the one whoami names).
+ */
+async function writerFor(db: Db, p: MachinePrincipal): Promise<EventTypeWriter> {
+  const row = p.memberId
+    ? await db.get<{ id: string; role: EventTypeWriter['role'] }>(
+        sql`SELECT id, role FROM member WHERE id = ${p.memberId} AND account_id = ${p.accountId} AND status = 'active' LIMIT 1`,
+      )
+    : await db.get<{ id: string; role: EventTypeWriter['role'] }>(
+        sql`SELECT id, role FROM member WHERE account_id = ${p.accountId} AND role = 'owner' AND status = 'active'
+            ORDER BY created_at ASC, id ASC LIMIT 1`,
+      );
+  if (!row) throw notFound('Host');
+  return { accountId: p.accountId, memberId: row.id, role: row.role };
+}
+
+function written(result: { ok: true; value: EventTypeView } | { ok: false; reason: string; message?: string }): EventTypeView {
+  if (result.ok) return result.value;
+  if (result.reason === 'NOT_FOUND') throw notFound('Event type');
+  throw new ToolFailure(result.reason, result.message ?? 'The event type could not be saved.');
+}
+
+/** A save that makes an event type visible is a publish, as on the dashboard. */
+function published(deps: McpToolDeps, writer: EventTypeWriter, et: EventTypeView): void {
+  void deps.analytics?.hostEvent(
+    'event_type_published',
+    { accountId: writer.accountId, memberId: writer.memberId },
+    { source: 'mcp', is_team: Boolean(et.teamId), requires_confirmation: et.requiresConfirmation },
+  );
+}
+
+const eventTypeWriteOutput = z.looseObject({
+  event_type: eventTypeShape,
+  changed: z.array(z.string()).describe('The fields this call changed, by name.'),
+});
+
+const updateEventTypeInput = z.strictObject({
+  event_type_id: z.string().min(1).max(64).describe('From list_event_types or get_event_type.'),
+  if_revision: z
+    .string()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe('The revision get_event_type or list_event_types returned. Needed with questions; a stale one answers CONFLICT and changes nothing.'),
+  ...editableFields,
+  idempotency_key: idempotencyKey,
+});
+const updateEventTypeTool: ToolDef = {
+  name: 'update_event_type',
+  title: 'Change an event type',
+  description:
+    'Change the safe settings of one event type: title, description, length, location, intake questions, whether it is hidden, the minimum notice, whether bookings wait for the host to confirm, and how many days ahead it can be booked. Fields left out stay as they are. questions replaces the whole list in order, so it needs if_revision, the revision get_event_type returned; a stale one answers CONFLICT and changes nothing. Removing a question takes it off the booking page, so it is best confirmed with the person first. A question the CRM mapping reads keeps its name and type. Text takes no links or web addresses (URL_NOT_ALLOWED names the field) and no invisible characters. The redirect after booking, tracking, reminders, CRM mappings, hosts, team and link name are changed in the dashboard only. Needs scope event-types:write and respects the key\'s event-type allowlist. Returns the event type as get_event_type does, with its new revision and the names of the fields that changed.',
+  scope: 'event-types:write',
+  write: true,
+  enabled: eventTypeWritesOn,
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  input: updateEventTypeInput,
+  output: eventTypeWriteOutput,
+  async run(args: z.infer<typeof updateEventTypeInput>, call, deps) {
+    const p = requireScope(call, 'event-types:write');
+    if (p.eventTypeIds && !p.eventTypeIds.includes(args.event_type_id)) throw notFound('Event type');
+    const existing = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
+    if (!existing) throw notFound('Event type');
+    if (sentFields(args).length === 0) throw new ToolFailure('INVALID_ARGUMENT', 'Nothing to change.', `Pass at least one of: ${EDITABLE.join(', ')}.`);
+    if (args.questions && !args.if_revision)
+      throw new ToolFailure(
+        'INVALID_ARGUMENT',
+        'questions replaces the whole list, so it needs if_revision.',
+        'Read the event type with get_event_type and pass its revision as if_revision.',
+      );
+    const writer = await writerFor(deps.db, p);
+    const { idempotency_key: key, ...request } = args;
+    const { data, replayed } = await keyedWrite(deps, call, p.accountId, 'update_event_type', key, request, async () => {
+      // Read again and compared here, just before the write and after a stored
+      // result would have been answered: a retry of a call that succeeded
+      // finds its own result, not a stale revision. Not under a lock.
+      const current = await getEventTypeById(deps.db, p.accountId, args.event_type_id);
+      if (!current) throw notFound('Event type');
+      if (args.if_revision && args.if_revision !== revisionOf(current))
+        throw new ToolFailure(
+          'CONFLICT',
+          'The event type changed since that revision was read, so nothing was changed.',
+          'Read it again with get_event_type, then retry against the new revision with a NEW idempotency_key.',
+        );
+      const before = fieldsOf(current.bookingFields);
+      const shown = before.filter((b) => b['type'] !== 'guests');
+      if (args.questions && (shown.length > MAX_QUESTIONS || shown.some(beyondRead)))
+        throw new ToolFailure(
+          'INVALID_ARGUMENT',
+          `This event type has questions a read cannot show whole (more than ${MAX_QUESTIONS} questions or ${MAX_OPTIONS} options, or text over 200 characters).`,
+          'Its questions are edited in the dashboard.',
+        );
+      const { questions, trusted } = args.questions ? keepStoredText(args.questions, before) : { questions: undefined, trusted: undefined };
+      const keptNames = before.filter((b) => b['type'] === 'guests').map((b) => String(b['name']));
+      refuse(checkEventTypeEdit({ ...args, questions }, { existingQuestionNames: before.map((b) => String(b['name'])), keptNames, trusted }));
+      const bookingFields = questions ? bookingFieldsFrom(questions, before) : undefined;
+      if (bookingFields) {
+        refuse(mappedQuestionProblem(current.crmPropertyMappings, before, bookingFields));
+        await assertMappingsAreDeliverable(deps, p.accountId, current.crmPropertyMappings, bookingFields as never);
+      }
+      const input = eventTypeInputSchema.partial().parse(contractFields(args, bookingFields));
+      const updated = written(await updateEventTypeChecked(deps, writer, current, input));
+      if (current.hidden && !updated.hidden) published(deps, writer, updated);
+      return { event_type: await eventTypeOut(deps, p, updated), changed: changedFields(current, updated) };
+    });
+    const what = data.changed.length ? `changed ${data.changed.join(', ')}` : 'nothing to change';
+    return {
+      data,
+      summary: `"${data.event_type.title}": ${what}${replayed ? ' (replay of an earlier identical call)' : ''}. Revision ${data.event_type.revision}.`,
+      affected: [existing.id],
+      changed: replayed ? [] : data.changed,
+    };
+  },
+};
+
+const createEventTypeInput = z.strictObject({
+  ...editableFields,
+  title: z.string().trim().min(1).max(200).describe('Its name on the booking page; the link name comes from it.'),
+  length_minutes: z.number().int().min(1).max(1440).describe('How long the meeting is, in minutes.'),
+  slug: z
+    .string()
+    .max(80)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Lowercase letters and digits, words joined by -.')
+    .optional()
+    .describe("The link name, e.g. project-kickoff: lowercase letters and digits joined by -, unique among the host's event types (CONFLICT when taken). Left out, it comes from the title."),
+  hidden: z.boolean().optional().describe('Defaults to true: created off the public pages. False publishes it at once.'),
+  idempotency_key: idempotencyKey,
+});
+const createEventTypeTool: ToolDef = {
+  name: 'create_event_type',
+  title: 'Create an event type',
+  description:
+    'Create a personal event type for the host: a title and a length, and optionally a description, location, intake questions, minimum notice, confirmation, booking window and link name (slug). It is created hidden, with no public page, unless hidden is false; update_event_type with hidden false publishes it later. Without a slug the link name comes from the title, with a number added when it is taken; a slug the host already uses answers CONFLICT. Signed in, the host is the signed-in person; with an API key, the workspace owner whoami names. It follows the host\'s working hours. Needs scope event-types:write and a key with no event-type limit. Text takes no links, web addresses or invisible characters, as in update_event_type. Retrying with the same idempotency_key answers the first result and creates nothing more.',
+  scope: 'event-types:write',
+  write: true,
+  enabled: eventTypeWritesOn,
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  input: createEventTypeInput,
+  output: eventTypeWriteOutput.extend({
+    already_created: z.boolean().describe('True when this idempotency_key had already created it; nothing was created again.'),
+  }),
+  async run(args: z.infer<typeof createEventTypeInput>, call, deps) {
+    const p = requireScope(call, 'event-types:write');
+    // A key held to some event types works on those; a new one is outside them.
+    if (p.eventTypeIds)
+      throw new ToolFailure(
+        'INSUFFICIENT_SCOPE',
+        `This API key (${p.prefix}) is limited to some event types, so it cannot create one.`,
+        'Use a key with no event-type limit, or a sign-in.',
+      );
+    const writer = await writerFor(deps.db, p);
+    const { idempotency_key: key, ...request } = args;
+    let createdId: string | null = null;
+    const { data, replayed } = await keyedWrite(
+      deps,
+      call,
+      p.accountId,
+      'create_event_type',
+      key,
+      request,
+      async ({ resumed }) => {
+        if (resumed)
+          throw new ToolFailure(
+            'CONFLICT',
+            'An earlier call with this idempotency_key has not finished.',
+            'Retry with the SAME idempotency_key in a few seconds to get its result.',
+          );
+        refuse(checkEventTypeEdit(args, { existingQuestionNames: [] }));
+        const taken = new Set(
+          (await deps.db.all<{ slug: string }>(sql`SELECT slug FROM event_type WHERE account_id = ${p.accountId} AND member_id = ${writer.memberId}`)).map(
+            (r) => r.slug,
+          ),
+        );
+        // A link name the caller chose is its own or refused; none given, one comes from the title.
+        const slugTaken = (slug: string) =>
+          new ToolFailure('CONFLICT', `The link name "${slug}" is already used by another event type of this host.`, 'Choose another slug, or leave it out to have one made from the title.');
+        if (args.slug && taken.has(args.slug)) throw slugTaken(args.slug);
+        const base = slugFromTitle(args.title);
+        let slug = args.slug ?? base;
+        for (let n = 2; taken.has(slug); n += 1) slug = `${base}-${n}`;
+        const fields = contractFields({ ...args, hidden: args.hidden ?? true }, args.questions ? bookingFieldsFrom(args.questions, []) : undefined);
+        const input = eventTypeInputSchema.parse({ ...fields, slug });
+        const result = await createEventTypeChecked(deps, writer, input);
+        if (!result.ok && result.reason === 'SLUG_TAKEN') throw slugTaken(slug);
+        const created = written(result);
+        createdId = created.id;
+        if (!created.hidden) published(deps, writer, created);
+        const changed: string[] = [...(args.slug ? ['slug'] : []), ...sentFields(args)];
+        return { event_type: await eventTypeOut(deps, p, created), changed, already_created: false };
+      },
+      async () => {
+        if (createdId) await deleteEventType(deps.db, p.accountId, createdId);
+      },
+    );
+    const out = replayed ? { ...data, already_created: true } : data;
+    return {
+      data: out,
+      summary: `${replayed ? 'Already created' : 'Created'} "${out.event_type.title}" (${out.event_type.hidden ? 'hidden' : 'published'}), id ${out.event_type.id}.`,
+      affected: [out.event_type.id],
+      changed: replayed ? [] : data.changed,
+    };
+  },
+};
+
 /**
  * A keyed write that stores only its success, keyed by account + caller + tool
  * + key and compared against a hash of every argument: a retry with the same
@@ -4031,7 +4651,9 @@ async function decide(
         );
       else throw failureFor(out.reason, 'The booking could not be changed.');
     }
-    const b = await deps.calV2.bookingResponse(p.accountId, uid);
+    const read = await deps.calV2.bookingResponse(p.accountId, uid);
+    // A confirmation writes the meeting to the calendar now: wait for its link.
+    const b = kind === 'confirm' && !already ? await withMeetingUrl(deps, p.accountId, read) : read;
     const booking = await summarize(deps, p.accountId, b, args.time_zone ?? (await hostZone(deps.db, p.accountId, uid)));
     return {
       booking,
@@ -4047,7 +4669,7 @@ async function decide(
     };
   });
   const out = replayed ? { ...data, already_applied: true } : data;
-  return { data: out, summary: `${kind === 'confirm' ? 'Confirmed' : 'Declined'}. ${line(out.booking)}`, affected: [uid] };
+  return { data: out, summary: `${kind === 'confirm' ? 'Confirmed' : 'Declined'}. ${line(out.booking)}${videoLine(out.booking)}`, affected: [uid] };
 }
 
 const confirmBooking: ToolDef = {
@@ -4182,4 +4804,11 @@ export const TOOLS: readonly ToolDef[] = [
   cancelBooking,
   createEvent,
   checkAttendeeAvailability,
+  updateEventTypeTool,
+  createEventTypeTool,
 ];
+
+/** The tools this deployment serves: the catalog less those its switches turn off. */
+export function servedTools(env: ToolSwitches): readonly ToolDef[] {
+  return TOOLS.filter((def) => def.enabled?.(env) ?? true);
+}

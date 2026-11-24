@@ -105,6 +105,8 @@ export interface BookingMessages {
     nextMonth: string;
     /** Marks the current day in the grid; visually a dot, here for the label. */
     today: string;
+    /** On a day with hours whose times a booking limit of the event has closed. */
+    dayFull: string;
     /** The day column before any day is chosen. */
     pickADay: string;
     /** Announced (not shown) while the month's times are still being read. */
@@ -548,6 +550,8 @@ export interface BookingMessages {
           bufferAfter: string;
           seats: string;
           window: string;
+          /** Any booking limit is set. */
+          limits: string;
           interval: string;
         };
         errors: {
@@ -686,6 +690,24 @@ export interface BookingMessages {
         hint: string;
         /** Inline error for anything but a whole number in range; `{max}` is the cap. */
         invalid: string;
+      };
+      /**
+       * Booking limits: how many bookings of the event, and how many minutes of
+       * them, one day and one week (Monday to Sunday) may hold, in the
+       * schedule's time zone. Empty is no limit.
+       */
+      bookingLimits: {
+        title: string;
+        hint: string;
+        bookingsPerDay: string;
+        bookingsPerWeek: string;
+        minutesPerDay: string;
+        minutesPerWeek: string;
+        placeholder: string;
+        /** Inline error for anything but a whole number in range; `{max}` is the cap. */
+        invalid: string;
+        /** A minutes limit shorter than the event, which would close every day; `{min}` is its length. */
+        belowLength: string;
       };
       fBufferBefore: string;
       fBufferAfter: string;
@@ -2154,6 +2176,7 @@ export const en: BookingMessages = {
     previousMonth: 'Previous month',
     nextMonth: 'Next month',
     today: 'Today',
+    dayFull: 'Full',
     pickADay: 'Pick a day to see the times available.',
     readingTimes: 'Finding the times available this month.',
     noTimesOnDay: 'No times available on this day.',
@@ -2472,12 +2495,13 @@ export const en: BookingMessages = {
         },
         advanced: {
           title: 'Advanced settings',
-          hint: 'Buffers, group seats, how far ahead people can book, and how often times start.',
+          hint: 'Buffers, group seats, how far ahead people can book, booking limits, and how often times start.',
           allDefault: 'Default settings',
           bufferBefore: '{n} min before',
           bufferAfter: '{n} min after',
           seats: '{n} seats per time',
           window: 'up to {n} days ahead',
+          limits: 'booking limits',
           interval: 'starts every {n} min',
         },
         errors: {
@@ -2611,6 +2635,17 @@ export const en: BookingMessages = {
         placeholder: 'No limit',
         hint: 'Invitees can book up to this many calendar days ahead, counting from today in the time zone of the schedule (on a team event, each host’s own). With 14, the last day they can pick is 14 days from today. Leave it empty for no limit.',
         invalid: 'Use a whole number from 1 to {max}, or leave it empty.',
+      },
+      bookingLimits: {
+        title: 'Booking limits',
+        hint: 'Cap how many bookings of this event a day or a week (Monday to Sunday) can take, by count or by total minutes, in the time zone of the schedule (on a team event, each host’s own, with every host’s bookings counted together). Pending bookings count; cancelled and declined ones don’t. Once a day or week is full, its other times close and the booking page shows the day as Full. Leave a field empty for no limit.',
+        bookingsPerDay: 'Max bookings per day',
+        bookingsPerWeek: 'Max bookings per week',
+        minutesPerDay: 'Max total minutes per day',
+        minutesPerWeek: 'Max total minutes per week',
+        placeholder: 'No limit',
+        invalid: 'Use a whole number from 1 to {max}, or leave it empty.',
+        belowLength: 'Use at least the event’s length ({min} min), or leave it empty: no time could be booked with less.',
       },
       fBufferBefore: 'Buffer before (min)',
       fBufferAfter: 'Buffer after (min)',
@@ -3379,6 +3414,8 @@ export const en: BookingMessages = {
         cancel_booking: 'Cancel a booking and tell the invitee. A repeating event can be cancelled by date or from a date on.',
         create_event: 'Put an event of your own on your calendar, with or without guests, once or repeating. Safe to retry.',
         check_attendee_availability: 'See when you and the people you name are free, from your calendar.',
+        update_event_type: 'Change the title, description, length, location, questions, visibility, notice, confirmation or booking window of an event type. Links are not accepted. Safe to retry.',
+        create_event_type: 'Create an event type, with its link name if you choose one, hidden until you publish it. Safe to retry.',
       },
       scopeLabels: {
         'event-types:read': 'See event types',
@@ -3387,6 +3424,7 @@ export const en: BookingMessages = {
         'bookings:write': 'Create, hold, reschedule, confirm and decline bookings',
         'bookings:cancel': 'Cancel bookings',
         'calendars:read': 'See connected calendars',
+        'event-types:write': 'Edit event types',
       },
       scopesLead: 'Access this key grants',
       eventTypesLabel: 'Event types',
@@ -3701,7 +3739,7 @@ export const en: BookingMessages = {
         holds: { title: 'Holds', body: 'Keep a time for a few minutes while the person decides, so nobody else takes it.' },
         bookings: { title: 'Your bookings', body: 'Put events of your own on your calendar, see your meetings, read their details, move them to another time or cancel them.' },
         requests: { title: 'Booking requests', body: 'See the requests waiting for your answer, then accept or decline them.' },
-        account: { title: 'Account and event types', body: 'Who is connected, the workspaces you can work in, your event types with their settings and links, your teams, members and notification emails.' },
+        account: { title: 'Account and event types', body: 'Who is connected, the workspaces you can work in, your event types with their settings and links (and, where your workspace allows it, creating and editing them), your teams, members and notification emails.' },
       },
       items: {
         find_available_slots: { what: 'See the open times of one event type, day by day.', ask: 'When am I free for a 30-minute call this week?' },
@@ -3743,6 +3781,14 @@ export const en: BookingMessages = {
         list_connection_calendars: { what: 'See the calendars inside one connected account, like a shared team calendar.', ask: 'Which calendars are in my Google account?' },
         list_integrations: { what: 'See whether your CRM is connected and, if it fails, which access it is missing.', ask: 'Is our CRM still connected?' },
         list_crm_contact_properties: { what: 'See the contact fields in your CRM that booking answers can fill.', ask: 'Which CRM fields can I map the company question to?' },
+        update_event_type: {
+          what: 'Change an event type: its title, description, length, location, questions, whether it is published, the notice it needs, whether you confirm each booking and how far ahead it can be booked. Links are not accepted.',
+          ask: 'Add a required question about the budget to my intro call',
+        },
+        create_event_type: {
+          what: 'Create an event type with a title and a length, and the link name you want. It stays hidden until you publish it.',
+          ask: 'Create a 45-minute event called Project kickoff',
+        },
       },
     },
     oauthConsent: {
@@ -4084,6 +4130,7 @@ export const es: BookingMessages = {
     previousMonth: 'Mes anterior',
     nextMonth: 'Mes siguiente',
     today: 'Hoy',
+    dayFull: 'Completo',
     pickADay: 'Elige un día para ver los horarios disponibles.',
     readingTimes: 'Buscando los horarios disponibles de este mes.',
     noTimesOnDay: 'No hay horarios disponibles este día.',
@@ -4409,12 +4456,13 @@ export const es: BookingMessages = {
         },
         advanced: {
           title: 'Ajustes avanzados',
-          hint: 'Márgenes, cupos por grupo, con cuánta anticipación se puede reservar y cada cuánto empiezan los horarios.',
+          hint: 'Márgenes, cupos por grupo, con cuánta anticipación se puede reservar, límites de reservas y cada cuánto empiezan los horarios.',
           allDefault: 'Ajustes predeterminados',
           bufferBefore: '{n} min antes',
           bufferAfter: '{n} min después',
           seats: '{n} cupos por horario',
           window: 'hasta {n} días antes',
+          limits: 'límites de reservas',
           interval: 'empieza cada {n} min',
         },
         errors: {
@@ -4548,6 +4596,17 @@ export const es: BookingMessages = {
         placeholder: 'Sin límite',
         hint: 'Los invitados pueden reservar hasta esta cantidad de días calendario hacia adelante, contando desde hoy en la zona horaria del horario (en un evento de equipo, la de cada anfitrión). Con 14, el último día que pueden elegir es dentro de 14 días. Déjalo vacío para no poner límite.',
         invalid: 'Usa un número entero de 1 a {max}, o déjalo vacío.',
+      },
+      bookingLimits: {
+        title: 'Límites de reservas',
+        hint: 'Limita cuántas reservas de este evento puede recibir un día o una semana (de lunes a domingo), por cantidad o por minutos en total, en la zona horaria del horario (en un evento de equipo, la de cada anfitrión, contando juntas las reservas de todos). Las reservas pendientes cuentan; las canceladas y las rechazadas no. Cuando un día o una semana se llena, sus demás horarios se cierran y la página de reservas muestra el día como Completo. Deja un campo vacío para no poner límite.',
+        bookingsPerDay: 'Máx. de reservas por día',
+        bookingsPerWeek: 'Máx. de reservas por semana',
+        minutesPerDay: 'Máx. de minutos por día',
+        minutesPerWeek: 'Máx. de minutos por semana',
+        placeholder: 'Sin límite',
+        invalid: 'Usa un número entero de 1 a {max}, o déjalo vacío.',
+        belowLength: 'Usa al menos la duración del evento ({min} min), o déjalo vacío: con menos no se podría reservar ningún horario.',
       },
       fBufferBefore: 'Margen antes (min)',
       fBufferAfter: 'Margen después (min)',
@@ -5318,6 +5377,8 @@ export const es: BookingMessages = {
         cancel_booking: 'Cancela una reserva y avisa al invitado. Un evento que se repite se cancela por fecha o desde una fecha.',
         create_event: 'Pone un evento propio en tu calendario, con o sin invitados, una vez o que se repita. Se puede reintentar sin riesgo.',
         check_attendee_availability: 'Mira cuándo están libres tú y las personas que nombres, desde tu calendario.',
+        update_event_type: 'Cambia el título, la descripción, la duración, el lugar, las preguntas, la visibilidad, la antelación, la confirmación o el plazo de reserva de un tipo de evento. No acepta enlaces. Se puede reintentar sin riesgo.',
+        create_event_type: 'Crea un tipo de evento, con el nombre de enlace que elijas, oculto hasta que lo publiques. Se puede reintentar sin riesgo.',
       },
       scopeLabels: {
         'event-types:read': 'Ver tipos de evento',
@@ -5326,6 +5387,7 @@ export const es: BookingMessages = {
         'bookings:write': 'Crear, apartar, reagendar, confirmar y rechazar reservas',
         'bookings:cancel': 'Cancelar reservas',
         'calendars:read': 'Ver calendarios conectados',
+        'event-types:write': 'Editar tipos de evento',
       },
       scopesLead: 'Acceso que da esta clave',
       eventTypesLabel: 'Tipos de evento',
@@ -5640,7 +5702,7 @@ export const es: BookingMessages = {
         holds: { title: 'Horarios apartados', body: 'Aparta un horario unos minutos mientras la persona decide, para que nadie más lo tome.' },
         bookings: { title: 'Tus reservas', body: 'Pon eventos propios en tu calendario, mira tus reuniones, lee sus detalles, muévelas a otro horario o cancélalas.' },
         requests: { title: 'Solicitudes de reserva', body: 'Mira las solicitudes que esperan tu respuesta y acéptalas o recházalas.' },
-        account: { title: 'Cuenta y tipos de evento', body: 'Quién está conectado, en qué espacios puedes trabajar, tus tipos de evento con su configuración y enlaces, tus equipos, miembros y correos de notificación.' },
+        account: { title: 'Cuenta y tipos de evento', body: 'Quién está conectado, en qué espacios puedes trabajar, tus tipos de evento con su configuración y enlaces (y, donde tu espacio lo permite, crearlos y editarlos), tus equipos, miembros y correos de notificación.' },
       },
       items: {
         find_available_slots: { what: 'Mira los horarios libres de un tipo de evento, día por día.', ask: '¿Cuándo estoy libre para una llamada de 30 minutos esta semana?' },
@@ -5682,6 +5744,14 @@ export const es: BookingMessages = {
         list_connection_calendars: { what: 'Mira los calendarios dentro de una cuenta conectada, como un calendario compartido del equipo.', ask: '¿Qué calendarios hay en mi cuenta de Google?' },
         list_integrations: { what: 'Mira si tu CRM está conectado y, si falla, qué acceso le falta.', ask: '¿Nuestro CRM sigue conectado?' },
         list_crm_contact_properties: { what: 'Mira los campos de contacto de tu CRM que pueden llenar las respuestas de una reserva.', ask: '¿A qué campo del CRM puedo mapear la pregunta de empresa?' },
+        update_event_type: {
+          what: 'Cambia un tipo de evento: su título, descripción, duración, lugar, preguntas, si está publicado, la antelación que pide, si confirmas cada reserva y con cuántos días se puede reservar. No acepta enlaces.',
+          ask: 'Agrega a mi llamada de introducción una pregunta obligatoria sobre el presupuesto',
+        },
+        create_event_type: {
+          what: 'Crea un tipo de evento con un título, una duración y el nombre de enlace que quieras. Queda oculto hasta que lo publiques.',
+          ask: 'Crea un evento de 45 minutos llamado Inicio del proyecto',
+        },
       },
     },
     oauthConsent: {

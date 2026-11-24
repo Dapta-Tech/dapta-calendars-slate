@@ -31,13 +31,14 @@ export const OAUTH_SCOPES = [
   'bookings:read',
   'bookings:write',
   'bookings:cancel',
+  'event-types:write',
 ] as const satisfies readonly ApiScope[];
 export type OAuthScope = (typeof OAUTH_SCOPES)[number];
 
 /**
  * The minimal set: what the protected-resource metadata advertises and what a
- * first connection asks for. Read-only; writes and cancel arrive by step-up
- * (a 403 `insufficient_scope` naming them) when a tool needs them.
+ * first connection asks for. Read-only; writes, cancel and event-type edits
+ * arrive by step-up (a 403 `insufficient_scope` naming them) when a tool needs them.
  */
 export const BASELINE_SCOPES = ['event-types:read', 'availability:read', 'bookings:read'] as const satisfies readonly OAuthScope[];
 

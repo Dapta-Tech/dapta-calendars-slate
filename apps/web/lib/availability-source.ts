@@ -13,6 +13,8 @@ export type AvailabilityChunk =
   | {
       ok: true;
       slots: Slot[];
+      /** Times a booking limit closed (ISO UTC): their day reads "Full" when it has no slot left. */
+      fullSlots?: string[];
       emptyReason?: string;
       /** The event's intake questions; the island needs them only once. */
       bookingFields?: BookingField[];
@@ -48,6 +50,7 @@ export function toChunk(r: AvailabilityResponse | null): AvailabilityChunk {
   return {
     ok: true,
     slots: r.slots,
+    ...(r.fullSlots?.length ? { fullSlots: r.fullSlots } : {}),
     ...(r.emptyReason ? { emptyReason: r.emptyReason } : {}),
     bookingFields: r.eventType.bookingFields,
   };

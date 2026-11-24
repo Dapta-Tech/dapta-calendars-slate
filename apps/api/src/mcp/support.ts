@@ -293,14 +293,20 @@ const ACTIONABLE: Record<string, { message?: string; hint: string }> = {
   FEATURE_NOT_SUPPORTED: { hint: 'This event type uses a feature the MCP tools do not support yet; book it from its public page.' },
 };
 
+/** The core's words for a refusal the event's booking limit caused (`limitReachedMessage`). */
+export const BOOKING_LIMIT = /has reached this event type's booking limit/;
+
 /** A failure from an upstream error code, with the model-facing advice attached. */
 export function failureFor(code: string, message: string): ToolFailure {
+  // A full day or week (the event's booking limit) keeps the core's words,
+  // which say so, under the code a time not offered gets.
+  const limit = BOOKING_LIMIT.test(message);
   // The booking core reports a bad start time under its intake-validation code.
-  if (code === 'BOOKING_FIELDS_INVALID' && /time is not available|start time/i.test(message)) code = 'INVALID_SLOT';
+  if (code === 'BOOKING_FIELDS_INVALID' && (limit || /time is not available|start time/i.test(message))) code = 'INVALID_SLOT';
   // The core calls a hold a reservation; the tools call it a hold.
   if (code === 'RESERVATION_EXPIRED') code = 'HOLD_EXPIRED';
   const known = ACTIONABLE[code];
-  return new ToolFailure(code, known?.message ?? message, known?.hint);
+  return new ToolFailure(code, limit ? message : (known?.message ?? message), known?.hint);
 }
 
 /** Map anything a tool can throw to a `ToolFailure` the model can act on. */

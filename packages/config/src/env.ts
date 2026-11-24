@@ -456,6 +456,12 @@ export const serverEnvSchema = z.object({
   MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC: blankIsDefault(z.coerce.number().positive().default(0.2)),
   // How long one tool call may run before the caller gets a timeout error.
   MCP_TOOL_TIMEOUT_MS: blankIsDefault(z.coerce.number().int().min(1000).max(120_000).default(20_000)),
+  // The kill switch for the event-type write tools (`update_event_type`,
+  // `create_event_type`, ADR 0013). Off by default: unset or anything but
+  // true/1/yes, neither tool is listed nor callable, whatever scope a caller
+  // holds. Read once when the API starts, like every setting here: a change
+  // takes effect when the API process restarts.
+  MCP_EVENT_TYPE_WRITE_ENABLED: boolish.default('false'),
 
   // --- OAuth for the MCP endpoint (this API as its own authorization server) --
   // OFF by default, and a bare fork never needs it: API keys and the public

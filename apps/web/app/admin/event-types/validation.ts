@@ -10,8 +10,14 @@
  */
 import { templateErrors, templateIssueMessage } from '@slate/engine';
 import { isReservedFieldName } from '@slate/shared';
-import { MAX_BOOKING_WINDOW_DAYS, eventCustomHoursSchema, isSuccessRedirectUrl as isRedirectUrl } from '@slate/types';
-import type { EventTypeDraft } from './draft';
+import {
+  MAX_BOOKING_LIMIT_PER_DAY,
+  MAX_BOOKING_LIMIT_PER_WEEK,
+  MAX_BOOKING_WINDOW_DAYS,
+  eventCustomHoursSchema,
+  isSuccessRedirectUrl as isRedirectUrl,
+} from '@slate/types';
+import { LIMIT_KEYS, type EventTypeDraft, type LimitKey } from './draft';
 import type { EventTypeMessages } from './sections/shared';
 import { invalidTrackingKeys, type TrackingKey } from './sections/tracking';
 import { HOURS_IDS } from './sections/availability';
@@ -42,6 +48,8 @@ export const FIELD_IDS = {
   afterBuf: 'et-buffer-after',
   seats: 'et-seats',
   windowDays: 'et-booking-window',
+  /** `maxBookingsPerDay` → `et-max-bookings-per-day`. */
+  limit: (key: LimitKey) => `et-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`,
   slotInterval: 'et-slot-interval',
   redirectUrl: 'et-redirect-url',
   tracking: (key: TrackingKey) => `et-tracking-${key}`,
@@ -132,6 +140,15 @@ export function validateDraft(
       m.bookingWindow.invalid.replace('{max}', String(MAX_BOOKING_WINDOW_DAYS)),
       'advanced',
     );
+  for (const key of LIMIT_KEYS) {
+    const v = d.limits[key];
+    const max = key.endsWith('Day') ? MAX_BOOKING_LIMIT_PER_DAY : MAX_BOOKING_LIMIT_PER_WEEK;
+    if (v !== '' && (!isWhole(v) || v < 1 || v > max))
+      general(FIELD_IDS.limit(key), m.bookingLimits.invalid.replace('{max}', String(max)), 'advanced');
+    // Fewer minutes than the event lasts would close every day: the API refuses it too.
+    else if (v !== '' && key.startsWith('maxMinutes') && isWhole(d.lengthMinutes) && v < d.lengthMinutes)
+      general(FIELD_IDS.limit(key), m.bookingLimits.belowLength.replace('{min}', String(d.lengthMinutes)), 'advanced');
+  }
   if (d.slotInterval !== '' && (!isWhole(d.slotInterval) || d.slotInterval < 1))
     general(FIELD_IDS.slotInterval, e.intervalInvalid, 'advanced');
 

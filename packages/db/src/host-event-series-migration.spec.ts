@@ -90,7 +90,9 @@ for (const dialect of ["sqlite", "postgres"] as const) {
         const { db, close } = await database(dialect);
         try {
           const applied = await migrate(db);
-          expect(applied.slice(-2)).toEqual([owner, series]);
+          // In order, one after the other; later migrations may follow them.
+          const at = applied.indexOf(owner);
+          expect(applied.slice(at, at + 2)).toEqual([owner, series]);
           expect(
             applied.filter((name) => name.slice(0, 4) === series.slice(0, 4)),
           ).toEqual([series]);
@@ -127,7 +129,12 @@ for (const dialect of ["sqlite", "postgres"] as const) {
           );
           expect(before).toBeDefined();
 
-          expect(await migrate(db)).toEqual([series]);
+          // The series migration first, then only migrations newer than it.
+          const newer = readdirSync(join(root, dialect))
+            .filter((file) => file.endsWith(".sql") && file > owner)
+            .sort();
+          expect(newer[0]).toBe(series);
+          expect(await migrate(db)).toEqual(newer);
           await assertSchema(db);
           expect(
             await db.get(

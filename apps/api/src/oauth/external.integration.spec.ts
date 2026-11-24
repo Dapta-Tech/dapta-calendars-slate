@@ -19,7 +19,7 @@ import type { McpCall } from '../mcp/support';
 
 const RESOURCE = 'https://calendar.example.test/mcp';
 const PRM_URL = 'https://calendar.example.test/.well-known/oauth-protected-resource/mcp';
-const ALL_SCOPES = ['event-types:read', 'availability:read', 'bookings:read', 'bookings:write', 'bookings:cancel'];
+const ALL_SCOPES = ['event-types:read', 'availability:read', 'bookings:read', 'bookings:write', 'bookings:cancel', 'event-types:write'];
 const signingJwk = () => JSON.stringify(generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' }));
 
 const fakes: FakeAs[] = [];
