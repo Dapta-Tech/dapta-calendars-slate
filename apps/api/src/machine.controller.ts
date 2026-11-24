@@ -229,7 +229,7 @@ export class MachineController {
   @Get('bookings')
   async list(@Req() req: ReqLike, @Query() q: Record<string, string>) {
     const principal = await this.auth.resolveMachine(req, 'bookings:read');
-    const { from, to, limit } = parseBookingsListQuery(q);
+    const { from, to, limit, status, cursor } = parseBookingsListQuery(q);
     const res = await listBookings(this.db, {
       accountId: principal.accountId,
       // Honor the key's resource allowlist: an event-type-scoped key must not
@@ -237,9 +237,9 @@ export class MachineController {
       eventTypeIds: principal.eventTypeIds,
       from,
       to,
-      status: q.status,
+      status,
       limit,
-      cursor: q.cursor,
+      cursor,
     });
     // P1-3: real keyset pagination — nextCursor is non-null when more remain.
     return { items: res.items, nextCursor: res.nextCursor };

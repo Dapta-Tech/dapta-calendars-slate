@@ -432,7 +432,7 @@ export class HostController {
   @Get('host/bookings')
   async listBookings(@Req() req: ReqLike, @Query() q: Record<string, string>) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.listBookings(p, { ...parseBookingsListQuery(q), status: q.status });
+    return this.admin.listBookings(p, parseBookingsListQuery(q));
   }
 
   /**
