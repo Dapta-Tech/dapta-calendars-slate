@@ -469,6 +469,8 @@ export interface TeamProfileView {
     name: string;
     logoUrl: string | null;
     timeZone: string;
+    /** The team's language (`teamLocale`), null when nobody it falls back to has one. */
+    locale: 'en' | 'es' | null;
   };
   eventTypes: Array<{
     slug: string;
@@ -494,6 +496,26 @@ async function getTeamBySlug(db: Db, accountId: string, teamSlug: string) {
   }>(
     sql`SELECT id, slug, name, logo_url, time_zone FROM team WHERE account_id = ${accountId} AND slug = ${teamSlug} LIMIT 1`,
   );
+}
+
+/**
+ * A team's language, for the words a link preview puts around the team's own
+ * event titles when the robot reading it states no language: the language of
+ * the team's earliest active owner who has one, else of the workspace's owner. A team
+ * has no language column of its own, and its owners are the people who name
+ * its events.
+ */
+export async function teamLocale(db: Db, accountId: string, teamId: string): Promise<'en' | 'es' | null> {
+  const row = await db.get<{ locale: string | null }>(
+    sql`SELECT m.locale FROM member m
+        LEFT JOIN team_membership tm
+          ON tm.member_id = m.id AND tm.team_id = ${teamId} AND tm.role = 'owner' AND tm.accepted = 1
+        WHERE m.account_id = ${accountId} AND m.status = 'active' AND m.locale IS NOT NULL
+          AND (tm.member_id IS NOT NULL OR m.role = 'owner')
+        ORDER BY CASE WHEN tm.member_id IS NOT NULL THEN 0 ELSE 1 END, m.created_at ASC, m.id ASC
+        LIMIT 1`,
+  );
+  return bookingLocale(row?.locale);
 }
 
 export async function getTeamProfile(
@@ -526,6 +548,7 @@ export async function getTeamProfile(
       name: team.name,
       logoUrl: team.logo_url,
       timeZone: team.time_zone,
+      locale: await teamLocale(db, account.id, team.id),
     },
     eventTypes: rows.map((r) => ({
       slug: r.slug,

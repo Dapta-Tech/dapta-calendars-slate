@@ -236,6 +236,7 @@ export const API_REFERENCE: Readonly<Record<string, ApiEndpoint>> = {
   'PATCH /v1/me/handle': { area: 'profile', access: 'member', summary: "Change the caller's booking link name." },
   'GET /v1/handle-available': { area: 'profile', access: 'member', summary: 'Whether a link name is free.' },
   'POST /v1/me/timezone-sync': { area: 'profile', access: 'member', summary: "Follow the browser's time zone." },
+  'POST /v1/me/locale-sync': { area: 'profile', access: 'member', summary: "Record the dashboard's language once." },
 
   // Onboarding.
   'GET /v1/me/setup-status': { area: 'onboarding', access: 'member', summary: 'Which setup steps are done.' },

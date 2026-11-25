@@ -160,6 +160,7 @@ export const API_ROUTE_EXCLUSIONS: Readonly<Record<string, RouteExclusion>> = {
   'PATCH /v1/me/handle': notYet("No tool changes the caller's link name."),
   'GET /v1/handle-available': notYet('No tool checks whether a link name is free.'),
   'POST /v1/me/timezone-sync': dashboardOnly("Follows the browser's own time zone."),
+  'POST /v1/me/locale-sync': dashboardOnly('Records the language the dashboard is shown in, once.'),
 
   // Onboarding
   'GET /v1/me/setup-status': dashboardOnly(ONBOARDING),

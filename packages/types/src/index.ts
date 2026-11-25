@@ -1147,6 +1147,10 @@ export const publicProfileSchema = z.object({
     brandColor: z.string().nullable(),
     layout: z.string().nullable(),
     style: bookingPageStyleSchema.partial().nullable(),
+    /** The host's own language, which a link preview falls back to when the
+     *  robot reading it states none. Optional on the wire so an older API
+     *  still parses; absent and null both mean "not known". */
+    locale: z.enum(['en', 'es']).nullable().optional(),
   }),
   /**
    * Whether this page carries the Dapta branding, as the API decided it with
@@ -1191,6 +1195,9 @@ export const teamProfileSchema = z.object({
     name: z.string(),
     logoUrl: z.string().nullable(),
     timeZone: z.string(),
+    /** The team's language (its owner's, else the workspace owner's); see
+     *  `publicProfileSchema`. Optional on the wire. */
+    locale: z.enum(['en', 'es']).nullable().optional(),
   }),
   eventTypes: z.array(
     z.object({
@@ -1557,8 +1564,21 @@ export type EventCustomHours = z.infer<typeof eventCustomHoursSchema>;
 
 // --- Event-type CRUD ------------------------------------------------------
 
+/**
+ * Link names a public route already answers on beside a host's or a team's
+ * events: the link-preview image and the address it had before. An event named
+ * so would have a booking link that never opens.
+ */
+export const RESERVED_EVENT_SLUGS: readonly string[] = ['card.png', 'opengraph-image'];
+
 export const eventTypeInputSchema = z.object({
-  slug: z.string().min(1).max(80),
+  slug: z
+    .string()
+    .min(1)
+    .max(80)
+    .refine((slug) => !RESERVED_EVENT_SLUGS.includes(slug.trim().toLowerCase()), {
+      message: 'This link name is reserved. Choose another one.',
+    }),
   title: z.string().min(1).max(200),
   description: z.string().max(2000).nullable().optional(),
   lengthMinutes: z.number().int().positive().max(1440),
