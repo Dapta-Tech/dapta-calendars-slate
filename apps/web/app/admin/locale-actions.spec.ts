@@ -2,8 +2,8 @@
  * The language switch saves the host's own language as well as the cookie. The
  * save is awaited, so the switch stays disabled until it answers and two quick
  * choices land in order; a failed save is tried once more; an unreachable API
- * never stops the dashboard from changing language. The 2 s bound on each call
- * lives in the client (`admin-api.spec.ts`), so a session refresh is never cut.
+ * never stops the dashboard from changing language. There is deliberately no
+ * timeout: an abandoned request could still land after a later choice.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

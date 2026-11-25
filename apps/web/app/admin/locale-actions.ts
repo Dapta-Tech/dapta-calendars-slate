@@ -11,13 +11,13 @@ import { LOCALE_COOKIE } from '@/lib/locale';
  *
  * The choice is also the host's own language (`member.locale`): their emails
  * are written in it, and a link preview of their booking page falls back to it
- * when the robot drawing the preview states no language. The save is awaited:
- * the switch stays disabled until it answers (`LanguageSwitcher`), so two quick
- * choices are stored in the order they were made. A failed save is tried once
- * more, each call bounded by the client (`updateMyLocale`), never the request as
- * a whole, so a session refresh in between always completes. The dashboard's
- * own language still changes if the API is unreachable, and the next choice
- * saves again.
+ * when the robot drawing the preview states no language. The save is awaited,
+ * like every dashboard action, with no timeout of its own: the switch stays
+ * disabled until the request has settled (`LanguageSwitcher`), so no earlier
+ * choice is ever still on its way when a later one is made, and choices are
+ * stored in the order they were made. A save that failed is tried once more
+ * with the same value. The dashboard's own language still changes if the API is
+ * unreachable, and the next choice saves again.
  */
 export async function setLocaleAction(locale: string): Promise<void> {
   const value = locale === 'es' ? 'es' : 'en';

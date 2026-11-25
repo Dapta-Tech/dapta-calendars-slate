@@ -61,12 +61,7 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * `timeoutMs` bounds each network call on its own, never the request as a
- * whole: a session refresh between a 401 and its retry always runs to the end,
- * so a slow API can never cost the host the refreshed session cookie.
- */
-async function req<T>(method: string, path: string, body?: unknown, opts: { timeoutMs?: number } = {}): Promise<T> {
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   // Identity is read per attempt, not once: after a refresh the retry has to
   // carry the token the identity service has just minted, not the dead one.
   const call = async (): Promise<Response> => {
@@ -78,7 +73,6 @@ async function req<T>(method: string, path: string, body?: unknown, opts: { time
       headers: Object.keys(headers).length ? headers : undefined,
       body: body ? JSON.stringify(body) : undefined,
       cache: 'no-store',
-      ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
     });
   };
 
@@ -233,9 +227,8 @@ export const adminApi = {
   syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
   /** Record the dashboard's language as the host's own, only while they have none. */
   syncLocale: (locale: 'en' | 'es') => req<{ ok: boolean }>('POST', '/v1/me/locale-sync', { locale }),
-  /** The host's own language, as chosen with the language switch. Each call waits 2 s at most. */
-  updateMyLocale: (locale: 'en' | 'es') =>
-    req<{ ok: boolean }>('PATCH', '/v1/me/settings', { locale }, { timeoutMs: 2000 }),
+  /** The host's own language, as chosen with the language switch. */
+  updateMyLocale: (locale: 'en' | 'es') => req<{ ok: boolean }>('PATCH', '/v1/me/settings', { locale }),
   // Dapta branding on the public pages (included with the Dapta AI subscription).
   brandingStatus: () =>
     req<{ hideBranding: boolean; canHide: boolean; showing: boolean }>('GET', '/v1/account/branding'),
