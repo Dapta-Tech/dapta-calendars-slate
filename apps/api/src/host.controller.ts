@@ -285,11 +285,6 @@ export class HostController {
         message: 'Unknown time zone (must be a valid IANA zone, e.g. America/Mexico_City).',
       });
     }
-    // The language is read back as `en` or `es` everywhere (emails, link
-    // previews); anything else stored would read as "none" with no error.
-    if (body?.locale !== undefined && body.locale !== null && body.locale !== 'en' && body.locale !== 'es') {
-      throw new BadRequestException({ error: 'INVALID_LOCALE', message: 'Language must be "en" or "es".' });
-    }
     await this.admin.updateSettings(p, body);
     return { ok: true };
   }

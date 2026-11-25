@@ -10,7 +10,7 @@ import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
-import { previewMetadata } from '@/lib/share-card';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
@@ -64,7 +64,7 @@ export async function generateMetadata({
     // The team's own card (`card.png` beside this file): its logo, the event,
     // the length, in the language chosen above.
     ...previewMetadata({
-      pagePath: `/${team.account.code}/team/${team.team.slug}/${event.slug}`,
+      pagePath: pagePath(team.account.code, 'team', team.team.slug, event.slug),
       locale,
       title,
       description,

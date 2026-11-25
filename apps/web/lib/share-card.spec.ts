@@ -6,9 +6,17 @@
  */
 import { describe, expect, it } from 'vitest';
 import { RESERVED_EVENT_SLUGS, eventTypeInputSchema } from '@slate/types';
-import { CARD_FILE, cardUrl, previewMetadata } from './share-card';
+import { CARD_FILE, cardUrl, pagePath, previewMetadata } from './share-card';
 
 describe('the card address', () => {
+  it('encodes every segment, so a link name with a space, # or ? still reaches its card', () => {
+    expect(pagePath('northwind', 'riley-chen', 'design review')).toBe('/northwind/riley-chen/design%20review');
+    expect(cardUrl(pagePath('northwind', 'team', 'sales', 'q&a #1?'), 'es')).toBe(
+      '/northwind/team/sales/q%26a%20%231%3F/card.png?lang=es',
+    );
+    expect(pagePath('northwind', 'reunión')).toBe('/northwind/reuni%C3%B3n');
+  });
+
   it("names the page's language", () => {
     expect(cardUrl('/northwind/riley-chen/design-review', 'es')).toBe('/northwind/riley-chen/design-review/card.png?lang=es');
   });

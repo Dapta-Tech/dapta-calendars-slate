@@ -5,7 +5,7 @@ import { getTeamProfile } from '@/lib/api';
 import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { publicLocale } from '@/lib/locale';
-import { previewMetadata } from '@/lib/share-card';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
@@ -52,7 +52,7 @@ export async function generateMetadata({
     description,
     // The team's own card (`card.png` beside this file), in the same language.
     ...previewMetadata({
-      pagePath: `/${team.account.code}/team/${team.team.slug}`,
+      pagePath: pagePath(team.account.code, 'team', team.team.slug),
       locale,
       title,
       description,

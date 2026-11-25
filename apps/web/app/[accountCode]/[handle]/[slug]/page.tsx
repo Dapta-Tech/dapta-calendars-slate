@@ -10,7 +10,7 @@ import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
-import { previewMetadata } from '@/lib/share-card';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
@@ -69,7 +69,7 @@ export async function generateMetadata({
     description,
     // The card is `card.png` beside this file, in the language chosen above.
     ...previewMetadata({
-      pagePath: `/${profile.account.code}/${profile.member.handle}/${event.slug}`,
+      pagePath: pagePath(profile.account.code, profile.member.handle, event.slug),
       locale,
       title,
       description,

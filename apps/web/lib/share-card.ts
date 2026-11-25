@@ -31,6 +31,15 @@ import { IS_DAPTA_BRAND, PRODUCT_NAME } from '@/lib/product-name';
  */
 export const CARD_FILE = 'card.png';
 
+/**
+ * A public page's path from its segments, each encoded. Link names are stored
+ * as hosts typed them (some hold spaces), and a raw `#` or `?` would end the
+ * card's path early, so the image would never be reached.
+ */
+export function pagePath(...segments: string[]): string {
+  return `/${segments.map((s) => encodeURIComponent(s)).join('/')}`;
+}
+
 export function cardUrl(pagePath: string, locale: Locale): string {
   return `${pagePath}/${CARD_FILE}?lang=${locale}`;
 }
@@ -41,6 +50,7 @@ export function cardUrl(pagePath: string, locale: Locale): string {
  * sighted reader sees.
  */
 export function previewMetadata(p: {
+  /** Built with `pagePath`, so every segment is encoded. */
   pagePath: string;
   locale: Locale;
   title: string;

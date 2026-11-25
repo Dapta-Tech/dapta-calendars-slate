@@ -292,6 +292,12 @@ export class AdminService {
   }
 
   updateSettings(p: HostPrincipal, patch: Parameters<typeof updateMemberSettings>[2]) {
+    // The language is read back as `en` or `es` everywhere (emails, link
+    // previews); anything else stored would read as "none" with no error. Held
+    // here, not in a controller, so every caller of this service inherits it.
+    if (patch?.locale !== undefined && patch.locale !== null && patch.locale !== 'en' && patch.locale !== 'es') {
+      throw new BadRequestException({ error: 'INVALID_LOCALE', message: 'Language must be "en" or "es".' });
+    }
     return updateMemberSettings(this.db, p.memberId, patch);
   }
 

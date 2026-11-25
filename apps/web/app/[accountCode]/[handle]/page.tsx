@@ -5,7 +5,7 @@ import { getProfile } from '@/lib/api';
 import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { publicLocale } from '@/lib/locale';
-import { previewMetadata } from '@/lib/share-card';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
@@ -56,7 +56,7 @@ export async function generateMetadata({
     title,
     description,
     ...previewMetadata({
-      pagePath: `/${profile.account.code}/${profile.member.handle}`,
+      pagePath: pagePath(profile.account.code, profile.member.handle),
       locale,
       title,
       description,
