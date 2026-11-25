@@ -93,7 +93,14 @@ export const getProfile = cache(
 export interface TeamProfile {
   /** `shortCode` never changes (see `publicProfileSchema`); absent from an older API. */
   account: { code: string; name: string; shortCode?: string };
-  team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
+  team: {
+    slug: string;
+    name: string;
+    logoUrl: string | null;
+    timeZone: string;
+    /** The team's language for link previews; absent from an older API. */
+    locale?: 'en' | 'es' | null;
+  };
   eventTypes: Array<{
     slug: string;
     title: string;

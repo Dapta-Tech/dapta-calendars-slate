@@ -4,8 +4,8 @@
  * branding off while it is a paying Dapta AI customer gets a card with the
  * host alone; every other account gets the card exactly as before.
  *
- * Each card (profile and event) renders both states, through the route and
- * the real card tree. "Exactly as before" is byte for byte: `showBranding:
+ * Each card (profile, event, team and team event) renders both states, through
+ * its route and the real card tree. "Exactly as before" is byte for byte: `showBranding:
  * true` renders the same card as a payload without the field.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +17,7 @@ const env = vi.hoisted(() => {
   return saved;
 });
 
-const api = vi.hoisted(() => ({ getProfile: vi.fn() }));
+const api = vi.hoisted(() => ({ getProfile: vi.fn(), getTeamProfile: vi.fn() }));
 vi.mock('@/lib/api', () => api);
 vi.mock('@/lib/locale', () => ({ publicLocale: async () => 'en' }));
 vi.mock('@/lib/og-image-source', () => ({ cardImageDataUri: async () => null }));
@@ -36,8 +36,14 @@ vi.mock('@/lib/og-card', async (real) => {
 });
 
 import { BookingCard, type BookingCardInput } from '@/lib/og-card';
-import ProfileCard from './[handle]/opengraph-image';
-import EventCard from './[handle]/[slug]/opengraph-image';
+import { GET as ProfileCard } from './[handle]/card.png/route';
+import { GET as EventCard } from './[handle]/[slug]/card.png/route';
+import { GET as TeamCard } from './team/[teamSlug]/card.png/route';
+import { GET as TeamEventCard } from './team/[teamSlug]/[slug]/card.png/route';
+import type { NextRequest } from 'next/server';
+
+/** The image request a robot sends, as far as the routes read it. */
+const at = (path: string) => ({ nextUrl: new URL(`https://book.example.test${path}`) }) as NextRequest;
 
 afterAll(() => {
   if (env === undefined) delete process.env.NEXT_PUBLIC_PRODUCT_NAME;
@@ -56,24 +62,51 @@ const profile = {
   },
   eventTypes: [{ slug: 'design-review', title: 'Design review', description: null, lengthMinutes: 30 }],
 };
+const team = {
+  account: { code: 'northwind', name: 'Northwind' },
+  team: { slug: 'design', name: 'Riley Chen', logoUrl: null, timeZone: 'UTC' },
+  eventTypes: [{ slug: 'crit', title: 'Design crit', description: null, lengthMinutes: 30, schedulingType: 'round_robin' }],
+  brand: null,
+};
 const withShow = (show?: boolean) => (show === undefined ? profile : { ...profile, showBranding: show });
+const teamWithShow = (show?: boolean) => (show === undefined ? team : { ...team, showBranding: show });
 
 const surfaces = [
   {
     name: 'the profile card',
-    draw: () => ProfileCard({ params: Promise.resolve({ accountCode: 'northwind', handle: 'riley-chen' }) }),
+    draw: () =>
+      ProfileCard(at('/northwind/riley-chen/card.png?lang=en'), {
+        params: Promise.resolve({ accountCode: 'northwind', handle: 'riley-chen' }),
+      }),
   },
   {
     name: 'the event card',
     draw: () =>
-      EventCard({
+      EventCard(at('/northwind/riley-chen/design-review/card.png?lang=en'), {
         params: Promise.resolve({ accountCode: 'northwind', handle: 'riley-chen', slug: 'design-review' }),
+      }),
+  },
+  {
+    // The team is named after a person here only so the host assertion below
+    // reads the same for every surface.
+    name: 'the team card',
+    draw: () =>
+      TeamCard(at('/northwind/team/design/card.png?lang=en'), {
+        params: Promise.resolve({ accountCode: 'northwind', teamSlug: 'design' }),
+      }),
+  },
+  {
+    name: 'the team event card',
+    draw: () =>
+      TeamEventCard(at('/northwind/team/design/crit/card.png?lang=en'), {
+        params: Promise.resolve({ accountCode: 'northwind', teamSlug: 'design', slug: 'crit' }),
       }),
   },
 ];
 
 async function card(draw: () => Promise<unknown>, show?: boolean): Promise<{ input: BookingCardInput; html: string }> {
   api.getProfile.mockResolvedValue(withShow(show));
+  api.getTeamProfile.mockResolvedValue(teamWithShow(show));
   drawn.last = null;
   await draw();
   const input = drawn.last as BookingCardInput;
@@ -81,7 +114,10 @@ async function card(draw: () => Promise<unknown>, show?: boolean): Promise<{ inp
 }
 
 describe('the link preview cards follow the account branding switch', () => {
-  beforeEach(() => api.getProfile.mockReset());
+  beforeEach(() => {
+    api.getProfile.mockReset();
+    api.getTeamProfile.mockReset();
+  });
 
   for (const s of surfaces) {
     it(`${s.name}: switched off while paying, the product mark and name are gone`, async () => {

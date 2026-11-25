@@ -225,6 +225,10 @@ export const adminApi = {
   onboardingEarly: () => req<{ enqueued: boolean }>('POST', '/v1/me/onboarding/early'),
   // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
   syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
+  /** Record the dashboard's language as the host's own, only while they have none. */
+  syncLocale: (locale: 'en' | 'es') => req<{ ok: boolean }>('POST', '/v1/me/locale-sync', { locale }),
+  /** The host's own language, as chosen with the language switch. */
+  updateMyLocale: (locale: 'en' | 'es') => req<{ ok: boolean }>('PATCH', '/v1/me/settings', { locale }),
   // Dapta branding on the public pages (included with the Dapta AI subscription).
   brandingStatus: () =>
     req<{ hideBranding: boolean; canHide: boolean; showing: boolean }>('GET', '/v1/account/branding'),

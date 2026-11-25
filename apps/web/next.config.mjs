@@ -74,6 +74,21 @@ const nextConfig = {
       { source: '/admin/developers', destination: '/admin/developers/connect', permanent: false },
     ];
   },
+  // A booking page's link preview moved from Next's `opengraph-image` file to
+  // `card.png`, a route whose address can name the language (`lib/share-card.ts`).
+  // Previews already shared point at the old address; it keeps drawing the card.
+  // `afterFiles`: after the static routes, before `[slug]` would read the old
+  // name as an event's link name.
+  async rewrites() {
+    return {
+      beforeFiles: [],
+      afterFiles: [
+        { source: '/:accountCode/:handle/opengraph-image', destination: '/:accountCode/:handle/card.png' },
+        { source: '/:accountCode/:handle/:slug/opengraph-image', destination: '/:accountCode/:handle/:slug/card.png' },
+      ],
+      fallback: [],
+    };
+  },
 };
 
 export default nextConfig;

@@ -27,6 +27,29 @@ import { cardFonts } from '@/lib/og-fonts';
 export const OG_SIZE = { width: 1200, height: 630 } as const;
 
 /**
+ * The part of the card every app shows. Slack draws a link's image as a square
+ * cut from its middle (verified 2026-11-24: Slack stores this card as a full
+ * 1200x630 `image_url`, exactly as it stores cal.com's and vercel.com's, and
+ * its client still paints a centred square of it beside the text), and
+ * WhatsApp does the same in its compact preview. So everything that says who,
+ * what and how long sits on a panel inside this square; only the product mark,
+ * which nobody needs to read, lives outside it.
+ */
+export const OG_SAFE_SQUARE = {
+  left: (OG_SIZE.width - OG_SIZE.height) / 2,
+  size: OG_SIZE.height,
+} as const;
+
+/** The panel's distance from the safe square's edges, so a crop never lands on its border. */
+const PANEL_INSET = 24;
+export const OG_PANEL = {
+  left: OG_SAFE_SQUARE.left + PANEL_INSET,
+  top: PANEL_INSET,
+  width: OG_SAFE_SQUARE.size - PANEL_INSET * 2,
+  height: OG_SIZE.height - PANEL_INSET * 2,
+} as const;
+
+/**
  * Satori draws from values, not from a stylesheet, so the booking ground's few
  * colours are restated here. They are the `.bp-ground[data-theme=...]` values in
  * `@slate/shared/tokens.css`, frozen there for every live booking page, and
@@ -34,16 +57,18 @@ export const OG_SIZE = { width: 1200, height: 630 } as const;
  */
 export const OG_GROUND: Record<
   BrandCanvas,
-  { background: string; foreground: string; muted: string; border: string }
+  { background: string; card: string; foreground: string; muted: string; border: string }
 > = {
   light: {
     background: '#f4f6f8',
+    card: '#ffffff',
     foreground: '#0d1013',
     muted: '#55636f',
     border: 'rgba(20, 32, 44, 0.22)',
   },
   dark: {
     background: '#0a0c0e',
+    card: '#101418',
     foreground: '#e8edf2',
     muted: '#93a1ae',
     border: 'rgba(148, 170, 190, 0.16)',
@@ -114,6 +139,8 @@ export interface BookingCardInput {
   hostName: string;
   /** A drawable photo (`og-image-source.ts`), or null for the monogram. */
   photo: string | null;
+  /** The photo is a logo (a team's): drawn whole, never cut to a circle. */
+  photoIsLogo?: boolean;
   /** The headline: the event's title, or on a profile the host's name. */
   title: string;
   /** A supporting line (the event's description or the host's bio). */
@@ -134,17 +161,28 @@ export function BookingCard(c: BookingCardInput) {
   const vars = { ...brandVars(c.accent, c.canvas), ...widgetStyleVars({ buttons: c.buttons, corners: c.corners }) };
   const accent = vars['--accent']!;
   const onAccent = vars['--accent-contrast']!;
-  const avatarSize = c.kind === 'profile' ? 132 : 88;
+  const avatarSize = c.kind === 'profile' ? 120 : 64;
   // The page's monogram, restated: the accent as ink, pulled a third toward the
   // text colour, on a 16% tint of itself; shaped by the Corners setting.
   const monogramInk = mixHex(accent, ground.foreground, 0.66);
   const monogramGround = mixHex(accent, ground.background, 0.16);
-  const avatarRadius = c.photo ? avatarSize / 2 : px(vars['--bp-avatar-radius'], avatarSize);
-  // The page's 44px button, scaled to the card's 64px one; a pill stays a pill.
-  const buttonRadius = Math.min(px(vars['--bp-btn-radius'], 64) * 1.45, 32);
+  const avatarRadius =
+    c.photo && !c.photoIsLogo ? avatarSize / 2 : px(vars['--bp-avatar-radius'], avatarSize);
+  // The page's 44px button, scaled to the card's 56px one; a pill stays a pill.
+  const buttonRadius = Math.min(px(vars['--bp-btn-radius'], 56) * 1.3, 28);
+  // The panel is the booking page's own card, its corners scaled the same way.
+  const panelRadius = Math.min(px(vars['--bp-radius'], 40) * 2.4, 40);
+  // The accent, barely there, so the ground either side of the panel is not a void.
+  const glow = mixHex(accent, ground.background, c.canvas === 'dark' ? 0.16 : 0.22);
 
   const avatar = c.photo ? (
-    <img src={c.photo} width={avatarSize} height={avatarSize} style={{ borderRadius: avatarRadius, objectFit: 'cover' }} alt="" />
+    <img
+      src={c.photo}
+      width={avatarSize}
+      height={avatarSize}
+      style={{ borderRadius: avatarRadius, objectFit: c.photoIsLogo ? 'contain' : 'cover' }}
+      alt=""
+    />
   ) : (
     <div
       style={{
@@ -165,84 +203,144 @@ export function BookingCard(c: BookingCardInput) {
     </div>
   );
 
-  const markHeight = 26;
+  const markHeight = 24;
+  // Long host text gets a smaller size before it gets clipped: the square is
+  // narrow, and a title that fits whole is worth more than a large one cut short.
+  const title = clip(c.title, 64);
+  const titleSize = title.length <= 22 ? 60 : title.length <= 40 ? 50 : 42;
   return (
     <div
       style={{
         width: '100%',
         height: '100%',
         display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        padding: '64px 72px',
+        position: 'relative',
         background: ground.background,
+        // Fades to the ground itself at zero alpha: Satori reads `transparent` as
+        // transparent black, which greys a light canvas on the way out.
+        backgroundImage: `radial-gradient(circle at 8% 12%, ${glow} 0%, ${ground.background}00 38%), radial-gradient(circle at 92% 90%, ${glow} 0%, ${ground.background}00 38%)`,
         color: ground.foreground,
         fontFamily: 'Card',
       }}
     >
-      {/* Rail: who. The host on the left; the product, small, opposite. */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          {avatar}
-          {c.kind === 'event' ? (
-            <div style={{ display: 'flex', fontSize: 32, fontWeight: 700 }}>{clip(c.hostName, 40)}</div>
-          ) : null}
+      {/* The product, small, in a corner every crop may drop. */}
+      {c.productName ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 48,
+            right: 56,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            fontSize: 22,
+            color: ground.muted,
+          }}
+        >
+          <img src={productMark(ground.foreground)} width={Math.round(markHeight * MARK_RATIO)} height={markHeight} alt="" />
+          {c.productName}
         </div>
-        {c.productName ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 22, color: ground.muted }}>
-            <img src={productMark(ground.foreground)} width={Math.round(markHeight * MARK_RATIO)} height={markHeight} alt="" />
-            {c.productName}
-          </div>
-        ) : null}
-      </div>
+      ) : null}
 
-      {/* Body: what. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <div style={{ display: 'flex', fontSize: 68, fontWeight: 700, lineHeight: 1.06, letterSpacing: -1.5 }}>
-          {clip(c.title, 64)}
-        </div>
-        {c.subtitle ? (
-          <div style={{ display: 'flex', fontSize: 28, lineHeight: 1.35, color: ground.muted }}>
-            {clip(c.subtitle, 120)}
+      {/* The panel: everything that matters, inside the square every app keeps. */}
+      <div
+        style={{
+          position: 'absolute',
+          left: OG_PANEL.left,
+          top: OG_PANEL.top,
+          width: OG_PANEL.width,
+          height: OG_PANEL.height,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '44px 40px 40px',
+          background: ground.card,
+          border: `1.5px solid ${ground.border}`,
+          borderRadius: panelRadius,
+        }}
+      >
+        {/* Who. */}
+        {c.kind === 'event' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, maxWidth: '100%' }}>
+            {avatar}
+            <div style={{ display: 'flex', fontSize: 30, fontWeight: 700, wordBreak: 'break-word' }}>{clip(c.hostName, 26)}</div>
           </div>
-        ) : null}
-      </div>
+        ) : (
+          avatar
+        )}
 
-      {/* Base: how long, and the page's own primary. */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        {c.duration ? (
+        {/* What. */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, width: '100%' }}>
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '10px 20px',
-              border: `1.5px solid ${ground.border}`,
-              borderRadius: buttonRadius,
-              fontSize: 24,
+              justifyContent: 'center',
+              textAlign: 'center',
+              width: '100%',
+              fontSize: titleSize,
+              fontWeight: 700,
+              lineHeight: 1.08,
+              letterSpacing: -1,
+              // Host text may hold a word longer than the panel (a pasted URL);
+              // it wraps inside the square rather than running out of it.
+              wordBreak: 'break-word',
             }}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={ground.muted} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 7v5l3 2" />
-            </svg>
-            {c.duration}
+            {title}
           </div>
-        ) : (
-          <div style={{ display: 'flex' }} />
-        )}
-        <div
-          style={{
-            display: 'flex',
-            padding: '16px 32px',
-            borderRadius: buttonRadius,
-            background: accent,
-            color: onAccent,
-            fontSize: 24,
-            fontWeight: 700,
-          }}
-        >
-          {c.cta}
+          {c.subtitle ? (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                textAlign: 'center',
+                width: '100%',
+                fontSize: 24,
+                lineHeight: 1.35,
+                color: ground.muted,
+                wordBreak: 'break-word',
+              }}
+            >
+              {clip(c.subtitle, 80)}
+            </div>
+          ) : null}
+        </div>
+
+        {/* How long, and the page's own primary. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {c.duration ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '12px 20px',
+                border: `1.5px solid ${ground.border}`,
+                borderRadius: buttonRadius,
+                fontSize: 24,
+              }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={ground.muted} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              {c.duration}
+            </div>
+          ) : null}
+          <div
+            style={{
+              display: 'flex',
+              padding: '14px 28px',
+              borderRadius: buttonRadius,
+              background: accent,
+              color: onAccent,
+              fontSize: 24,
+              fontWeight: 700,
+            }}
+          >
+            {c.cta}
+          </div>
         </div>
       </div>
     </div>
@@ -255,12 +353,21 @@ export function BookingCard(c: BookingCardInput) {
  * wrong: a host who changes their colour and re-shares expects the new card.
  */
 const CACHE_CONTROL = 'public, max-age=0, s-maxage=600, stale-while-revalidate=86400';
+/**
+ * Never reused: a card whose language came from the request's own headers (an
+ * address without `?lang=`), which a shared cache keyed on the URL alone would
+ * hand to the next reader in the wrong language, and the empty card, which is
+ * also what a brief API failure draws and must not be pinned at an edge. The
+ * `.png` address makes both likelier to meet a cache that keys on the
+ * extension.
+ */
+const NO_STORE = 'no-store';
 
-export function bookingCardResponse(c: BookingCardInput): ImageResponse {
+export function bookingCardResponse(c: BookingCardInput, opts: { reusable?: boolean } = {}): ImageResponse {
   return new ImageResponse(<BookingCard {...c} />, {
     ...OG_SIZE,
     fonts: cardFonts(),
-    headers: { 'cache-control': CACHE_CONTROL },
+    headers: { 'cache-control': opts.reusable === false ? NO_STORE : CACHE_CONTROL },
   });
 }
 
@@ -268,6 +375,6 @@ export function bookingCardResponse(c: BookingCardInput): ImageResponse {
 export function emptyCardResponse(canvas: BrandCanvas = 'light'): ImageResponse {
   return new ImageResponse(<div style={{ width: '100%', height: '100%', display: 'flex', background: OG_GROUND[canvas].background }} />, {
     ...OG_SIZE,
-    headers: { 'cache-control': CACHE_CONTROL },
+    headers: { 'cache-control': NO_STORE },
   });
 }

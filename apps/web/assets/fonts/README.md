@@ -1,7 +1,7 @@
 # Share-card typeface
 
 Figtree, the brand face, vendored as TrueType so `next/og` can rasterize the
-booking page's link preview (`opengraph-image.tsx` under the public routes) in
+booking page's link preview (the `card.png` routes under the public pages) in
 the same face the page is set in. Loaded by `apps/web/lib/og-fonts.ts`.
 
 ## Why a second copy

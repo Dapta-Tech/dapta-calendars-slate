@@ -50,21 +50,55 @@ export async function getLocale(): Promise<Locale> {
 }
 
 /**
+ * The robots that fetch a page to draw its link preview in a chat or a feed:
+ * Slack, WhatsApp, Facebook and Messenger, iMessage (which announces itself as
+ * the Facebook and Twitter robots), LinkedIn, X, Discord, Telegram, Teams and
+ * Skype. Whatever language header one sends is its own configuration, not the
+ * language of whoever will read the preview.
+ */
+const LINK_PREVIEW_ROBOT =
+  /Slackbot|WhatsApp|facebookexternalhit|Facebot|LinkedInBot|Twitterbot|Discordbot|TelegramBot|SkypeUriPreview|MicrosoftPreview/i;
+
+export function isLinkPreviewRobot(userAgent: string | null | undefined): boolean {
+  return LINK_PREVIEW_ROBOT.test(userAgent ?? '');
+}
+
+/**
+ * The language a visitor states, or null for a link-preview robot, whose
+ * header (Slack's sends none) says nothing about who will read the preview.
+ * Everyone else is answered from their header as always: a missing one, or one
+ * that names neither supported language, is English. That keeps a search
+ * crawler's page whole: its title, body and `<html lang>` all say English.
+ */
+export function statedLocale(acceptLanguage: string | null | undefined, userAgent: string | null | undefined): Locale | null {
+  if (isLinkPreviewRobot(userAgent)) return null;
+  return negotiateLocale(acceptLanguage);
+}
+
+/**
  * Public-surface locale (no admin cookie there): an explicit `?lang=` wins,
- * otherwise the browser's Accept-Language decides. Defaults to English.
+ * then the language the visitor states (`statedLocale`), then, for a
+ * link-preview robot only, `host`, the page owner's own language, then English.
  *
- * With no argument, `?lang=` is read from the request's own query, which the
+ * `host` is for the words a link preview puts around the host's own text: the
+ * event's title is in the host's language, so "Entrevista oficina" is followed
+ * by "con Felipe", not "with Felipe". A person is answered exactly as before.
+ *
+ * With no `lang`, `?lang=` is read from the request's own query, which the
  * middleware forwards as `QUERY_HEADER`. That is what lets the root layout
  * stamp `<html lang>` with the same answer the page renders in: the layout is
  * never handed the page's search params, and every public page asks this one
  * function.
  */
-export async function publicLocale(lang?: string): Promise<Locale> {
+export async function publicLocale(lang?: string, host?: Locale | null): Promise<Locale> {
   if (lang) return langFromQuery(lang);
   const head = await headers();
   const fromQuery = new URLSearchParams(head.get(QUERY_HEADER) ?? '').get('lang');
   if (fromQuery) return langFromQuery(fromQuery);
-  return negotiateLocale(head.get('accept-language'));
+  const acceptLanguage = head.get('accept-language');
+  // Without a host language there is nothing better than the header, a
+  // robot's included: such a page answers exactly as it did before.
+  return statedLocale(acceptLanguage, head.get('user-agent')) ?? host ?? negotiateLocale(acceptLanguage);
 }
 
 /**

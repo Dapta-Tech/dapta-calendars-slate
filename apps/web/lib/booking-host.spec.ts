@@ -35,6 +35,8 @@ const PUBLIC = [
   ['/manage/2c6f0e2e-1b9a-4f53-8d5b-0a1b2c3d4e5f', '?token=t0k3n'],
   ['/uc8ict/felipe/30min', ''],
   ['/acme/alex-rivera/opengraph-image', ''],
+  ['/acme/alex-rivera/intro-call/card.png', '?lang=es'],
+  ['/acme/team/sales/team-demo/card.png', '?lang=en'],
 ] as const;
 
 /** What every host serves as is. */
