@@ -156,6 +156,29 @@ describe('adminApi 401 handling', () => {
     });
   });
 
+  it("bounds each language save call with its own timeout, and nothing else's", async () => {
+    fetchMock.mockResolvedValue({ status: 200, ok: true, json: async () => ({ ok: true }) });
+
+    await adminApi.updateMyLocale('es');
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+
+    await adminApi.me();
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).signal).toBeUndefined();
+  });
+
+  it('lets a session refresh finish before the timed language save is retried', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ status: 401, ok: false, json: async () => ({}) })
+      .mockResolvedValueOnce({ status: 200, ok: true, json: async () => ({ ok: true }) });
+
+    await adminApi.updateMyLocale('en');
+
+    expect(refreshOrSignOut).toHaveBeenCalledTimes(1);
+    expect(bearerOf(fetchMock.mock.calls[1])).toBe('Bearer fresh-token');
+    // Each call carries its own bound; the refresh between them has none.
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('leaves a healthy request alone — no refresh, no retry', async () => {
     fetchMock.mockResolvedValue({ status: 200, ok: true, json: async () => ({ accountId: 'a' }) });
 

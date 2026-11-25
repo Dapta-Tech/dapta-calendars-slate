@@ -30,9 +30,11 @@ export function LanguageSwitcher({ locale, label }: { locale: Locale; label: str
         disabled={pending}
         ariaLabel={label}
         locale={locale}
+        // An async transition: the select stays disabled until the action,
+        // which saves the host's language, has answered.
         onChange={(next) =>
-          start(() => {
-            void setLocaleAction(next);
+          start(async () => {
+            await setLocaleAction(next);
           })
         }
       />

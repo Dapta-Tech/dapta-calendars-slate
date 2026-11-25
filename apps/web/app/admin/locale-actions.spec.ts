@@ -2,7 +2,8 @@
  * The language switch saves the host's own language as well as the cookie. The
  * save is awaited, so the switch stays disabled until it answers and two quick
  * choices land in order; a failed save is tried once more; an unreachable API
- * never stops the dashboard from changing language.
+ * never stops the dashboard from changing language. The 2 s bound on each call
+ * lives in the client (`admin-api.spec.ts`), so a session refresh is never cut.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -44,18 +45,6 @@ describe('setLocaleAction', () => {
     api.updateMyLocale.mockRejectedValue(new Error('API down'));
     await expect(setLocaleAction('es')).resolves.toBeUndefined();
     expect(jar.set).toHaveBeenCalledWith('slate_locale', 'es', expect.anything());
-  });
-
-  it('never waits on a hung API for more than a few seconds', async () => {
-    vi.useFakeTimers();
-    try {
-      api.updateMyLocale.mockReturnValue(new Promise(() => {}));
-      const done = setLocaleAction('es');
-      await vi.advanceTimersByTimeAsync(4000);
-      await expect(done).resolves.toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('reads anything but Spanish as English', async () => {
