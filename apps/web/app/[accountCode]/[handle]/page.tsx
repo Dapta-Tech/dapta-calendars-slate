@@ -5,6 +5,7 @@ import { getProfile } from '@/lib/api';
 import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { publicLocale } from '@/lib/locale';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
@@ -27,8 +28,8 @@ import {
 
 // Per-page SEO/OG from host data (R11 audit). getProfile is request-cached, so
 // this shares the page's fetch. Only public profile fields are used. The image
-// is `opengraph-image.tsx` beside this file (the host's own card), so no
-// `images` here: an explicit list would replace it.
+// is `card.png` beside this file (the host's own card), named here with the
+// language the words chose, so the picture and the text always agree.
 export async function generateMetadata({
   params,
   searchParams,
@@ -43,7 +44,9 @@ export async function generateMetadata({
   if (!profile) return {};
   const name = profile.member.displayName ?? profile.member.handle;
   const bio = (profile.member.style as { bio?: string } | null)?.bio;
-  const description = bio || t(getMessages(await publicLocale()).growth.seoProfile, { name });
+  // A link-preview robot states no language: the host's own is used instead.
+  const locale = await publicLocale(undefined, profile.member.locale);
+  const description = bio || t(getMessages(locale).growth.seoProfile, { name });
   // The card's headline is the name; the account rides along only when it says
   // something the name does not, by the same rule as the line over the name on
   // the page (`profileEyebrow`), so the tab never says a name twice either.
@@ -52,8 +55,14 @@ export async function generateMetadata({
   return {
     title,
     description,
-    openGraph: { title, description, type: 'profile' },
-    twitter: { card: 'summary_large_image', title, description },
+    ...previewMetadata({
+      pagePath: pagePath(profile.account.code, profile.member.handle),
+      locale,
+      title,
+      description,
+      type: 'profile',
+      alt: name,
+    }),
     // An embedded URL is this same page with different chrome — never a second
     // indexable copy of it.
     ...(isEmbedRequest(query) ? { robots: { index: false, follow: false } } : {}),

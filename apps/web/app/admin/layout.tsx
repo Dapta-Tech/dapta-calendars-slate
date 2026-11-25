@@ -9,6 +9,7 @@ import { HostAnalytics } from '@/components/analytics/host-analytics';
 import { analyticsConfig, hostAnalyticsIdentity } from '@/lib/analytics/config';
 import { ToastProvider } from '@/components/toast';
 import { TimeZoneSync } from '@/components/timezone-sync';
+import { LocaleSync } from '@/components/locale-sync';
 import { WorkspaceSync } from '@/components/workspace-sync';
 import { chosenWorkspace } from '@/lib/workspace';
 import { currentReturnTo, getSession } from '@/lib/auth-session';
@@ -116,6 +117,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   return (
     <ToastProvider>
       <TimeZoneSync currentTimeZone={me.timeZone} />
+      <LocaleSync currentLocale={me.locale} locale={locale} />
       <WorkspaceSync rendered={await chosenWorkspace()} />
       <HostAnalytics
         config={analytics}

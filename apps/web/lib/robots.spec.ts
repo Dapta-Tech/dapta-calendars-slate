@@ -84,7 +84,7 @@ describe('X-Robots-Tag', () => {
 
   it('marks every response of a noindexed deployment', () => {
     vi.stubEnv('NOINDEX', 'true');
-    for (const path of ['/acme/alex-rivera/intro-call', '/admin', '/robots.txt', '/acme/alex-rivera/opengraph-image']) {
+    for (const path of ['/acme/alex-rivera/intro-call', '/admin', '/robots.txt', '/acme/alex-rivera/opengraph-image', '/acme/alex-rivera/intro-call/card.png']) {
       expect(visit(path).headers.get('x-robots-tag'), path).toBe('noindex, nofollow');
     }
   });

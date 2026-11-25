@@ -137,6 +137,8 @@ export interface MemberRow {
   booking_page_style: unknown;
   time_zone: string;
   default_schedule_id: string | null;
+  /** The host's own language (`en` | `es`), NULL until they have one. Not every query reads it. */
+  locale?: string | null;
 }
 export interface EventTypeRow {
   id: string;
@@ -365,7 +367,7 @@ export async function getMember(
 ): Promise<MemberRow | undefined> {
   return db.get<MemberRow>(
     sql`SELECT id, account_id, handle, display_name, email, avatar_url, cover_url, brand_color,
-               layout, booking_page_style, time_zone, default_schedule_id
+               layout, booking_page_style, time_zone, default_schedule_id, locale
         FROM member WHERE account_id = ${accountId} AND handle = ${handle} LIMIT 1`,
   );
 }
@@ -530,6 +532,13 @@ export interface PublicProfile {
     brandColor: string | null;
     layout: string | null;
     style: Record<string, unknown> | null;
+    /**
+     * The host's own language, null when they have none on record. A link
+     * preview is drawn in it when the robot fetching the page states no
+     * language of its own: the host wrote the event's title, so the words
+     * around it should be the host's too.
+     */
+    locale: 'en' | 'es' | null;
   };
   eventTypes: Array<{
     slug: string;
@@ -605,6 +614,7 @@ export async function getPublicProfile(
       brandColor: member.brand_color,
       layout: member.layout,
       style,
+      locale: bookingLocale(member.locale),
     },
     eventTypes: rows.map((r) => ({
       slug: r.slug,

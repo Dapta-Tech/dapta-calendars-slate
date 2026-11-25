@@ -5,6 +5,7 @@ import { getTeamProfile } from '@/lib/api';
 import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { publicLocale } from '@/lib/locale';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
@@ -41,16 +42,23 @@ export async function generateMetadata({
   // with the separator the person profile's title uses.
   const account = profileEyebrow(team.account.name, team.team.name);
   const title = account ? `${team.team.name} · ${account}` : team.team.name;
-  const description = t(getMessages(await publicLocale()).growth.seoProfile, {
+  // A link-preview robot states no language: the team's own is used instead.
+  const locale = await publicLocale(undefined, team.team.locale);
+  const description = t(getMessages(locale).growth.seoProfile, {
     name: team.team.name,
   });
-  const logo = team.team.logoUrl;
-  const images = logo && /^https?:\/\//i.test(logo) ? [logo] : undefined;
   return {
     title,
     description,
-    openGraph: { title, description, type: 'website', images },
-    twitter: { card: 'summary', title, description, images },
+    // The team's own card (`card.png` beside this file), in the same language.
+    ...previewMetadata({
+      pagePath: pagePath(team.account.code, 'team', team.team.slug),
+      locale,
+      title,
+      description,
+      type: 'website',
+      alt: team.team.name,
+    }),
     // An embedded URL is this same page with different chrome — never a second
     // indexable copy of it.
     ...(isEmbedRequest(query) ? { robots: { index: false, follow: false } } : {}),

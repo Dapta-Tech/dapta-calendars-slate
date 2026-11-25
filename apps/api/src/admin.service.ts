@@ -188,6 +188,26 @@ export class AdminService {
   }
 
   /**
+   * Record the language the dashboard is shown in as the host's own, once.
+   *
+   * `member.locale` is the host's language: their emails are written in it, and
+   * a link preview of their page falls back to it when the robot fetching the
+   * page states no language. Nothing used to write it, so it was empty for
+   * every host. The dashboard reports what it renders in (the saved switch,
+   * else the browser's language) and this keeps it only while the column is
+   * still empty, in one conditional write, so a later explicit choice always
+   * stands.
+   */
+  async syncClientLocale(p: HostPrincipal, locale: string): Promise<{ ok: boolean }> {
+    if (locale !== 'en' && locale !== 'es') return { ok: false };
+    await this.db.run(
+      sql`UPDATE member SET locale = ${locale}
+          WHERE id = ${p.memberId} AND account_id = ${p.accountId} AND locale IS NULL`,
+    );
+    return { ok: true };
+  }
+
+  /**
    * The Home "Get bookable" checklist (R22: real data, not a static nag) —
    * three steps: a connected calendar, working hours (a default schedule with
    * ≥1 rule), and at least one PUBLISHED event type.
@@ -272,6 +292,12 @@ export class AdminService {
   }
 
   updateSettings(p: HostPrincipal, patch: Parameters<typeof updateMemberSettings>[2]) {
+    // The language is read back as `en` or `es` everywhere (emails, link
+    // previews); anything else stored would read as "none" with no error. Held
+    // here, not in a controller, so every caller of this service inherits it.
+    if (patch?.locale !== undefined && patch.locale !== null && patch.locale !== 'en' && patch.locale !== 'es') {
+      throw new BadRequestException({ error: 'INVALID_LOCALE', message: 'Language must be "en" or "es".' });
+    }
     return updateMemberSettings(this.db, p.memberId, patch);
   }
 

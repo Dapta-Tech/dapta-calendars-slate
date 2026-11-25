@@ -135,6 +135,19 @@ export class HostController {
     return this.admin.syncClientTimeZone(p, body?.timeZone ?? '');
   }
 
+  /**
+   * The language the dashboard is shown in, recorded as the host's own the
+   * first time it is known. No-op once the member has one: a choice made with
+   * the language switch (`PATCH me/settings`) is never overwritten from here.
+   * See AdminService.syncClientLocale.
+   */
+  @Post('me/locale-sync')
+  @HttpCode(200)
+  async syncLocale(@Req() req: ReqLike, @Body() body: { locale?: string }) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.syncClientLocale(p, body?.locale ?? '');
+  }
+
   /** The Home "Get bookable" checklist status (real data, not a static nag). */
   @Get('me/setup-status')
   async setupStatus(@Req() req: ReqLike) {

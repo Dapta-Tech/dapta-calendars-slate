@@ -10,6 +10,7 @@ import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
@@ -48,12 +49,13 @@ export async function generateMetadata({
   if (!profile || !event) return {};
   const name = profile.member.displayName ?? profile.member.handle;
   // Title and description say what the card says: the event, the host, the
-  // length. The image is `opengraph-image.tsx` beside this file, so no
-  // `images` here: an explicit list would replace the host's card. A title that
-  // already names the host is not told who it is with a second time.
-  // `publicLocale()` reads `?lang=` from the same forwarded query `<html lang>`
-  // does, so the title and the document never disagree.
-  const growth = getMessages(await publicLocale()).growth;
+  // length. A title that already names the host is not told who it is with a
+  // second time. `publicLocale()` reads `?lang=` from the same forwarded query
+  // `<html lang>` does, so the title and the document never disagree; a
+  // link-preview robot, which states no language, gets the host's own, the
+  // language the event's title is written in.
+  const locale = await publicLocale(undefined, profile.member.locale);
+  const growth = getMessages(locale).growth;
   const title = eventPageTitle(growth.seoEventTitle, event.title, name);
   const description =
     event.description ||
@@ -65,8 +67,15 @@ export async function generateMetadata({
   return {
     title,
     description,
-    openGraph: { title, description, type: 'website' },
-    twitter: { card: 'summary_large_image', title, description },
+    // The card is `card.png` beside this file, in the language chosen above.
+    ...previewMetadata({
+      pagePath: pagePath(profile.account.code, profile.member.handle, event.slug),
+      locale,
+      title,
+      description,
+      type: 'website',
+      alt: title,
+    }),
     // An embedded URL is this same page with different chrome. Left indexable
     // it becomes a second copy of the host's booking page in search results,
     // reachable from any snippet's `src`.

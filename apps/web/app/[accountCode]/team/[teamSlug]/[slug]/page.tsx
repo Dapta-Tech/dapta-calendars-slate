@@ -10,6 +10,7 @@ import { isBusy, orBusy } from '@/lib/busy';
 import { BusyPage } from '@/components/busy-page';
 import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
+import { pagePath, previewMetadata } from '@/lib/share-card';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
@@ -46,7 +47,9 @@ export async function generateMetadata({
   // The same title rule as a person's event page, with the team as the host,
   // matched on its whole name only: "The Growth Team" opens with a word that
   // half the event titles in the world contain.
-  const growth = getMessages(await publicLocale()).growth;
+  // A link-preview robot states no language: the team's own is used instead.
+  const locale = await publicLocale(undefined, team.team.locale);
+  const growth = getMessages(locale).growth;
   const title = eventPageTitle(growth.seoEventTitle, event.title, team.team.name, { firstName: false });
   const description =
     event.description ||
@@ -55,13 +58,19 @@ export async function generateMetadata({
       name: team.team.name,
       minutes: event.lengthMinutes,
     });
-  const logo = team.team.logoUrl;
-  const images = logo && /^https?:\/\//i.test(logo) ? [logo] : undefined;
   return {
     title,
     description,
-    openGraph: { title, description, type: 'website', images },
-    twitter: { card: 'summary', title, description, images },
+    // The team's own card (`card.png` beside this file): its logo, the event,
+    // the length, in the language chosen above.
+    ...previewMetadata({
+      pagePath: pagePath(team.account.code, 'team', team.team.slug, event.slug),
+      locale,
+      title,
+      description,
+      type: 'website',
+      alt: title,
+    }),
     // An embedded URL is this same page with different chrome — never a second
     // indexable copy of it.
     ...(isEmbedRequest(query) ? { robots: { index: false, follow: false } } : {}),
