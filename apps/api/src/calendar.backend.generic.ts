@@ -18,7 +18,18 @@
  * The number itself is `MAX_AVAILABILITY_WINDOW_DAYS` in `@slate/types` — one
  * definition shared by every availability path (#136).
  *   POST   /v1/events                                    → { externalEventId, externalCalendarId?, meetingUrl? }
- *   PATCH  /v1/events/:externalEventId                   → { externalEventId, ... }
+ *   PATCH  /v1/events/:externalEventId                   → { externalEventId, cancelled?, ... }
+ *   GET    /v1/connections/:ref/events/:externalEventId  → { status: 'active' | 'cancelled' }
+ *
+ * DELETED EVENTS. A host can delete the event on their calendar behind this
+ * service's back. A PATCH of such an event answers 404/410, or (as Google
+ * does) success with the event still deleted: then return `cancelled: true`,
+ * and the move writes the event again. The GET answers whether an event is
+ * still there (404/410 also means deleted); reminders are skipped for a
+ * meeting the host deleted. It is called only once the deployment says the
+ * backend has it (CALENDAR_BACKEND_FEATURES=event-lookup): a backend without
+ * the route would answer 404 for every event. Without it, reminders go out as
+ * before.
  *
  * CONFERENCING (both POST and PATCH). The request body carries
  * `requestConferenceLink: boolean`. When true, create a conferencing room and
@@ -87,6 +98,7 @@ import type {
   CreateEventInput,
   CreatedEvent,
   DeleteEventInput,
+  EventLookupInput,
   ListBusyInput,
   UpdateEventInput,
 } from '@slate/calendar';
@@ -128,7 +140,11 @@ export function genericBackendFeatures(raw: string | undefined | null): Partial<
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
   );
-  return { recurrence: said.has('recurrence'), attendeeFreeBusy: said.has('attendee-free-busy') };
+  return {
+    recurrence: said.has('recurrence'),
+    attendeeFreeBusy: said.has('attendee-free-busy'),
+    eventLookup: said.has('event-lookup'),
+  };
 }
 
 export class GenericRestWire implements CalendarWire {
@@ -250,7 +266,22 @@ export class GenericRestWire implements CalendarWire {
       externalEventId: id,
       externalCalendarId: typeof r['externalCalendarId'] === 'string' ? r['externalCalendarId'] : null,
       meetingUrl: typeof r['meetingUrl'] === 'string' ? r['meetingUrl'] : null,
+      ...(r['cancelled'] === true || r['status'] === 'cancelled' ? { cancelled: true } : {}),
     };
+  }
+
+  getEvent(input: EventLookupInput): WireRequest {
+    return {
+      method: 'GET',
+      path:
+        `/v1/connections/${enc(input.connectionRef)}/events/${enc(input.externalEventId)}` +
+        query({ calendarId: input.calendarId ?? null }),
+      scope: 'tenant',
+      subject: input.connectionRef,
+    };
+  }
+  parseEventState(raw: unknown): 'active' | 'cancelled' {
+    return asRecord(raw)['status'] === 'cancelled' ? 'cancelled' : 'active';
   }
 
   deleteEvent(input: DeleteEventInput): WireRequest {

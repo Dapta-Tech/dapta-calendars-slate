@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
-import { GenericRestWire, StaticTokenSource } from './calendar.backend.generic';
+import { GenericRestWire, StaticTokenSource, genericBackendFeatures } from './calendar.backend.generic';
 import {
   asConnector,
   CalendarHttpError,
@@ -146,6 +146,64 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     await expect(provider.deleteEvent({ connectionRef: 'conn-A', externalEventId: 'ext-9' })).rejects.toBeInstanceOf(
       CalendarHttpError,
     );
+  });
+
+  describe('an event deleted on the calendar', () => {
+    const move = {
+      connectionRef: 'conn-A',
+      externalEventId: 'ext-9',
+      title: 't',
+      startUtc: '2026-08-01T14:00:00.000Z',
+      endUtc: '2026-08-01T14:30:00.000Z',
+      attendeeEmails: [],
+    };
+
+    it('a move answered with the event still cancelled says so', async () => {
+      const { provider } = makeProvider([{ json: { externalEventId: 'ext-9', status: 'cancelled' } }]);
+      await expect(provider.updateEvent(move)).resolves.toMatchObject({ externalEventId: 'ext-9', cancelled: true });
+    });
+
+    it('a move that asks (reportDeleted) gets 404/410 as cancelled; others and occurrence moves still throw', async () => {
+      for (const status of [404, 410]) {
+        const { provider } = makeProvider([{ status, text: 'gone' }]);
+        await expect(provider.updateEvent({ ...move, reportDeleted: true })).resolves.toMatchObject({ cancelled: true });
+      }
+      const plain = makeProvider([{ status: 410, text: 'gone' }]);
+      await expect(plain.provider.updateEvent(move)).rejects.toBeInstanceOf(CalendarHttpError);
+      const occurrence = makeProvider([{ status: 410, text: 'gone' }]);
+      await expect(
+        occurrence.provider.updateEvent({ ...move, reportDeleted: true, occurrenceStartUtc: '2026-08-01T14:00:00.000Z' }),
+      ).rejects.toBeInstanceOf(CalendarHttpError);
+    });
+
+    it('a generic backend is never asked to look an event up unless the deployment says it can', async () => {
+      const lookup = { connectionRef: 'conn-A', externalEventId: 'ext-9' };
+      const off = makeProvider([{ status: 404, text: 'no such route' }], { wire: new GenericRestWire(genericBackendFeatures('')) });
+      await expect(off.provider.eventExists(lookup)).resolves.toBeNull();
+      expect(off.calls).toHaveLength(0);
+      const on = makeProvider([{ json: { status: 'active' } }], { wire: new GenericRestWire(genericBackendFeatures('event-lookup')) });
+      await expect(on.provider.eventExists(lookup)).resolves.toBe(true);
+    });
+
+    it('a plain move is not marked cancelled', async () => {
+      const { provider } = makeProvider([{ json: { externalEventId: 'ext-9' } }]);
+      expect((await provider.updateEvent(move)).cancelled).toBeUndefined();
+    });
+
+    it('eventExists reads the status, treats 404/410 as deleted, and throws on other failures', async () => {
+      const lookup = { connectionRef: 'conn A', externalEventId: 'ext 9', calendarId: 'cal-1' };
+      const live = makeProvider([{ json: { status: 'active' } }]);
+      await expect(live.provider.eventExists(lookup)).resolves.toBe(true);
+      expect(live.calls[0]!.method).toBe('GET');
+      expect(live.calls[0]!.url).toBe('https://cal.example.test/v1/connections/conn%20A/events/ext%209?calendarId=cal-1');
+      await expect(makeProvider([{ json: { status: 'cancelled' } }]).provider.eventExists(lookup)).resolves.toBe(false);
+      for (const status of [404, 410]) {
+        await expect(makeProvider([{ status, text: 'gone' }]).provider.eventExists(lookup)).resolves.toBe(false);
+      }
+      await expect(makeProvider([{ status: 401, text: 'no' }]).provider.eventExists(lookup)).rejects.toBeInstanceOf(
+        CalendarHttpError,
+      );
+    });
   });
 
   it('the generic wire carries sendInvitations: in the body on a write, as a query on a delete', async () => {

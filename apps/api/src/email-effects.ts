@@ -315,9 +315,11 @@ export class EmailEffects {
     @Inject(EMAIL) private readonly provider?: EmailProvider,
     // Optional: only needed to compose the public {{booking_link}} URL.
     @Inject(ENV) private readonly env?: ServerEnv,
-    // Read for ONE bit: whether a calendar write-out exists at all, which is
-    // what decides if a conferencing booking's mail is worth delaying. The PORT
-    // interface only (invariant 7) — no adapter, no vendor.
+    // Read for two things: whether a calendar write-out exists at all, which
+    // decides if a conferencing booking's mail is worth delaying, and whether
+    // the host deleted the booking's event before a reminder or follow-up goes
+    // out (`hostDeletedEvent`). The PORT interface only (invariant 7) — no
+    // adapter, no vendor.
     @Inject(CALENDAR) private readonly calendar?: CalendarProvider,
     // Whether the invitee's mail carries the Dapta branding reads the cached
     // Dapta AI verdict through these, exactly as the public pages do. Optional
@@ -1005,6 +1007,52 @@ export class EmailEffects {
   }
 
   /**
+   * True only when every calendar event written for this booking was deleted
+   * on its calendar: the host took the meeting off, so a reminder (or a
+   * follow-up) would be about a meeting they dropped. A reschedule after that
+   * writes the event again (`CalendarEffects.moveEvent`), so the moved
+   * meeting's reminders still go out, and while that write is still queued the
+   * answer is "send". Anything short of a clear "deleted" sends: no calendar,
+   * no written event, a backend that cannot look events up, or a failed
+   * lookup. One host still holding the event is enough to send.
+   */
+  private async hostDeletedEvent(uid: string): Promise<boolean> {
+    const calendar = this.calendar;
+    if (!calendar?.enabled || typeof calendar.eventExists !== 'function') return false;
+    // A calendar write still on its way (a reschedule that will write the
+    // deleted event again, a create) means the event is about to be there:
+    // send. Deciding now would race it and drop the moved meeting's reminder.
+    const writing = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM outbox
+          WHERE kind = 'calendar' AND booking_uid = ${uid} AND status = 'pending' AND action <> 'delete'
+          LIMIT 1`,
+    );
+    if (writing) return false;
+    const refs = await this.db.all<{ destination: string | null; external_event_id: string; external_calendar_id: string | null }>(
+      sql`SELECT r.destination, r.external_event_id, r.external_calendar_id
+          FROM booking_reference r JOIN booking b ON b.id = r.booking_id
+          WHERE b.uid = ${uid} AND r.type = 'calendar_event' AND r.external_event_id IS NOT NULL`,
+    );
+    if (refs.length === 0) return false;
+    for (const ref of refs) {
+      if (!ref.destination) return false;
+      let exists: boolean | null;
+      try {
+        exists = await calendar.eventExists({
+          connectionRef: ref.destination,
+          externalEventId: ref.external_event_id,
+          ...(ref.external_calendar_id ? { calendarId: ref.external_calendar_id } : {}),
+        });
+      } catch (err) {
+        this.log.warn(`could not look up the calendar event of ${uid} before its reminder: ${err instanceof Error ? err.name : 'error'}`);
+        return false;
+      }
+      if (exists !== false) return false;
+    }
+    return true;
+  }
+
+  /**
    * The worker's executor for an `email` outbox row. Rebuilds the notification
    * from the payload and sends it via the notifier; a THROWN transport error
    * propagates so the worker retries. `delivered:false` (log-only) is success.
@@ -1063,6 +1111,11 @@ export class EmailEffects {
       if (live && kind === 'reminder' && Number(live.start_ms) <= Date.now()) {
         throw new OutboxSkipError(`reminder for ${n.uid} skipped: the meeting has already started`);
       }
+    }
+    if ((kind === 'reminder' || kind === 'follow_up') && n.uid && (await this.hostDeletedEvent(n.uid))) {
+      // The meeting the host took off their calendar: no reminder before it,
+      // no "how did it go" after it.
+      throw new OutboxSkipError(`${kind} for ${n.uid} skipped: the host deleted the event from their calendar`);
     }
     if ((kind === 'reminder' || kind === 'follow_up') && n.reminderId && n.uid) {
       // A reminder row can sit dormant for 28 days, so the switch is re-read at

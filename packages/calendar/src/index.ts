@@ -92,6 +92,22 @@ export interface CreatedEvent {
   externalEventId: string;
   externalCalendarId?: string | null;
   meetingUrl?: string | null;
+  /**
+   * True when the provider answered a move with an event that is no longer on
+   * the calendar: someone deleted it there. Some providers accept a change to a
+   * deleted event and still answer success (Google keeps it deleted and says
+   * `status: "cancelled"`), so a move must look at this rather than trust the
+   * success. Absent or false: the event is on the calendar.
+   */
+  cancelled?: boolean;
+}
+
+/** One event already written, to look up on its calendar. */
+export interface EventLookupInput {
+  connectionRef: string;
+  /** Provider-calendar target used when the connection exposes many calendars. */
+  calendarId?: string;
+  externalEventId: string;
 }
 
 export interface DeleteEventInput {
@@ -162,6 +178,13 @@ export interface UpdateEventInput {
    * series that has not started. Never sent with `occurrenceStartUtc`.
    */
   recurrence?: EventRecurrence | null;
+  /**
+   * True: a backend answer that the event no longer exists (404/410) comes back
+   * as `cancelled: true` instead of an error. Only a caller that can recover
+   * (a move that writes the event again) asks for it; every other update still
+   * fails loudly on a missing event.
+   */
+  reportDeleted?: boolean;
 }
 
 /**
@@ -176,6 +199,12 @@ export interface CalendarFeatures {
   attendeeFreeBusy: boolean;
   /** The calendar creates a video room when `requestConferenceLink` is true. */
   conferencing: boolean;
+  /**
+   * The backend answers `eventExists` lookups. Off for a generic backend until
+   * the deployment says so (CALENDAR_BACKEND_FEATURES=event-lookup): one that
+   * never built the route would answer 404, which reads as "deleted".
+   */
+  eventLookup?: boolean;
 }
 
 /** What a backend has when it declares nothing: single events, and the room the contract has always asked for. */
@@ -265,6 +294,13 @@ export interface CalendarProvider {
   /** Move an existing event in place (true reschedule). */
   updateEvent(input: UpdateEventInput): Promise<CreatedEvent>;
   deleteEvent(input: DeleteEventInput): Promise<void>;
+  /**
+   * Optional: whether an event this service wrote is still on its calendar.
+   * `false` = deleted there (by the host, a phone or another app); `true` = still
+   * there; `null` = this backend cannot tell. Throws when the backend fails, and
+   * a caller then treats the answer as unknown, never as deleted.
+   */
+  eventExists?(input: EventLookupInput): Promise<boolean | null>;
   /** List the calendars a connected account exposes (post-connect pick). */
   listCalendars(connectionRef: string): Promise<CalendarSummary[]>;
   /** Probe a connection's live health (drives the per-row status + ping). */
@@ -333,6 +369,9 @@ export class InMemoryCalendarProvider implements CalendarProvider {
   readonly updated: UpdateEventInput[] = [];
   readonly deleted: DeleteEventInput[] = [];
   readonly attendeeReads: AttendeeBusyInput[] = [];
+  readonly lookups: EventLookupInput[] = [];
+  /** Events deleted on the calendar itself, as a host deleting them by hand would. */
+  private removedOnCalendar = new Set<string>();
   /** What `features` answers for every connection (the basics until a spec says otherwise). */
   declaredFeatures: Partial<CalendarFeatures> = {};
   /** True: a create that asks for a room gets one (`https://video.example/<event id>`). */
@@ -394,17 +433,27 @@ export class InMemoryCalendarProvider implements CalendarProvider {
       meetingUrl: this.mintRooms && input.requestConferenceLink ? `https://video.example/${externalEventId}` : null,
     });
   }
+  /** Delete an event on the calendar itself, behind this service's back. */
+  removeOnCalendar(externalEventId: string): void {
+    this.removedOnCalendar.add(externalEventId);
+  }
   updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
     this.updated.push(input);
-    // A move keeps the same external event id.
+    // A move keeps the same external event id. Like Google, a move of an event
+    // deleted on the calendar is accepted and answers it still deleted.
     return Promise.resolve({
       externalEventId: input.externalEventId,
       meetingUrl: null,
+      ...(this.removedOnCalendar.has(input.externalEventId) ? { cancelled: true } : {}),
     });
   }
   deleteEvent(input: DeleteEventInput): Promise<void> {
     this.deleted.push(input);
     return Promise.resolve();
+  }
+  eventExists(input: EventLookupInput): Promise<boolean | null> {
+    this.lookups.push(input);
+    return Promise.resolve(!this.removedOnCalendar.has(input.externalEventId));
   }
   listCalendars(connectionRef: string): Promise<CalendarSummary[]> {
     return Promise.resolve(this.calendars.get(connectionRef) ?? []);
