@@ -494,11 +494,11 @@ export class CalendarEffects {
       // arbitrary co-host and minting a second room behind the invitee's back.
       const isOrganizer = ref.destination === organizerRef;
       const notifies = (ref.destination ?? ctx.destinationRefs[0] ?? null) === inviting;
+      const connectionRef = ref.destination ?? ctx.destinationRefs[0] ?? '';
+      const calendarId = ref.externalCalendarId ?? ctx.destinationCalendarIds[connectionRef];
       const updated = await this.calendar.updateEvent({
-        connectionRef: ref.destination ?? ctx.destinationRefs[0] ?? '',
-        calendarId:
-          ref.externalCalendarId ??
-          ctx.destinationCalendarIds[ref.destination ?? ctx.destinationRefs[0] ?? ''],
+        connectionRef,
+        calendarId,
         externalEventId: ref.externalEventId!,
         title: ctx.title,
         // Only a booking whose body came from a template sends one (absent
@@ -516,6 +516,37 @@ export class CalendarEffects {
         timeZone: ctx.attendeeTimeZone,
         sendInvitations: notifies && sendInvitations,
       });
+      if (updated.cancelled) {
+        // The host deleted this event on their calendar, and the provider kept
+        // it deleted through the move (Google answers success with the event
+        // still cancelled). The booking was moved on purpose and is still on,
+        // so write the event again at the new time, and keep the new id so the
+        // next move or cancel reaches it. Stored right after the create: a
+        // retry then moves the new event instead of writing a second one.
+        this.log.warn(`event of ${uid} was deleted on the calendar; writing it again at the new time`);
+        const created = await this.calendar.createEvent({
+          connectionRef,
+          calendarId,
+          title: ctx.title,
+          startUtc: ctx.startUtc,
+          endUtc: ctx.endUtc,
+          attendeeEmails: attendeesFor(ctx, connectionRef),
+          organizerEmail: ctx.organizerEmail,
+          description: eventBody(ctx, isOrganizer ? null : (meetingUrl ?? storedUrl)),
+          // The deleted event took its room with it: the organizer's new event
+          // asks for a fresh one, which then reaches every row below.
+          requestConferenceLink: wantsLink && isOrganizer,
+          timeZone: ctx.attendeeTimeZone,
+          sendInvitations: notifies && sendInvitations,
+        });
+        await fillBookingReference(this.db, ref.id, {
+          externalEventId: created.externalEventId,
+          externalCalendarId: created.externalCalendarId ?? calendarId ?? null,
+          meetingUrl: isOrganizer ? (created.meetingUrl ?? ref.meetingUrl) : ref.meetingUrl,
+        });
+        if (isOrganizer) meetingUrl = created.meetingUrl ?? null;
+        continue;
+      }
       if (isOrganizer) meetingUrl = updated.meetingUrl ?? null;
     }
     // Persist ONLY a non-null URL, and ONLY after every move landed — one

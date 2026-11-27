@@ -148,6 +148,53 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     );
   });
 
+  describe('an event deleted on the calendar', () => {
+    const move = {
+      connectionRef: 'conn-A',
+      externalEventId: 'ext-9',
+      title: 't',
+      startUtc: '2026-08-01T14:00:00.000Z',
+      endUtc: '2026-08-01T14:30:00.000Z',
+      attendeeEmails: [],
+    };
+
+    it('a move answered with the event still cancelled says so', async () => {
+      const { provider } = makeProvider([{ json: { externalEventId: 'ext-9', status: 'cancelled' } }]);
+      await expect(provider.updateEvent(move)).resolves.toMatchObject({ externalEventId: 'ext-9', cancelled: true });
+    });
+
+    it('a move answered 404 or 410 says the event is gone; an occurrence move still throws', async () => {
+      for (const status of [404, 410]) {
+        const { provider } = makeProvider([{ status, text: 'gone' }]);
+        await expect(provider.updateEvent(move)).resolves.toMatchObject({ cancelled: true });
+      }
+      const { provider } = makeProvider([{ status: 410, text: 'gone' }]);
+      await expect(
+        provider.updateEvent({ ...move, occurrenceStartUtc: '2026-08-01T14:00:00.000Z' }),
+      ).rejects.toBeInstanceOf(CalendarHttpError);
+    });
+
+    it('a plain move is not marked cancelled', async () => {
+      const { provider } = makeProvider([{ json: { externalEventId: 'ext-9' } }]);
+      expect((await provider.updateEvent(move)).cancelled).toBeUndefined();
+    });
+
+    it('eventExists reads the status, treats 404/410 as deleted, and throws on other failures', async () => {
+      const lookup = { connectionRef: 'conn A', externalEventId: 'ext 9', calendarId: 'cal-1' };
+      const live = makeProvider([{ json: { status: 'active' } }]);
+      await expect(live.provider.eventExists(lookup)).resolves.toBe(true);
+      expect(live.calls[0]!.method).toBe('GET');
+      expect(live.calls[0]!.url).toBe('https://cal.example.test/v1/connections/conn%20A/events/ext%209?calendarId=cal-1');
+      await expect(makeProvider([{ json: { status: 'cancelled' } }]).provider.eventExists(lookup)).resolves.toBe(false);
+      for (const status of [404, 410]) {
+        await expect(makeProvider([{ status, text: 'gone' }]).provider.eventExists(lookup)).resolves.toBe(false);
+      }
+      await expect(makeProvider([{ status: 401, text: 'no' }]).provider.eventExists(lookup)).rejects.toBeInstanceOf(
+        CalendarHttpError,
+      );
+    });
+  });
+
   it('the generic wire carries sendInvitations: in the body on a write, as a query on a delete', async () => {
     const { provider, calls } = makeProvider([
       { status: 200, json: { externalEventId: 'ext-1' } },

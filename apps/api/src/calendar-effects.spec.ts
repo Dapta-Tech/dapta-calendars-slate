@@ -43,6 +43,8 @@ class RecordingCalendarProvider implements CalendarProvider {
   readonly created: CreateEventInput[] = [];
   readonly updated: UpdateEventInput[] = [];
   readonly deleted: DeleteEventInput[] = [];
+  /** Events deleted on the calendar itself (by the host, by hand). */
+  readonly removedOnCalendar = new Set<string>();
   private seq = 0;
   listBusy(): Promise<[]> {
     return Promise.resolve([]);
@@ -53,6 +55,10 @@ class RecordingCalendarProvider implements CalendarProvider {
   }
   updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
     this.updated.push(input);
+    // Google accepts a move of a deleted event and answers it still cancelled.
+    if (this.removedOnCalendar.has(input.externalEventId)) {
+      return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: null, cancelled: true });
+    }
     return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: 'https://meet/x' });
   }
   deleteEvent(input: DeleteEventInput): Promise<void> {
@@ -998,6 +1004,33 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
           WHERE b.uid = ${uid}`,
     );
     expect(ref!.external_calendar_id).toBe(secondaryCalendarId);
+  });
+
+  it('reschedule of an event the host deleted on their calendar writes it again and keeps the new id', async () => {
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    // The host deletes the event in their calendar; the booking stays on.
+    provider.removedOnCalendar.add('evt-1');
+
+    await (effects as unknown as Awaitable).moveEvent(uid);
+
+    // The move was tried, the provider kept it deleted, so a fresh event went in.
+    expect(provider.updated).toHaveLength(1);
+    expect(provider.created).toHaveLength(2);
+    expect(provider.created[1]!.connectionRef).toBe(CAL_REF);
+    const refs = await db.all<{ external_event_id: string }>(
+      sql`SELECT br.external_event_id FROM booking_reference br JOIN booking b ON b.id = br.booking_id
+          WHERE b.uid = ${uid} AND br.type = 'calendar_event'`,
+    );
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.external_event_id).toBe('evt-2');
+
+    // The next move reaches the new event in place: no third event.
+    await (effects as unknown as Awaitable).moveEvent(uid);
+    expect(provider.updated.at(-1)!.externalEventId).toBe('evt-2');
+    expect(provider.created).toHaveLength(2);
   });
 
   it('reschedule with nothing created yet falls back to a fresh create', async () => {

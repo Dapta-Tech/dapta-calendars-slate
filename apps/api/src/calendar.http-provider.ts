@@ -24,6 +24,7 @@ import type {
   CreateEventInput,
   CreatedEvent,
   DeleteEventInput,
+  EventLookupInput,
   ListBusyInput,
   UpdateEventInput,
 } from '@slate/calendar';
@@ -255,6 +256,14 @@ export interface CalendarWire {
    * which the contract has always had (`BASIC_CALENDAR_FEATURES`).
    */
   features?(connectionRef: string): Partial<CalendarFeatures>;
+  /**
+   * Optional: look one written event up on its calendar. With `parseEventState`
+   * it answers whether the event is still there; a backend without it cannot
+   * tell, and callers then go on as if it were.
+   */
+  getEvent?(input: EventLookupInput): WireRequest;
+  /** Optional, with `getEvent`: 'cancelled' when the event was deleted on the calendar, else 'active'. */
+  parseEventState?(raw: unknown): 'active' | 'cancelled';
   /** Optional: read other people's busy times through the host's connection. */
   listAttendeeBusy?(input: AttendeeBusyInput): WireRequest;
   /** Optional, with `listAttendeeBusy`: every email asked for, busy or unknown (never free when unknown). */
@@ -301,6 +310,11 @@ function retryAfterMs(res: Response): number | null {
   if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
   const at = Date.parse(raw);
   return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
+
+/** A backend answer that says the event no longer exists. */
+function isGone(err: unknown): boolean {
+  return err instanceof CalendarHttpError && (err.status === 404 || err.status === 410);
 }
 
 /** Thrown on any non-2xx backend response so the outbox worker retries. */
@@ -516,9 +530,36 @@ export class ExternalCalendarProvider implements CalendarProvider {
   }
 
   async updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
-    const run = this.wire.run?.updateEvent;
-    if (run) return run.call(this.wire.run, input, (req) => this.send('updateEvent', req));
-    return this.wire.parseEvent(await this.send('updateEvent', this.wire.updateEvent(input)));
+    try {
+      const run = this.wire.run?.updateEvent;
+      if (run) return await run.call(this.wire.run, input, (req) => this.send('updateEvent', req));
+      return this.wire.parseEvent(await this.send('updateEvent', this.wire.updateEvent(input)));
+    } catch (err) {
+      // The event is gone from the calendar (deleted there by hand): say so,
+      // so the move can write it again, rather than retrying a change that can
+      // never land. Google answers 410 for a deleted event, others 404. Only a
+      // whole event: a missing occurrence of a series is not a deleted booking.
+      if (isGone(err) && !input.occurrenceStartUtc) {
+        return { externalEventId: input.externalEventId, meetingUrl: null, cancelled: true };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Whether an event this service wrote is still on its calendar. Null when
+   * the wire cannot look one up. A 404/410 is the clearest "deleted"; any other
+   * failure throws, and the caller treats it as unknown.
+   */
+  async eventExists(input: EventLookupInput): Promise<boolean | null> {
+    const wire = this.wire;
+    if (!wire.getEvent || !wire.parseEventState) return null;
+    try {
+      return wire.parseEventState(await this.send('getEvent', wire.getEvent(input))) !== 'cancelled';
+    } catch (err) {
+      if (isGone(err)) return false;
+      throw err;
+    }
   }
 
   /** What the wire declares for this connection (`calendarFeatures` fills in the rest). */

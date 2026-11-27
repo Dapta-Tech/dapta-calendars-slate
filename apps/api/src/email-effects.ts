@@ -1005,6 +1005,42 @@ export class EmailEffects {
   }
 
   /**
+   * True only when every calendar event written for this booking was deleted
+   * on its calendar: the host took the meeting off, so a reminder would
+   * announce a meeting they dropped. A reschedule after that writes the event
+   * again (`CalendarEffects.moveEvent`), so the moved meeting's reminders still
+   * go out. Anything short of a clear "deleted" sends the reminder: no
+   * calendar, no written event, a backend that cannot look events up, or a
+   * failed lookup. One host still holding the event is enough to send.
+   */
+  private async hostDeletedEvent(uid: string): Promise<boolean> {
+    const calendar = this.calendar;
+    if (!calendar?.enabled || typeof calendar.eventExists !== 'function') return false;
+    const refs = await this.db.all<{ destination: string | null; external_event_id: string; external_calendar_id: string | null }>(
+      sql`SELECT r.destination, r.external_event_id, r.external_calendar_id
+          FROM booking_reference r JOIN booking b ON b.id = r.booking_id
+          WHERE b.uid = ${uid} AND r.type = 'calendar_event' AND r.external_event_id IS NOT NULL`,
+    );
+    if (refs.length === 0) return false;
+    for (const ref of refs) {
+      if (!ref.destination) return false;
+      let exists: boolean | null;
+      try {
+        exists = await calendar.eventExists({
+          connectionRef: ref.destination,
+          externalEventId: ref.external_event_id,
+          ...(ref.external_calendar_id ? { calendarId: ref.external_calendar_id } : {}),
+        });
+      } catch (err) {
+        this.log.warn(`could not look up the calendar event of ${uid} before its reminder: ${err instanceof Error ? err.name : 'error'}`);
+        return false;
+      }
+      if (exists !== false) return false;
+    }
+    return true;
+  }
+
+  /**
    * The worker's executor for an `email` outbox row. Rebuilds the notification
    * from the payload and sends it via the notifier; a THROWN transport error
    * propagates so the worker retries. `delivered:false` (log-only) is success.
@@ -1062,6 +1098,9 @@ export class EmailEffects {
       // long outage is dropped once the meeting has started.
       if (live && kind === 'reminder' && Number(live.start_ms) <= Date.now()) {
         throw new OutboxSkipError(`reminder for ${n.uid} skipped: the meeting has already started`);
+      }
+      if (live && kind === 'reminder' && (await this.hostDeletedEvent(n.uid))) {
+        throw new OutboxSkipError(`reminder for ${n.uid} skipped: the host deleted the event from their calendar`);
       }
     }
     if ((kind === 'reminder' || kind === 'follow_up') && n.reminderId && n.uid) {
