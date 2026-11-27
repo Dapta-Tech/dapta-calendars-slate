@@ -639,6 +639,38 @@ describe('OutboxWorker: isolation, backoff, horizon, leases (F7)', () => {
       expect((await status(mail)).status).toBe('done');
     });
 
+    it('a reminder goes out while a calendar write for the booking is still queued (the reschedule will write it again)', async () => {
+      const cal = lookupCalendar();
+      const worker = makeWorker(envWith(), new DisabledCalendarProvider(), cal.provider);
+      const uid = await booked();
+      await withEvent(uid, 'evt-being-rewritten');
+      cal.removed.add('evt-being-rewritten');
+      // Due far later than the reminder: still pending when the reminder drains.
+      await enqueueOutbox(db, { kind: 'calendar', action: 'reschedule', bookingUid: uid, now: 10_000_000 });
+      const mail = await reminderFor(uid);
+      await worker.drainOnce(0);
+      expect((await status(mail)).status).toBe('done');
+    });
+
+    it('a follow-up for a meeting the host deleted from their calendar is skipped too', async () => {
+      const cal = lookupCalendar();
+      const worker = makeWorker(envWith(), new DisabledCalendarProvider(), cal.provider);
+      const uid = await booked();
+      await withEvent(uid, 'evt-follow');
+      cal.removed.add('evt-follow');
+      const mail = await enqueueOutbox(db, {
+        kind: 'email',
+        action: 'follow_up',
+        bookingUid: uid,
+        accountId,
+        payload: notification(accountId, uid),
+        now: 0,
+      });
+      await worker.drainOnce(0);
+      expect((await status(mail)).status).toBe('skipped');
+      expect((await status(mail)).lastError).toMatch(/host deleted the event/);
+    });
+
     it('a reminder goes out when the lookup fails or the backend cannot look events up', async () => {
       for (const lookup of ['fails', 'absent'] as const) {
         const cal = lookupCalendar({ lookup });

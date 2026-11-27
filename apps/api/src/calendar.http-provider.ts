@@ -535,11 +535,11 @@ export class ExternalCalendarProvider implements CalendarProvider {
       if (run) return await run.call(this.wire.run, input, (req) => this.send('updateEvent', req));
       return this.wire.parseEvent(await this.send('updateEvent', this.wire.updateEvent(input)));
     } catch (err) {
-      // The event is gone from the calendar (deleted there by hand): say so,
-      // so the move can write it again, rather than retrying a change that can
-      // never land. Google answers 410 for a deleted event, others 404. Only a
-      // whole event: a missing occurrence of a series is not a deleted booking.
-      if (isGone(err) && !input.occurrenceStartUtc) {
+      // The event is gone from the calendar (deleted there by hand). Only a
+      // caller that asked (`reportDeleted`, a move that writes it again) gets
+      // that as an answer; Google says 410, others 404. A missing occurrence of
+      // a series is never a deleted booking, so it still throws.
+      if (input.reportDeleted && isGone(err) && !input.occurrenceStartUtc) {
         return { externalEventId: input.externalEventId, meetingUrl: null, cancelled: true };
       }
       throw err;
@@ -554,6 +554,9 @@ export class ExternalCalendarProvider implements CalendarProvider {
   async eventExists(input: EventLookupInput): Promise<boolean | null> {
     const wire = this.wire;
     if (!wire.getEvent || !wire.parseEventState) return null;
+    // A backend that says it has no lookup route is never asked: its 404
+    // would read as "deleted" and silence reminders of live meetings.
+    if (wire.features?.(input.connectionRef).eventLookup === false) return null;
     try {
       return wire.parseEventState(await this.send('getEvent', wire.getEvent(input))) !== 'cancelled';
     } catch (err) {

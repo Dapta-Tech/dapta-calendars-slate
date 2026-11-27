@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
-import { GenericRestWire, StaticTokenSource } from './calendar.backend.generic';
+import { GenericRestWire, StaticTokenSource, genericBackendFeatures } from './calendar.backend.generic';
 import {
   asConnector,
   CalendarHttpError,
@@ -163,15 +163,26 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
       await expect(provider.updateEvent(move)).resolves.toMatchObject({ externalEventId: 'ext-9', cancelled: true });
     });
 
-    it('a move answered 404 or 410 says the event is gone; an occurrence move still throws', async () => {
+    it('a move that asks (reportDeleted) gets 404/410 as cancelled; others and occurrence moves still throw', async () => {
       for (const status of [404, 410]) {
         const { provider } = makeProvider([{ status, text: 'gone' }]);
-        await expect(provider.updateEvent(move)).resolves.toMatchObject({ cancelled: true });
+        await expect(provider.updateEvent({ ...move, reportDeleted: true })).resolves.toMatchObject({ cancelled: true });
       }
-      const { provider } = makeProvider([{ status: 410, text: 'gone' }]);
+      const plain = makeProvider([{ status: 410, text: 'gone' }]);
+      await expect(plain.provider.updateEvent(move)).rejects.toBeInstanceOf(CalendarHttpError);
+      const occurrence = makeProvider([{ status: 410, text: 'gone' }]);
       await expect(
-        provider.updateEvent({ ...move, occurrenceStartUtc: '2026-08-01T14:00:00.000Z' }),
+        occurrence.provider.updateEvent({ ...move, reportDeleted: true, occurrenceStartUtc: '2026-08-01T14:00:00.000Z' }),
       ).rejects.toBeInstanceOf(CalendarHttpError);
+    });
+
+    it('a generic backend is never asked to look an event up unless the deployment says it can', async () => {
+      const lookup = { connectionRef: 'conn-A', externalEventId: 'ext-9' };
+      const off = makeProvider([{ status: 404, text: 'no such route' }], { wire: new GenericRestWire(genericBackendFeatures('')) });
+      await expect(off.provider.eventExists(lookup)).resolves.toBeNull();
+      expect(off.calls).toHaveLength(0);
+      const on = makeProvider([{ json: { status: 'active' } }], { wire: new GenericRestWire(genericBackendFeatures('event-lookup')) });
+      await expect(on.provider.eventExists(lookup)).resolves.toBe(true);
     });
 
     it('a plain move is not marked cancelled', async () => {

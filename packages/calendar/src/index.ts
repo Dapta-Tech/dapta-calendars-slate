@@ -178,6 +178,13 @@ export interface UpdateEventInput {
    * series that has not started. Never sent with `occurrenceStartUtc`.
    */
   recurrence?: EventRecurrence | null;
+  /**
+   * True: a backend answer that the event no longer exists (404/410) comes back
+   * as `cancelled: true` instead of an error. Only a caller that can recover
+   * (a move that writes the event again) asks for it; every other update still
+   * fails loudly on a missing event.
+   */
+  reportDeleted?: boolean;
 }
 
 /**
@@ -192,6 +199,12 @@ export interface CalendarFeatures {
   attendeeFreeBusy: boolean;
   /** The calendar creates a video room when `requestConferenceLink` is true. */
   conferencing: boolean;
+  /**
+   * The backend answers `eventExists` lookups. Off for a generic backend until
+   * the deployment says so (CALENDAR_BACKEND_FEATURES=event-lookup): one that
+   * never built the route would answer 404, which reads as "deleted".
+   */
+  eventLookup?: boolean;
 }
 
 /** What a backend has when it declares nothing: single events, and the room the contract has always asked for. */

@@ -1027,10 +1027,37 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     expect(refs).toHaveLength(1);
     expect(refs[0]!.external_event_id).toBe('evt-2');
 
+    // The move asked the backend to report a deleted event rather than fail.
+    expect(provider.updated[0]!.reportDeleted).toBe(true);
     // The next move reaches the new event in place: no third event.
     await (effects as unknown as Awaitable).moveEvent(uid);
     expect(provider.updated.at(-1)!.externalEventId).toBe('evt-2');
     expect(provider.created).toHaveLength(2);
+  });
+
+  it("writing the organizer's event again replaces its dead room on every row, or clears it", async () => {
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    await db.run(
+      sql`UPDATE booking_reference SET meeting_url = 'https://meet/old'
+          WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+    );
+    provider.removedOnCalendar.add('evt-1');
+    // The replacement comes back without a room.
+    provider.createEvent = (input) => {
+      provider.created.push(input);
+      return Promise.resolve({ externalEventId: 'evt-new', meetingUrl: null });
+    };
+
+    await (effects as unknown as Awaitable).moveEvent(uid);
+
+    const rows = await db.all<{ meeting_url: string | null }>(
+      sql`SELECT br.meeting_url FROM booking_reference br JOIN booking b ON b.id = br.booking_id
+          WHERE b.uid = ${uid} AND br.type = 'calendar_event'`,
+    );
+    expect(rows.map((r) => r.meeting_url)).toEqual([null]);
   });
 
   it('reschedule with nothing created yet falls back to a fresh create', async () => {

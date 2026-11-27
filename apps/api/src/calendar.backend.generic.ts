@@ -26,8 +26,10 @@
  * does) success with the event still deleted: then return `cancelled: true`,
  * and the move writes the event again. The GET answers whether an event is
  * still there (404/410 also means deleted); reminders are skipped for a
- * meeting the host deleted. A backend without the GET leaves both decisions
- * to the old behavior: reminders go out.
+ * meeting the host deleted. It is called only once the deployment says the
+ * backend has it (CALENDAR_BACKEND_FEATURES=event-lookup): a backend without
+ * the route would answer 404 for every event. Without it, reminders go out as
+ * before.
  *
  * CONFERENCING (both POST and PATCH). The request body carries
  * `requestConferenceLink: boolean`. When true, create a conferencing room and
@@ -138,7 +140,11 @@ export function genericBackendFeatures(raw: string | undefined | null): Partial<
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
   );
-  return { recurrence: said.has('recurrence'), attendeeFreeBusy: said.has('attendee-free-busy') };
+  return {
+    recurrence: said.has('recurrence'),
+    attendeeFreeBusy: said.has('attendee-free-busy'),
+    eventLookup: said.has('event-lookup'),
+  };
 }
 
 export class GenericRestWire implements CalendarWire {

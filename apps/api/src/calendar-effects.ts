@@ -488,6 +488,10 @@ export class CalendarEffects {
     const sendInvitations = await this.providerInvites(ctx, inviteeEmailId, { job });
     const inviting = invitingDestination(ctx, ordered.map((r) => r.destination));
     let meetingUrl: string | null = null;
+    // Set once the organizer's event had to be written again: its room went
+    // with the deleted event, so every row and every co-host copy follows the
+    // new one (or none).
+    let roomReplaced = false;
     for (const ref of ordered) {
       // Identity, not position: if NO movable ref belongs to the organizer, none
       // is the organizer, and nobody re-mints — rather than promoting an
@@ -505,8 +509,10 @@ export class CalendarEffects {
         // leaves the event's body as it is); an emptied one is sent empty, to
         // clear it. A co-host's copy keeps its join line, with the room the
         // organizer's event has now.
-        ...(ctx.description !== null
-          ? { description: eventBody(ctx, isOrganizer ? null : (meetingUrl ?? storedUrl)) ?? '' }
+        // A co-host's copy is rewritten when the organizer's room changed, even
+        // without a template, so its join line never points at a dead room.
+        ...(ctx.description !== null || (roomReplaced && !isOrganizer)
+          ? { description: eventBody(ctx, isOrganizer ? null : roomReplaced ? meetingUrl : (meetingUrl ?? storedUrl)) ?? '' }
           : {}),
         startUtc: ctx.startUtc,
         endUtc: ctx.endUtc,
@@ -515,6 +521,9 @@ export class CalendarEffects {
         requestConferenceLink: wantsLink && isOrganizer && !storedUrl,
         timeZone: ctx.attendeeTimeZone,
         sendInvitations: notifies && sendInvitations,
+        // This caller can recover from a deleted event (below): ask the backend
+        // to say so rather than fail.
+        reportDeleted: true,
       });
       if (updated.cancelled) {
         // The host deleted this event on their calendar, and the provider kept
@@ -532,7 +541,7 @@ export class CalendarEffects {
           endUtc: ctx.endUtc,
           attendeeEmails: attendeesFor(ctx, connectionRef),
           organizerEmail: ctx.organizerEmail,
-          description: eventBody(ctx, isOrganizer ? null : (meetingUrl ?? storedUrl)),
+          description: eventBody(ctx, isOrganizer ? null : roomReplaced ? meetingUrl : (meetingUrl ?? storedUrl)),
           // The deleted event took its room with it: the organizer's new event
           // asks for a fresh one, which then reaches every row below.
           requestConferenceLink: wantsLink && isOrganizer,
@@ -542,9 +551,12 @@ export class CalendarEffects {
         await fillBookingReference(this.db, ref.id, {
           externalEventId: created.externalEventId,
           externalCalendarId: created.externalCalendarId ?? calendarId ?? null,
-          meetingUrl: isOrganizer ? (created.meetingUrl ?? ref.meetingUrl) : ref.meetingUrl,
+          meetingUrl: isOrganizer ? (created.meetingUrl ?? null) : roomReplaced ? meetingUrl : ref.meetingUrl,
         });
-        if (isOrganizer) meetingUrl = created.meetingUrl ?? null;
+        if (isOrganizer) {
+          meetingUrl = created.meetingUrl ?? null;
+          roomReplaced = wantsLink || Boolean(storedUrl);
+        }
         continue;
       }
       if (isOrganizer) meetingUrl = updated.meetingUrl ?? null;
@@ -556,6 +568,14 @@ export class CalendarEffects {
     // one. A backend that keeps the same room and simply does not echo it must
     // never blank a good stored link.
     if (meetingUrl) await setBookingReferenceMeetingUrl(this.db, ctx.bookingId, meetingUrl);
+    else if (roomReplaced) {
+      // The old room went with the deleted event and the new one has none:
+      // clear the dead link everywhere rather than keep sending it.
+      await this.db.run(
+        sql`UPDATE booking_reference SET meeting_url = NULL
+            WHERE booking_id = ${ctx.bookingId} AND type = 'calendar_event'`,
+      );
+    }
   }
 
   /**
@@ -810,6 +830,10 @@ export class CalendarEffects {
         sendInvitations: true,
         recurrence: await this.recurrenceOf(series),
       });
+      if (updated.cancelled) {
+        // Accepted but still deleted (Google): recorded as such, never as done.
+        throw new OutboxSkipError(`series ${series.id} not updated: its event was deleted on the calendar`);
+      }
       if (updated.meetingUrl) await setSeriesMeetingUrl(this.db, series.id, updated.meetingUrl);
     }
   }
@@ -837,7 +861,7 @@ export class CalendarEffects {
       if (b?.status !== 'accepted') throw new OutboxSkipError(`calendar move for ${uid} skipped: the date is ${b?.status ?? 'gone'}`);
       this.requireRecurrence(series.calendarDestination);
       const ctx = await this.seriesContext(series);
-      await this.calendar.updateEvent({
+      const moved = await this.calendar.updateEvent({
         connectionRef: series.calendarDestination,
         calendarId: series.calendarCalendarId ?? ctx.calendarId,
         externalEventId: series.calendarEventId,
@@ -850,6 +874,9 @@ export class CalendarEffects {
         timeZone: series.anchor.timeZone,
         sendInvitations: true,
       });
+      if (moved.cancelled) {
+        throw new OutboxSkipError(`calendar move for ${uid} skipped: the series' event was deleted on the calendar`);
+      }
     }
   }
 
@@ -1023,12 +1050,17 @@ export class CalendarEffects {
     // again, and putting back a guest who is already on changes nothing, so
     // the provider never invites them twice.
     let mark = change.mark;
+    // An event deleted on the calendar invites nobody: say so, never record a
+    // reinvite that did not happen.
+    const deleted = (): never => {
+      throw new OutboxSkipError(`cannot re-invite the guest of ${uid}: the event was deleted on the calendar`);
+    };
     if (!mark.guestRemoved) {
-      await this.calendar.updateEvent({ ...event, attendeeEmails: withoutGuest, sendInvitations: false });
+      if ((await this.calendar.updateEvent({ ...event, attendeeEmails: withoutGuest, sendInvitations: false })).cancelled) deleted();
       mark = { ...mark, guestRemoved: true };
       await writeCalendarChangeMark(this.db, change.id, mark);
     }
-    await this.calendar.updateEvent({ ...event, attendeeEmails: attendees, sendInvitations: true });
+    if ((await this.calendar.updateEvent({ ...event, attendeeEmails: attendees, sendInvitations: true })).cancelled) deleted();
     await writeCalendarChangeMark(this.db, change.id, { ...mark, reinvited: true });
     this.log.log(`the provider invited the guest of ${uid}: the invitee email ${inviteeEmailId} was never sent`);
   }
